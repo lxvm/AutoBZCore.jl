@@ -1,0 +1,10 @@
+name = "AutoBZCore"
+uuid = "66bd3e16-1600-45cf-8f55-0b550710682b"
+authors = ["lxvm <lorenzo@vanmunoz.com>"]
+version = "0.1.0"
+
+[deps]
+AbstractFourierSeriesEvaluators = "0a142af0-e792-4045-9df2-39f854813ded"
+AutoSymPTR = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
+IteratedIntegration = "3ecdc4d6-ee34-4049-885a-a4e3631db98b"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
