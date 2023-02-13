@@ -1,0 +1,5 @@
+# AutoBZCore.jl
+
+```@docs
+AutoBZCore
+```
