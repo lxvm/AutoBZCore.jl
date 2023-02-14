@@ -28,17 +28,35 @@ iterated_value(f::AbstractFourierIntegrand) = series(f)
 
 # abstract methods to optimize PTR
 
-equispace_integrand(f::AbstractFourierIntegrand, s_x) = finner(f)(s_x, params(f)...)
+ptr_integrand(f::AbstractFourierIntegrand, s_x) = finner(f)(s_x, params(f)...)
 
-check_period_match(f::AbstractFourierSeries, bz::AbstractBZ) =
-    @assert collect(period(f)) ≈ [x[2] - x[1] for x in boundingbox(bz)] "Integration region doesn't match integrand period"
-
-function equispace_rule(f::AbstractFourierIntegrand, bz::AbstractBZ, npt)
-    rule = Vector{Tuple{fourier_type(series(f),coefficient_type(bz)),coefficient_type(bz)}}(undef, 0)
-    equispace_rule!(rule, f, bz, npt)
+# general symmetries
+function ptr(npt, f::AbstractFourierIntegrand, ::Val{d}, ::Type{T}, syms) where {d,T}
+    x = Vector{Base.promote_op(series(f),NTuple{d,T})}(undef, 0)
+    w = Vector{Int}(undef, 0)
+    rule = (; x=x, w=w)
+    ptr!(rule, npt, f, Val(d), T, syms)
 end
-equispace_rule!(rule, f::AbstractFourierIntegrand, bz::AbstractBZ, npt) =
-    fourier_rule!(rule, series(f), bz, npt)
+
+ptr!(rule, npt, f::AbstractFourierIntegrand, ::Val{d}, ::Type{T}, syms) where {d,T} =
+    fourier_ptr!(rule, npt, series(f), Val(d), T, syms)
+
+function evalptr(rule, npt, f::AbstractFourierIntegrand, B::SMatrix{d,d}, syms) where d
+    int = mapreduce((w, x) -> w*ptr_integrand(f, x), +, rule.w, rule.x)
+    int * det(B)/npt^d/length(syms)
+end
+
+# no symmetries
+function ptr(npt, f::AbstractFourierIntegrand, ::Val{d}, ::Type{T}, syms::Nothing) where {d,T}
+    x = Vector{Base.promote_op(series(f),NTuple{d,T})}(undef, 0)
+    rule = (; x=x)
+    ptr!(rule, npt, f, Val(d), T, syms)
+end
+
+function evalptr(rule, npt, f::AbstractFourierIntegrand, B::SMatrix{d,d}, ::Nothing) where d
+    int = sum(x -> ptr_integrand(f, x), rule.x)
+    int * det(B)/npt^d
+end
 
 # implementations
 
@@ -103,24 +121,27 @@ iterated_integrand(_::IteratedFourierIntegrand, y, ::Type{Val{0}}) = y
 
 # PTR customizations
 
-function equispace_evalrule(f::IteratedFourierIntegrand{F,S}, rule::Vector) where {F,N,S<:AbstractFourierSeries{N}}
-    @warn "Do not trust an iterated integrand with equispace integration unless for linear integrands with full BZ"
-    iterated_fourier_evalrule(f, rule)
+evalptr(_, _, ::IteratedFourierIntegrand, _, _) =
+    throw(ArgumentError("iterated integrands and PTR are only allowed without symmetries"))
+
+function evalptr(rule, npt, f::IteratedFourierIntegrand, B, ::Nothing)
+    @warn "Do not trust an iterated integrand with equispace integration unless for linear integrands"
+    iterated_fourier_evalptr(rule.x, npt, f, B)
 end
 
-@generated function iterated_fourier_evalrule(f::F, rule::Vector{Tuple{T,W}}) where {N,S<:AbstractFourierSeries{N},FF,F<:IteratedFourierIntegrand{FF,S},T,W}
+@generated function iterated_fourier_evalptr(x::Vector{T}, npt, f::IteratedFourierIntegrand, B::SMatrix{N,N}) where {T,N}
     I_N = Symbol(:I_, N)
     quote
-        npt = round(Int, length(rule)^(1/$N)) # implicitly assuming FBZ
         # infer return types of individual integrals
-        T_1 = Base.promote_op(*, Base.promote_op(equispace_integrand, F, T), W)
+        T_1 = Base.promote_op(*, Base.promote_op(ptr_integrand, F, T), W)
         Base.Cartesian.@nexprs $(N-1) d -> T_{d+1} = Base.promote_op(iterated_integrand, F, T_d, Type{Val{d+1}})
         # compute quadrature
+        n = 0
         $I_N = zero($(Symbol(:T_, N)))
         Base.Cartesian.@nloops $N i rule (d -> d==1 ? nothing : I_{d-1} = zero(T_{d-1})) (d -> d==1 ? nothing : I_d += iterated_integrand(f, I_{d-1}, Val{d})) begin
-            idx = Base.Cartesian.@ncall $N equispace_index npt d -> i_d
-            I_1 += rule[idx][2]*equispace_integrand(f, rule[idx][1]) # implicitly assuming outer functions are linear
+            n += 1
+            I_1 += ptr_integrand(f, x[n]) # implicitly assuming outer functions are linear
         end
-        iterated_integrand(f, $I_N, Val{0})
+        iterated_integrand(f, $I_N, Val{0}) * det(B)/npt^d
     end
 end

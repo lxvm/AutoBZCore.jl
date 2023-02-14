@@ -10,4 +10,7 @@ using AutoBZCore
 
 @testset "AutoBZCore" begin
     
+    @testset "AbstractBZ" begin
+        
+    end
 end

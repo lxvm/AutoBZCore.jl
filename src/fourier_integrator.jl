@@ -16,7 +16,7 @@ passed to `f` which will be passed to the integrator must go in the last
 positions. This mostly applies to aliases that may have specialized behavior
 while also having an interface compatible with other routines (e.g. interpolation).
 """
-struct FourierIntegrator{F,S<:AbstractFourierSeries,P<:Tuple,BZ<:AbstractBZ,R,K<:NamedTuple} <: AbstractIntegrator{F}
+struct FourierIntegrator{F,S<:AbstractFourierSeries,P<:Tuple,BZ<:SymmetricBZ,R,K<:NamedTuple} <: AbstractIntegrator{F}
     f::F
     bz::BZ
     s::S
@@ -45,7 +45,7 @@ quad_integrand(f::FourierIntegrator{F}, ps...) where {F<:Function} =
 quad_integrand(f::FourierIntegrator{F}, ps...) where {F<:Tuple} =
     IteratedFourierIntegrand{F}(f.s, f.p..., ps...)
 
-quad_kwargs(::typeof(iterated_integration), f, bz::AbstractBZ; kwargs...) =
+quad_kwargs(::typeof(iterated_integration), f, bz::SymmetricBZ; kwargs...) =
     iterated_integration_kwargs(f, limits(bz); kwargs...)
 quad_kwargs(::typeof(autosymptr), f, bz; kwargs...) =
     autosymptr_kwargs(f, bz; kwargs...)
