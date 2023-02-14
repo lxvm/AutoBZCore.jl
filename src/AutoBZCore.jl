@@ -14,6 +14,8 @@ using AbstractFourierSeriesEvaluators
 using IteratedIntegration
 
 import AutoSymPTR: symptr, autosymptr, ptr, ptr!, evalptr, ptr_integrand
+import IteratedIntegration: iterated_integration, iterated_integration_kwargs,
+    iterated_integral_type, iterated_inference, alloc_segbufs
 
 # component 1: Brillouin zone type with IAI & PTR bindings
 

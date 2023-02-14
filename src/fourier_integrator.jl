@@ -16,17 +16,18 @@ passed to `f` which will be passed to the integrator must go in the last
 positions. This mostly applies to aliases that may have specialized behavior
 while also having an interface compatible with other routines (e.g. interpolation).
 """
-struct FourierIntegrator{F,S<:AbstractFourierSeries,P<:Tuple,BZ<:SymmetricBZ,R,K<:NamedTuple} <: AbstractIntegrator{F}
+struct FourierIntegrator{F,S,P,BZ,R,K} <: AbstractIntegrator{F}
     f::F
     bz::BZ
     s::S
     p::P
     routine::R
     kwargs::K
+    FourierIntegrator(f::F, bz::BZ, s::S, p::P, routine::R, kwargs::K) where {F,BZ<:SymmetricBZ,S<:AbstractFourierSeries,P<:Tuple,R,K<:NamedTuple} =
+        new{F,S,P,BZ,R,K}(f, bz, s, p, routine, kwargs)
 end
 
 function FourierIntegrator(f::F, bz, s, p...; ps=0.0, routine=iterated_integration, kwargs...) where F
-    check_period_match(s, bz)
     test = FourierIntegrand{F}(s, p..., ps...)
     FourierIntegrator(f, bz, s, p, routine, quad_kwargs(routine, test, bz; kwargs...))
 end
@@ -47,7 +48,7 @@ quad_integrand(f::FourierIntegrator{F}, ps...) where {F<:Tuple} =
 
 quad_kwargs(::typeof(iterated_integration), f, bz::SymmetricBZ; kwargs...) =
     iterated_integration_kwargs(f, limits(bz); kwargs...)
-quad_kwargs(::typeof(autosymptr), f, bz; kwargs...) =
-    autosymptr_kwargs(f, bz; kwargs...)
-quad_kwargs(::typeof(symptr), f, bz; kwargs...) =
-    symptr_kwargs(f, bz; kwargs...)
+quad_kwargs(::typeof(autosymptr), f, bz::SymmetricBZ; kwargs...) =
+    autosymptr_kwargs(f, bz.B, symmetries(bz); kwargs...)
+quad_kwargs(::typeof(symptr), f, bz::SymmetricBZ; kwargs...) =
+    symptr_kwargs(f, bz.B, symmetries(bz); kwargs...)
