@@ -9,11 +9,6 @@ git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
 uuid = "a4c015fc-c6ff-483c-b24f-f7ea428134e9"
 version = "0.0.1"
 
-[[deps.AbstractFourierSeriesEvaluators]]
-path = "../../AbstractFourierSeriesEvaluators"
-uuid = "0a142af0-e792-4045-9df2-39f854813ded"
-version = "0.1.0"
-
 [[deps.Adapt]]
 deps = ["LinearAlgebra"]
 git-tree-sha1 = "0310e08cb19f5da31d08341c6120c047598f5b9c"
@@ -28,7 +23,7 @@ version = "1.1.1"
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 
 [[deps.AutoBZCore]]
-deps = ["AbstractFourierSeriesEvaluators", "AutoSymPTR", "IteratedIntegration", "StaticArrays"]
+deps = ["AutoSymPTR", "FourierSeriesEvaluators", "IteratedIntegration", "LinearAlgebra", "StaticArrays"]
 path = ".."
 uuid = "66bd3e16-1600-45cf-8f55-0b550710682b"
 version = "0.1.0"
@@ -163,6 +158,11 @@ deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "Lo
 git-tree-sha1 = "a69dd6db8a809f78846ff259298678f0d6212180"
 uuid = "f6369f11-7733-5829-9624-2563aa707210"
 version = "0.10.34"
+
+[[deps.FourierSeriesEvaluators]]
+path = "../../FourierSeriesEvaluators"
+uuid = "2a892dea-6eef-4bb5-9d1c-de966c9f6db5"
+version = "0.1.0"
 
 [[deps.GPUArraysCore]]
 deps = ["Adapt"]
