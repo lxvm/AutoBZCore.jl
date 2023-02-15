@@ -1,8 +1,25 @@
-# TODO: release as a separate package
 """
-    AutoBZCore
+The package providing the functionality and abstractions for `AutoBZ.jl`. It
+provides both [`SymmetricBZ`](@ref), which is a type that stores information
+about the Brillouin zone (BZ), and [`FourierIntegrator`](@ref), a type that
+provides a functor interface to compute user-defined Brillouin zone integrals
+depending on Wannier-interpolated quantities. The package integrates with
+[`FourierSeriesEvaluators`](@ref), [`IteratedIntegration`](@ref), and
+[`AutoSymPTR`](@ref) to provide a generic interface to efficient algorithms for
+BZ integration.
 
-The package providing the functionality and abstractions for `AutoBZ.jl`
+For example, computing the local Green's function can be done as follows:
+
+    using LinearAlgebra
+    using FourierSeriesEvaluators
+    using AutoBZCore
+
+    gloc_integrand(H, η, ω) = inv(complex(ω,η)*I-H) # define integrand evaluator
+    h = FourierSeries([0.5, 0.0, 0.5]; offset=-2) # define 1D integer lattice Hamiltonian
+    fbz = FullBZ(I(1)) # construct BZ from lattice with default limits of integration
+    ps = (1.0, 0.0) # representative values for (η,ω), the last arguments of the integrand evaluator
+    gloc = FourierIntegrator(gloc_integrand, fbz, h; ps=ps) # initialize default integration routine
+    gloc(ps...) # evaluate gloc at parameter points
 """
 module AutoBZCore
 
