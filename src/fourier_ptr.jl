@@ -12,9 +12,9 @@ Fourier series evaluated at the symmetrized PTR grid points
         resize!(rule.x, npt^N)
         box = period(f)
         n = 0
-        Base.Cartesian.@nloops $N i _ -> Base.OneTo(npt) (d -> d==1 ? nothing : f_{d-1} = contract(f_d, (box[d][2]-box[d][1])*(i_d-1)/npt + box[d][1], Val(d))) begin
+        Base.Cartesian.@nloops $N i _ -> Base.OneTo(npt) (d -> d==1 ? nothing : f_{d-1} = contract(f_d, box[d]*(i_d-1)/npt, Val(d))) begin
             n += 1
-            rule.x[n] = f_1((box[1][2]-box[1][1])*(i_1-1)/npt + box[1][1])
+            rule.x[n] = f_1(box[1]*(i_1-1)/npt)
         end
         rule
     end
@@ -30,10 +30,10 @@ end
         box = period(f)
         resize!(rule.x, nsym)
         resize!(rule.w, nsym)
-        Base.Cartesian.@nloops $N i flag (d -> d==1 ? nothing : f_{d-1} = contract(f_d, (box[d][2]-box[d][1])*(i_d-1)/npt + box[d][1], Val(d))) begin
+        Base.Cartesian.@nloops $N i flag (d -> d==1 ? nothing : f_{d-1} = contract(f_d, box[d]*(i_d-1)/npt, Val(d))) begin
             (Base.Cartesian.@nref $N flag i) || continue
             n += 1
-            rule.x[n] = f_1((box[1][2]-box[1][1])*(i_1-1)/npt + box[1][1])
+            rule.x[n] = f_1(box[1]*(i_1-1)/npt)
             rule.w[n] = wsym[n]
             n >= nsym && break
         end

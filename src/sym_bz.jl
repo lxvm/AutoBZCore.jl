@@ -1,5 +1,6 @@
 # utilities
-function basis_to_limits(B::SMatrix{d,d}) where d
+function basis_to_limits(B::AbstractMatrix)
+    d = LinearAlgebra.checksquare(B)
     half_b = SVector{d}(ntuple(n -> norm(B[:,n])/2, Val{d}()))
     CubicLimits(-half_b, half_b)
 end
@@ -38,8 +39,6 @@ function SymmetricBZ(A::AbstractMatrix{T}, B::AbstractMatrix{S}, lims, syms=noth
 end
 
 nsyms(bz::SymmetricBZ) = length(bz.syms)
-symmetries(bz::SymmetricBZ) = bz.syms
-limits(bz::SymmetricBZ) = bz.lims
 Base.ndims(::SymmetricBZ{S,L,d}) where {S,L,d} = d
 Base.eltype(::Type{<:SymmetricBZ{S,L,d,T}}) where {S,L,d,T} = T
 
@@ -60,16 +59,14 @@ end
 
 
 """
-    FullBZ(A, B, lims; atol=sqrt(eps()))
+    FullBZ(A, B=canonical_reciprocal_basis(A), lims=basis_to_limits(B); atol=sqrt(eps()))
 
 A type alias for `SymmetricBZ{Nothing}` when there are no symmetries applied to BZ
 """
 const FullBZ = SymmetricBZ{Nothing}
-FullBZ(A, B, lims; kwargs...) = SymmetricBZ(A, B, lims; kwargs...)
+FullBZ(A, B=canonical_reciprocal_basis(A), lims=basis_to_limits(B); kwargs...) =
+    SymmetricBZ(A, B, lims; kwargs...)
 
 nsyms(::FullBZ) = 1
-symmetries(::FullBZ) = nothing
-limits(bz::FullBZ) = bz.lims
-Base.convert(::Type{<:FullBZ}, fbz::FullBZ) = fbz
 symmetrize(_, ::FullBZ, x) = x
 symmetrize(_, ::FullBZ, x::Number) = x

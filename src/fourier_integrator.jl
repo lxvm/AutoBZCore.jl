@@ -1,5 +1,5 @@
 """
-    FourierIntegrator(f, bz, s, p...; ps=0.0, routine=iterated_integration, args=(), kwargs=(;))
+    FourierIntegrator(f, bz, s, p...; ps=(), routine=iterated_integration, kwargs...)
     FourierIntegrator{F}(args...; kwargs...) where {F<:Function}
 
 Composite type that stores parts of a [`AutoBZ.FourierIntegrand`](@ref),
@@ -27,7 +27,7 @@ struct FourierIntegrator{F,S,P,BZ,R,K} <: AbstractIntegrator{F}
         new{F,S,P,BZ,R,K}(f, bz, s, p, routine, kwargs)
 end
 
-function FourierIntegrator(f::F, bz, s, p...; ps=0.0, routine=iterated_integration, kwargs...) where F
+function FourierIntegrator(f::F, bz, s, p...; ps=(), routine=iterated_integration, kwargs...) where F
     test = FourierIntegrand{F}(s, p..., ps...)
     FourierIntegrator(f, bz, s, p, routine, quad_kwargs(routine, test, bz; kwargs...))
 end
@@ -39,16 +39,14 @@ FourierIntegrator{F}(args...; kwargs...) where {F<:Tuple{Vararg{Function}}} =
 
 # methods
 
-limits(f::FourierIntegrator) = (f.bz,)
+quad_limits(f::FourierIntegrator) = (f.bz,)
 
 quad_integrand(f::FourierIntegrator{F}, ps...) where {F<:Function} =
     FourierIntegrand{F}(f.s, f.p..., ps...)
 quad_integrand(f::FourierIntegrator{F}, ps...) where {F<:Tuple} =
     IteratedFourierIntegrand{F}(f.s, f.p..., ps...)
 
-quad_kwargs(::typeof(iterated_integration), f, bz::SymmetricBZ; kwargs...) =
-    iterated_integration_kwargs(f, limits(bz); kwargs...)
-quad_kwargs(::typeof(autosymptr), f, bz::SymmetricBZ; kwargs...) =
-    autosymptr_kwargs(f, bz.B, symmetries(bz); kwargs...)
-quad_kwargs(::typeof(symptr), f, bz::SymmetricBZ; kwargs...) =
-    symptr_kwargs(f, bz.B, symmetries(bz); kwargs...)
+quad_kwargs(::typeof(autosymptr), f, bz; kwargs...) =
+    autosymptr_kwargs(f, bz; kwargs...)
+quad_kwargs(::typeof(symptr), f, bz; kwargs...) =
+    symptr_kwargs(f, bz; kwargs...)

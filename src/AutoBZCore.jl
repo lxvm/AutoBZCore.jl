@@ -10,16 +10,20 @@ using LinearAlgebra
 
 using StaticArrays
 
-using AbstractFourierSeriesEvaluators
+using FourierSeriesEvaluators
 using IteratedIntegration
+using AutoSymPTR
 
-import AutoSymPTR: symptr, autosymptr, ptr, ptr!, evalptr, ptr_integrand
+import AutoSymPTR: symptr, autosymptr, ptr, ptr!, ptr_, evalptr, ptr_integrand,
+    symptr_kwargs, autosymptr_kwargs
 import IteratedIntegration: iterated_integration, iterated_integration_kwargs,
-    iterated_integral_type, iterated_inference, alloc_segbufs
+    iterated_integral_type, iterated_inference, alloc_segbufs,
+    iterated_integrand, iterated_pre_eval,
+    quad_limits, quad_integrand, quad_kwargs
 
 # component 1: Brillouin zone type with IAI & PTR bindings
 
-export SymmetricBZ, FullBZ, basis, nsyms, symmetries, symmetrize, limits
+export SymmetricBZ, FullBZ, nsyms, symmetrize
 include("sym_bz.jl")
 
 include("iai_bz.jl")
@@ -32,8 +36,7 @@ include("ptr_bz.jl")
 export fourier_ptr!
 include("fourier_ptr.jl")
 
-export AbstractFourierIntegrand, finner, ftotal, series, params
-export FourierIntegrand, IteratedFourierIntegrand
+export AbstractFourierIntegrand, FourierIntegrand, IteratedFourierIntegrand
 include("fourier_integrands.jl")
 
 export FourierIntegrator

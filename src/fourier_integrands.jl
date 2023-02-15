@@ -5,57 +5,35 @@ Supertype representing Fourier integrands
 """
 abstract type AbstractFourierIntegrand{d,S<:AbstractFourierSeries} <: AbstractIteratedIntegrand{d} end
 
-# interface
-
-function finner end # the function acting in the innermost integral
-ftotal(f::AbstractFourierIntegrand) = f.f # the collection of functions
-series(f::AbstractFourierIntegrand) = f.s # the Fourier series
-params(f::AbstractFourierIntegrand) = f.p # collection of additional parameters
+#= interface
+Should have fields f, s, p representing the integrand, the series, and params
+=#
 
 # abstract methods to optimize IAI
 
-iterated_integrand(_::AbstractFourierIntegrand, y, ::Type{Val{d}}) where d = y
-iterated_integrand(f::AbstractFourierIntegrand, x, ::Type{Val{1}}) =
-    finner(f)(series(f)(x), params(f)...)
+@generated iterated_pre_eval(f::T, x, ::Val{dim}) where {dim,d,T<:AbstractFourierIntegrand{d}} =
+    :($(nameof(T)){$d}(f.f, contract(f.s, x, Val(dim)), f.p))
 
-@generated iterated_pre_eval(f::T, x, ::Type{Val{dim}}) where {dim,d,T<:AbstractFourierIntegrand{d}} =
-    :($(nameof(T)){$d}(ftotal(f), contract(series(f), x, dim), params(f)))
-    
-iterated_pre_eval(f::AbstractFourierIntegrand{N,S}, x, ::Type{Val{d}}) where {d,N,S<:AbstractInplaceFourierSeries} =
-    (contract!(series(f), x, Val(d)); return f)
-
-iterated_value(f::AbstractFourierIntegrand) = series(f)
+iterated_value(f::AbstractFourierIntegrand) = f.s
 
 # abstract methods to optimize PTR
 
-ptr_integrand(f::AbstractFourierIntegrand, s_x) = finner(f)(s_x, params(f)...)
+ptr!(rule, npt, f::AbstractFourierIntegrand, ::Val{d}, ::Type{T}, syms) where {d,T} =
+    fourier_ptr!(rule, npt, f.s, Val(d), T, syms)
 
 # general symmetries
 function ptr(npt, f::AbstractFourierIntegrand, ::Val{d}, ::Type{T}, syms) where {d,T}
-    x = Vector{Base.promote_op(series(f),NTuple{d,T})}(undef, 0)
+    x = Vector{Base.promote_op(f.s,NTuple{d,T})}(undef, 0)
     w = Vector{Int}(undef, 0)
     rule = (; x=x, w=w)
     ptr!(rule, npt, f, Val(d), T, syms)
 end
 
-ptr!(rule, npt, f::AbstractFourierIntegrand, ::Val{d}, ::Type{T}, syms) where {d,T} =
-    fourier_ptr!(rule, npt, series(f), Val(d), T, syms)
-
-function evalptr(rule, npt, f::AbstractFourierIntegrand, B::SMatrix{d,d}, syms) where d
-    int = mapreduce((w, x) -> w*ptr_integrand(f, x), +, rule.w, rule.x)
-    int * det(B)/npt^d/length(syms)
-end
-
 # no symmetries
 function ptr(npt, f::AbstractFourierIntegrand, ::Val{d}, ::Type{T}, syms::Nothing) where {d,T}
-    x = Vector{Base.promote_op(series(f),NTuple{d,T})}(undef, 0)
+    x = Vector{Base.promote_op(f.s,NTuple{d,T})}(undef, 0)
     rule = (; x=x)
     ptr!(rule, npt, f, Val(d), T, syms)
-end
-
-function evalptr(rule, npt, f::AbstractFourierIntegrand, B::SMatrix{d,d}, ::Nothing) where d
-    int = sum(x -> ptr_integrand(f, x), rule.x)
-    int * det(B)/npt^d
 end
 
 # implementations
@@ -75,14 +53,28 @@ struct FourierIntegrand{F,d,S,P} <: AbstractFourierIntegrand{d,S}
     f::F
     s::S
     p::P
-    FourierIntegrand{d}(f::F, s::S, p::P) where {d,F,S<:AbstractFourierSeries,P<:Tuple} =
+    FourierIntegrand{d}(f::F, s::S, p::P) where {d,F<:Function,S<:AbstractFourierSeries,P<:Tuple} =
         new{F,d,S,P}(f,s,p)
 end
-FourierIntegrand{F}(s::AbstractFourierSeries{N}, p::Tuple) where {F<:Function,N} =
+FourierIntegrand{F}(s::AbstractFourierSeries{N}, p...) where {F<:Function,N} =
     FourierIntegrand{N}(F.instance, s, p) # allows dispatch by aliases
-FourierIntegrand{d}(f, s, ps...) where d = FourierIntegrand{d}(f, s, ps)
+FourierIntegrand{d}(f, s, p...) where d = FourierIntegrand{d}(f, s, p)
 
-finner(f::FourierIntegrand) = ftotal(f)
+iterated_integrand(_::FourierIntegrand, y, ::Val{d}) where d = y
+iterated_integrand(f::FourierIntegrand, x, ::Val{1}) =
+    f.f(f.s(x), f.p...)
+
+ptr_integrand(f::FourierIntegrand, s_x) = f.f(s_x, f.p...)
+
+function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{d,d}, syms) where d
+    int = mapreduce((w, x) -> w*ptr_integrand(f, x), +, rule.w, rule.x)
+    int * det(B)/npt^d/length(syms)
+end
+
+function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{d,d}, ::Nothing) where d
+    int = sum(x -> ptr_integrand(f, x), rule.x)
+    int * det(B)/npt^d
+end
 
 
 """
@@ -108,16 +100,15 @@ struct IteratedFourierIntegrand{F,d,S,P} <: AbstractFourierIntegrand{d,S}
         new{F,d,S,P}(f,s,p)
 end
 IteratedFourierIntegrand{F}(s, ps...) where {F<:Tuple{Vararg{Function}}} =
-    IteratedFourierIntegrand(tuple(map(f -> f.instance, F.parameters)...), s, ps) # allows dispatch by aliases
-IteratedFourierIntegrand(f, s, ps...) = IteratedFourierIntegrand(f, s, ps)
-
-finner(f::IteratedFourierIntegrand) = f.f[1]
+    IteratedFourierIntegrand{length(F.parameters)}(tuple(map(f -> f.instance, F.parameters)...), s, ps) # allows dispatch by aliases
+IteratedFourierIntegrand{d}(f, s, ps...) where d =
+    IteratedFourierIntegrand{d}(f, s, ps)
 
 # IAI customizations
 
-iterated_integrand(f::IteratedFourierIntegrand, x, ::Type{Val{1}}) = f(x)
-iterated_integrand(f::IteratedFourierIntegrand, y, ::Type{Val{d}}) where d = f.f[d](y)
-iterated_integrand(_::IteratedFourierIntegrand, y, ::Type{Val{0}}) = y
+iterated_integrand(f::IteratedFourierIntegrand, x, ::Val{1}) = f.f[1](f.s(x), f.p...)
+iterated_integrand(f::IteratedFourierIntegrand, y, ::Val{d}) where d = f.f[d](y)
+iterated_integrand(_::IteratedFourierIntegrand, y, ::Val{0}) = y
 
 # PTR customizations
 
@@ -140,7 +131,7 @@ end
         $I_N = zero($(Symbol(:T_, N)))
         Base.Cartesian.@nloops $N i rule (d -> d==1 ? nothing : I_{d-1} = zero(T_{d-1})) (d -> d==1 ? nothing : I_d += iterated_integrand(f, I_{d-1}, Val{d})) begin
             n += 1
-            I_1 += ptr_integrand(f, x[n]) # implicitly assuming outer functions are linear
+            I_1 += iterated_integrand(f, x[n], Val{1}) # implicitly assuming outer functions are linear
         end
         iterated_integrand(f, $I_N, Val{0}) * det(B)/npt^d
     end
