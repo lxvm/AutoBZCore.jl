@@ -20,6 +20,16 @@ For example, computing the local Green's function can be done as follows:
     ps = (1.0, 0.0) # representative values for (η,ω), the last arguments of the integrand evaluator
     gloc = FourierIntegrator(gloc_integrand, fbz, h; ps=ps) # initialize default integration routine
     gloc(ps...) # evaluate gloc at parameter points
+
+!!! note "Assumptions"
+    `AutoBZCore` assumes that all calculations occur in the reciprocal lattice
+    basis, since that is the basis in which Wannier interpolants are most
+    efficiently described. This means that user-provided integration limits and
+    symmetries should be in the reciprocal lattice basis and additionally they
+    should be in fractional coordinates (e.g. the BZ in these coordinates has
+    vertices (0,0,0) and (1,1,1)). All symmetry transformations must be dealt
+    with by the user, who can specialize the [`symmetrize`](@ref) routine to
+    automate that step.
 """
 module AutoBZCore
 

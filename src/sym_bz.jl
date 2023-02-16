@@ -17,7 +17,12 @@ Data type representing a Brillouin zone reduced by a set of symmetries, `syms`
 with iterated integration limits `lims`, both of which are assumed to be in the
 lattice basis (since the Fourier series is). `A` and `B` should be
 identically-sized square matrices containing the real and reciprocal basis
-vectors in their columns.
+vectors in their columns. `lims` should be limits compatible with the
+`IteratedIntegration` package that represent the BZ in fractional lattice
+coordinates (e.g. the full BZ with vertices (0,0,0) & (1,1,1)). `syms` should be
+a collection of symmetries compatible with `AutoSymPTR` and the symmetry
+operators should be in the lattice basis (if necessary, rotate them from the
+Cartesian basis).
 """
 struct SymmetricBZ{S,L,d,T,d2}
     A::SMatrix{d,d,T,d2}

@@ -28,6 +28,7 @@ struct FourierIntegrator{F,S,P,BZ,R,K} <: AbstractIntegrator{F}
 end
 
 function FourierIntegrator(f::F, bz, s, p...; ps=(), routine=iterated_integration, kwargs...) where F
+    @assert all(isone, period(s)) "AutoBZCore assumes that the Fourier series uses fractional lattice coordinates with unit period"
     test = FourierIntegrand{F}(s, p..., ps...)
     FourierIntegrator(f, bz, s, p, routine, quad_kwargs(routine, test, bz; kwargs...))
 end
