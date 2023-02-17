@@ -29,7 +29,7 @@ struct SymmetricBZ{S,L,d,T,d2}
     B::SMatrix{d,d,T,d2}
     lims::L
     syms::S
-    SymmetricBZ(A::M, B::M, lims::L, syms::S) where {d,T,d2,M<:SMatrix{d,d,T,d2},L<:AbstractLimits{d},S} =
+    SymmetricBZ(A::M, B::M, lims::L, syms::S) where {d,T,d2,M<:SMatrix{d,d,T,d2},L,S} =
         new{S,L,d,T,d2}(A, B, lims, syms)
 end
 
@@ -56,11 +56,11 @@ domain, thus mapping the value of `x` on the parametrization to the full domain.
 """
 symmetrize(f, bz::SymmetricBZ, xs...) = map(x -> symmetrize(f, bz, x), xs)
 symmetrize(_, bz::SymmetricBZ, x::Number) = nsyms(bz)*x
-function symmetrize(_, ::SymmetricBZ, x)
+function symmetrize(f, ::SymmetricBZ, x)
     @warn "Symmetric BZ detected and returning integral computed from limits. Define a method for symmetrize() for your integrand type that maps to the full BZ value"
+    @show f
     x
 end
-
 
 
 """
@@ -75,3 +75,50 @@ FullBZ(A, B=canonical_reciprocal_basis(A), lims=basis_to_limits(B); kwargs...) =
 nsyms(::FullBZ) = 1
 symmetrize(_, ::FullBZ, x) = x
 symmetrize(_, ::FullBZ, x::Number) = x
+
+# TODO: In Julia 1.9 put these definitions in extensions modules
+
+"""
+    iterated_integration(f, bz::SymmetricBZ; kwargs...)
+"""
+function iterated_integration(f::F, bz::BZ; kwargs...) where {F,BZ<:SymmetricBZ}
+    kw = iterated_integration_kwargs(f, bz; kwargs...)
+    j = det(bz.B)
+    atol = kw.atol/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
+    int, err = iterated_integration(f, bz.lims; kw..., atol=atol)
+    symmetrize(f, bz, j*int, j*err)
+end
+iterated_integration_kwargs(f, bz::SymmetricBZ; kwargs...) =
+    iterated_integration_kwargs(f, bz.lims; kwargs...)
+
+quad_args(::typeof(iterated_integration), l, f) = (f, l)
+quad_kwargs(::typeof(iterated_integration), l, f; kwargs...) =
+    iterated_integration_kwargs(f, l; kwargs...)
+
+"""
+    symptr(f, bz::SymmetricBZ; kwargs...)
+"""
+function symptr(f, bz::SymmetricBZ; kwargs...)
+    int, rules = symptr(f, bz.B, bz.syms; kwargs...)
+    symmetrize(f, bz, int), rules
+end
+symptr_kwargs(f, bz::SymmetricBZ; kwargs...) =
+    symptr_kwargs(f, bz.B, bz.syms; kwargs...)
+
+quad_args(::typeof(symptr), bz, f) = (f, bz)
+quad_kwargs(::typeof(symptr), bz, f; kwargs...) =
+    symptr_kwargs(f, bz; kwargs...)
+
+"""
+    autosymptr(f, bz::SymmetricBZ; kwargs...)
+"""
+function autosymptr(f, bz::SymmetricBZ; kwargs...)
+    int, err, numevals, rules = autosymptr(f, bz.B, bz.syms; kwargs...)
+    symmetrize(f, bz, int, err)..., numevals, rules
+end
+autosymptr_kwargs(f, bz::SymmetricBZ; kwargs...) =
+    autosymptr_kwargs(f, bz.B, bz.syms; kwargs...)
+
+quad_args(::typeof(autosymptr), bz, f) = (f, bz)
+quad_kwargs(::typeof(autosymptr), bz, f; kwargs...) =
+    autosymptr_kwargs(f, bz; kwargs...)

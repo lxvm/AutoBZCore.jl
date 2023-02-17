@@ -54,22 +54,10 @@ end
         dos_integrand(H::AbstractMatrix, M) = imag(tr(inv(M-H)))/(-pi)
         s = InplaceFourierSeries(rand(SMatrix{3,3,ComplexF64}, 3,3,3))
         p = -I
-        f = FourierIntegrand{3}(dos_integrand, s, p)
+        f = FourierIntegrand(dos_integrand, s, p)
         @test FourierIntegrand{typeof(dos_integrand)}(s, p) == f
         @test iterated_integrand(f, (1.0, 1.0, 1.0), Val(1)) == f((1.0, 1.0, 1.0))
         @test iterated_integrand(f, 809, Val(0)) == iterated_integrand(f, 809, Val(2)) == 809
-    end
-
-    @testset "IteratedFourierIntegrand" begin
-        safedos_integrand(H::AbstractMatrix, M) = tr(inv(M-H))/(-pi)
-        fs = (safedos_integrand, imag, identity)
-        s = InplaceFourierSeries(rand(SMatrix{3,3,ComplexF64}, 3,3,3))
-        p = -I
-        f = IteratedFourierIntegrand{3}(fs, s, p)
-        @test IteratedFourierIntegrand{typeof(fs)}(s, p) == f
-        @test iterated_integrand(f, (1.0, 1.0, 1.0), Val(1)) == f((1.0, 1.0, 1.0))
-        @test iterated_integrand(f, complex(2.0, 1.1), Val(2)) == 1.1
-        @test iterated_integrand(f, 809, Val(0)) == iterated_integrand(f, 809, Val(3)) == 809
     end
 
     @testset "IAI" begin
@@ -81,7 +69,7 @@ end
         dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
         s = InplaceFourierSeries(integer_lattice(dims))
         p = complex(1.0,1.0)*I
-        f = FourierIntegrand{3}(dos_integrand, s, p)
+        f = FourierIntegrand(dos_integrand, s, p)
 
         iterated_integration(f, fbz)
     end
@@ -96,7 +84,7 @@ end
         dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
         s = InplaceFourierSeries(integer_lattice(dims))
         p = complex(1.0,1.0)*I
-        f = FourierIntegrand{3}(dos_integrand, s, p)
+        f = FourierIntegrand(dos_integrand, s, p)
 
         @test symptr(f, fbz)[1] ≈ symptr(f, bz)[1]
         @test autosymptr(f, fbz)[1] ≈ autosymptr(f, bz)[1]
@@ -114,17 +102,11 @@ end
         s = InplaceFourierSeries(integer_lattice(dims))
         p = complex(1.0,1.0)*I
         
-        fiai = FourierIntegrator(dos_integrand, fbz, s; ps=(p,), routine=iterated_integration)
-        fptr = FourierIntegrator(dos_integrand, fbz, s; ps=(p,), routine=symptr)
-        fsym = FourierIntegrator(dos_integrand, fbz, s; ps=(p,), routine=autosymptr)
-
-        bziai = FourierIntegrator(dos_integrand, bz, s; ps=(p,), routine=iterated_integration)
-        bzptr = FourierIntegrator(dos_integrand, bz, s; ps=(p,), routine=symptr)
-        bzsym = FourierIntegrator(dos_integrand, bz, s; ps=(p,), routine=autosymptr)
-
-        @test fiai(p)[1] ≈ bziai(p)[1]
-        @test fptr(p)[1] ≈ bzptr(p)[1]
-        @test fsym(p)[1] ≈ bzsym(p)[1]
+        for routine in (iterated_integration, symptr, autosymptr)
+            f1 = FourierIntegrator(routine, fbz, dos_integrand, s)
+            f2 = FourierIntegrator(routine,  bz, dos_integrand, s)
+            @test f1(p)[1] ≈ f2(p)[1]
+        end
     end
 
 end
