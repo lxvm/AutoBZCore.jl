@@ -1,8 +1,7 @@
 # utilities
-function basis_to_limits(B::AbstractMatrix)
-    d = LinearAlgebra.checksquare(B)
-    half_b = SVector{d}(ntuple(n -> norm(B[:,n])/2, Val{d}()))
-    CubicLimits(-half_b, half_b)
+function lattice_bz_limits(B::AbstractMatrix)
+    d = checksquare(B)
+    CubicLimits(zeros(d), ones(d))
 end
 function check_bases_canonical(A::AbstractMatrix, B::AbstractMatrix, atol)
     norm(A'B - 2pi*I) < atol || throw("Real and reciprocal Bravais lattice bases non-orthogonal to tolerance $atol")
@@ -36,7 +35,7 @@ end
 # eventually limits could be computed from B and symmetries
 function SymmetricBZ(A::AbstractMatrix{T}, B::AbstractMatrix{S}, lims, syms=nothing; atol=nothing) where {T,S}
     F = float(promote_type(T, S))
-    (d = LinearAlgebra.checksquare(A)) == LinearAlgebra.checksquare(B) ||
+    (d = checksquare(A)) == checksquare(B) ||
         throw(DimensionMismatch("Bravais lattices $A and $B must have the same shape"))
     check_bases_canonical(A, B, something(atol, sqrt(eps(F))))
     M = SMatrix{d,d,F,d^2}
@@ -64,12 +63,12 @@ end
 
 
 """
-    FullBZ(A, B=canonical_reciprocal_basis(A), lims=basis_to_limits(B); atol=sqrt(eps()))
+    FullBZ(A, B=canonical_reciprocal_basis(A), lims=lattice_bz_limits(B); atol=sqrt(eps()))
 
 A type alias for `SymmetricBZ{Nothing}` when there are no symmetries applied to BZ
 """
 const FullBZ = SymmetricBZ{Nothing}
-FullBZ(A, B=canonical_reciprocal_basis(A), lims=basis_to_limits(B); kwargs...) =
+FullBZ(A, B=canonical_reciprocal_basis(A), lims=lattice_bz_limits(B); kwargs...) =
     SymmetricBZ(A, B, lims; kwargs...)
 
 nsyms(::FullBZ) = 1
@@ -91,8 +90,8 @@ end
 iterated_integration_kwargs(f, bz::SymmetricBZ; kwargs...) =
     iterated_integration_kwargs(f, bz.lims; kwargs...)
 
-quad_args(::typeof(iterated_integration), l, f) = (f, l)
-quad_kwargs(::typeof(iterated_integration), l, f; kwargs...) =
+quad_args(::typeof(iterated_integration), f, l) = (f, l)
+quad_kwargs(::typeof(iterated_integration), f, l; kwargs...) =
     iterated_integration_kwargs(f, l; kwargs...)
 
 """
@@ -105,8 +104,8 @@ end
 symptr_kwargs(f, bz::SymmetricBZ; kwargs...) =
     symptr_kwargs(f, bz.B, bz.syms; kwargs...)
 
-quad_args(::typeof(symptr), bz, f) = (f, bz)
-quad_kwargs(::typeof(symptr), bz, f; kwargs...) =
+quad_args(::typeof(symptr), f, bz) = (f, bz)
+quad_kwargs(::typeof(symptr), f, bz; kwargs...) =
     symptr_kwargs(f, bz; kwargs...)
 
 """
@@ -119,6 +118,6 @@ end
 autosymptr_kwargs(f, bz::SymmetricBZ; kwargs...) =
     autosymptr_kwargs(f, bz.B, bz.syms; kwargs...)
 
-quad_args(::typeof(autosymptr), bz, f) = (f, bz)
-quad_kwargs(::typeof(autosymptr), bz, f; kwargs...) =
+quad_args(::typeof(autosymptr), f, bz) = (f, bz)
+quad_kwargs(::typeof(autosymptr), f, bz; kwargs...) =
     autosymptr_kwargs(f, bz; kwargs...)

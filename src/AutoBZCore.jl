@@ -33,9 +33,10 @@ For example, computing the local Green's function can be done as follows:
 """
 module AutoBZCore
 
-using LinearAlgebra
+using LinearAlgebra: I, norm, det, checksquare
 
-using StaticArrays
+using StaticArrays: SMatrix
+using QuadGK: quadgk
 
 using FourierSeriesEvaluators
 using IteratedIntegration

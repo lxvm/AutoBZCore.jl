@@ -24,6 +24,9 @@ end
 
 @testset "AutoBZCore" begin
     
+    @testset "QuadGKIntegrator" begin
+    end
+
     @testset "SymmetricBZ" begin
         dims = 3
         A = I(dims)
@@ -100,12 +103,23 @@ end
 
         dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
         s = InplaceFourierSeries(integer_lattice(dims))
-        p = complex(1.0,1.0)*I
+        M = complex(1.0,1.0)*I
         
         for routine in (iterated_integration, symptr, autosymptr)
-            f1 = FourierIntegrator(routine, fbz, dos_integrand, s)
-            f2 = FourierIntegrator(routine,  bz, dos_integrand, s)
-            @test f1(p)[1] ≈ f2(p)[1]
+            # test the interface without callargs
+            f1 = FourierIntegrator(routine, dos_integrand, fbz, s)
+            f2 = FourierIntegrator(routine, dos_integrand,  bz, s)
+            @test f1(M)[1] ≈ f2(M)[1]
+            
+            # test the interface with callargs
+            f3 = FourierIntegrator(routine, dos_integrand, fbz, s; callargs=(M,))
+            f4 = FourierIntegrator(routine, dos_integrand,  bz, s; callargs=(M,))
+            @test f3(M)[1] ≈ f4(M)[1]
+
+            # test the interface without additional args
+            f5 = FourierIntegrator(routine, dos_integrand, fbz, s, M)
+            f6 = FourierIntegrator(routine, dos_integrand,  bz, s, M)
+            @test f5()[1] ≈ f6()[1]
         end
     end
 

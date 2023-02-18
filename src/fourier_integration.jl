@@ -120,7 +120,7 @@ function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{d,d}, ::Nothing) whe
 end
 
 """
-    FourierIntegrator(routine, bz, f, s, p...; kwargs...)
+    FourierIntegrator(routine, f, bz, s, p...; kwargs...)
 
 An [`Integrator`](@ref) that is specialized for [`FourierIntegrand`](@ref).
 
@@ -132,4 +132,4 @@ const FourierIntegrator{F} = Integrator{FourierIntegrand,F}
 
 # hack to allow integrators via type alias
 FourierIntegrator{F}(routine, bz, s, p...; kwargs...) where {F<:Function} =
-    FourierIntegrator(routine, bz, F.instance, s, p...; kwargs...)
+    FourierIntegrator(routine, F.instance, bz, s, p...; kwargs...)
