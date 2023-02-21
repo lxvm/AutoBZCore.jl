@@ -1,6 +1,6 @@
 # TODO: In Julia 1.9 this could become an extension
 """
-    FourierIntegrand(f, s::AbstractFourierSeries, ps...)
+    FourierIntegrand(f, s::AbstractFourierSeries)
 
 A type generically representing an integrand `f` whose entire dependence on the
 variables of integration is in a Fourier series `s`, and which may also accept
@@ -10,20 +10,13 @@ Therefore the caller is expected to know the type of `s(x)` (hint: `eltype(s)`)
 and the layout of the parameters in the tuple `ps`. Additionally, `f` is assumed
 to be type-stable, and is compatible with the equispace integration routines.
 """
-struct FourierIntegrand{F,S,P,K} <: AbstractIntegrand{F}
+struct FourierIntegrand{F,S,P}
     f::F
     s::S
     p::P
-    kwargs::K
-    FourierIntegrand(f::F, s::S, p::P, k::K) where {F,S<:AbstractFourierSeries,P<:Tuple,K} =
-        new{F,S,P,K}(f,s,p,k)
+    FourierIntegrand(f::F, s::S, params...) where {F,S<:AbstractFourierSeries} =
+        new{F,S,typeof(params)}(f,s,params)
 end
-FourierIntegrand(f, s::AbstractFourierSeries, p...; kwargs...) =
-    FourierIntegrand(f, s, p, kwargs)
-# hack to allow user-defined integrands without a type alias
-FourierIntegrand{F}(s::AbstractFourierSeries, p...; kwargs...) where {F<:Function} =
-    FourierIntegrand(F.instance, s, p, kwargs)
-
 
 # IAI customizations that copy behavior of AbstractIteratedIntegrand
 
@@ -109,27 +102,47 @@ end
 
 ptr_integrand(f::FourierIntegrand, s_x) = f.f(s_x, f.p...)
 
-function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{d,d}, syms) where d
-    int = mapreduce((w, x) -> w*ptr_integrand(f, x), +, rule.w, rule.x)
-    int * det(B)/npt^d/length(syms)
+
+# enables kpt parallelization by default for all BZ integrals
+# with symmetries
+function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{N,N}, syms, min_per_thread=1, nthreads=Threads.nthreads()) where N
+    n = length(rule.x)
+    acc = rule.w[n]*ptr_integrand(f, rule.x[n]) # unroll first term in sum to get right types
+    n == 1 && return acc*det(B)/length(syms)/npt^N
+    runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
+    d, r = divrem(n-1, runthreads)
+    partial_sums = fill!(Vector{typeof(acc)}(undef, runthreads), zero(acc)) # allocations :(
+    Threads.@threads for i in Base.OneTo(runthreads)
+        # batch nodes into `runthreads` continguous groups of size d or d+1 (remainder)
+        jmax = (i <= r ? d+1 : d)
+        offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
+        @inbounds for j in 1:jmax
+            partial_sums[i] += rule.w[offset + j]*ptr_integrand(f, rule.x[offset + j])
+        end
+    end
+    for part in partial_sums
+        acc += part
+    end
+    acc*det(B)/length(syms)/npt^N
 end
-
-function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{d,d}, ::Nothing) where d
-    int = sum(x -> ptr_integrand(f, x), rule.x)
-    int * det(B)/npt^d
+# without symmetries
+function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{N,N}, ::Nothing, min_per_thread=1, nthreads=Threads.nthreads()) where N
+    n = length(rule.x)
+    acc = ptr_integrand(f, rule.x[n]) # unroll first term in sum to get right types
+    n == 1 && return acc*det(B)/npt^N
+    runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
+    d, r = divrem(n-1, runthreads)
+    partial_sums = fill!(Vector{typeof(acc)}(undef, runthreads), zero(acc)) # allocations :(
+    Threads.@threads for i in Base.OneTo(runthreads)
+        # batch nodes into `runthreads` continguous groups of size d or d+1 (remainder)
+        jmax = (i <= r ? d+1 : d)
+        offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
+        @inbounds for j in 1:jmax
+            partial_sums[i] += ptr_integrand(f, rule.x[offset + j])
+        end
+    end
+    for part in partial_sums
+        acc += part
+    end
+    acc*det(B)/npt^N
 end
-
-"""
-    FourierIntegrator(routine, f, bz, s, p...; kwargs...)
-
-An [`Integrator`](@ref) that is specialized for [`FourierIntegrand`](@ref).
-
-    FourierIntegrator{F}(routine, bz, s, p...; kwargs...) where {F<:Function}
-
-Defining a type alias for `FourierIntegrand{F}` allows for omitting `f`.
-"""
-const FourierIntegrator{F} = Integrator{FourierIntegrand,F}
-
-# hack to allow integrators via type alias
-FourierIntegrator{F}(routine, bz, s, p...; kwargs...) where {F<:Function} =
-    FourierIntegrator(routine, F.instance, bz, s, p...; kwargs...)
