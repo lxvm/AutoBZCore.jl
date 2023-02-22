@@ -1,6 +1,5 @@
-# TODO: In Julia 1.9 this could become an extension
 """
-    FourierIntegrand(f, s::AbstractFourierSeries, ps...)
+    FourierIntegrand(f, s::AbstractFourierSeries)
 
 A type generically representing an integrand `f` whose entire dependence on the
 variables of integration is in a Fourier series `s`, and which may also accept
@@ -10,29 +9,27 @@ Therefore the caller is expected to know the type of `s(x)` (hint: `eltype(s)`)
 and the layout of the parameters in the tuple `ps`. Additionally, `f` is assumed
 to be type-stable, and is compatible with the equispace integration routines.
 """
-struct FourierIntegrand{F,S,P,K} <: AbstractIntegrand{F}
+struct FourierIntegrand{F,S<:AbstractFourierSeries,P}
     f::F
     s::S
     p::P
-    kwargs::K
-    FourierIntegrand(f::F, s::S, p::P, k::K) where {F,S<:AbstractFourierSeries,P<:Tuple,K} =
-        new{F,S,P,K}(f,s,p,k)
 end
-FourierIntegrand(f, s::AbstractFourierSeries, p...; kwargs...) =
-    FourierIntegrand(f, s, p, kwargs)
-# hack to allow user-defined integrands without a type alias
-FourierIntegrand{F}(s::AbstractFourierSeries, p...; kwargs...) where {F<:Function} =
-    FourierIntegrand(F.instance, s, p, kwargs)
 
+struct FourierFunction{F,S}
+    f::F
+    s::S
+end
+construct_integrand(f::FourierFunction, iip, p) = FourierIntegrand(f.f, f.s, p)
+(f::FourierFunction)(x, p) = f.f(f.s(x), p...)
 
 # IAI customizations that copy behavior of AbstractIteratedIntegrand
 
 iterated_integrand(_::FourierIntegrand, y, ::Val{d}) where d = y
 iterated_integrand(f::FourierIntegrand, x, ::Val{1}) =
-    f.f(f.s(x), f.p...; f.kwargs...)
+    f.f(f.s(x), f.p...)
 
 iterated_pre_eval(f::FourierIntegrand, x, ::Val{d}) where d =
-    FourierIntegrand(f.f, contract(f.s, x, Val(d)), f.p, f.kwargs)
+    FourierIntegrand(f.f, contract(f.s, x, Val(d)), f.p)
 
 (f::FourierIntegrand)(::Tuple{}) = f
 function (f::FourierIntegrand)(x::NTuple{N}) where N
@@ -46,37 +43,35 @@ end
 
 # PTR customizations
 
-# general symmetries
-function ptr(npt, f::FourierIntegrand, ::Val{d}, ::Type{T}, syms) where {d,T}
-    x = Vector{Base.promote_op(f.s,NTuple{d,T})}(undef, 0)
-    w = Vector{Int}(undef, 0)
-    rule = (; x=x, w=w)
-    ptr!(rule, npt, f, Val(d), T, syms)
+# no symmetries
+struct FourierPTRRule{X,S<:AbstractFourierSeries}
+    x::Vector{X}
+    s::S
+end
+Base.length(r::FourierPTRRule) = length(r.x)
+function Base.copy!(r::T, s::T) where {T<:FourierPTRRule}
+    copy!(r.x, s.x)
+    r
 end
 
-# no symmetries
-function ptr(npt, f::FourierIntegrand, ::Val{d}, ::Type{T}, syms::Nothing) where {d,T}
-    x = Vector{Base.promote_op(f.s,NTuple{d,T})}(undef, 0)
-    rule = (; x=x)
-    ptr!(rule, npt, f, Val(d), T, syms)
+struct FourierPTR{T<:AbstractFourierSeries}
+    s::T
+end
+function (f::FourierPTR)(::Type{T}, ::Val{N}) where {T,N}
+    S = Base.promote_op(f.s, NTuple{N,T})
+    x = Vector{S}(undef, 0)
+    FourierPTRRule(x, f.s)
 end
 
-ptr!(rule, npt, f::FourierIntegrand, ::Val{d}, ::Type{T}, syms) where {d,T} =
-fourier_ptr!(rule, npt, f.s, Val(d), T, syms)
+(f::FourierPTR)(::Type{T}, npt, ::Val{N}) where {T,N} =
+    ptr_rule!(f(T, Val(N)), npt, Val(N))
 
-"""
-    fourier_ptr!(rule, npt, f::AbstractFourierSeries, ::Val{d}, ::Type{T}, syms) where {d,T}
-
-Modifies and returns the NamedTuple `rule` with fields `x,w` to contain the
-Fourier series evaluated at the symmetrized PTR grid points
-"""
-# no symmetries
-@generated function fourier_ptr!(rule, npt, f::AbstractFourierSeries{N}, ::Val{N}, ::Type{T}, ::Nothing) where {N,T}
+@generated function ptr_rule!(rule::FourierPTRRule, npt, ::Val{N}) where {N}
     f_N = Symbol(:f_, N)
     quote
-        $f_N = f
+        $f_N = rule.s
         resize!(rule.x, npt^N)
-        box = period(f)
+        box = period($f_N)
         n = 0
         Base.Cartesian.@nloops $N i _ -> Base.OneTo(npt) (d -> d==1 ? nothing : f_{d-1} = contract(f_d, box[d]*(i_d-1)/npt, Val(d))) begin
             n += 1
@@ -86,16 +81,64 @@ Fourier series evaluated at the symmetrized PTR grid points
     end
 end
 
+function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
+    N = checksquare(B); T = float(eltype(B))
+    rule_ = (rule===nothing) ? FourierPTR(f.s)(T, npt, Val(N)) : rule
+    n = length(rule_)
+
+    acc = f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
+    n == 1 && return acc*det(B)/npt^N
+    runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
+    d, r = divrem(n-1, runthreads)
+    partial_sums = fill!(Vector{typeof(acc)}(undef, runthreads), zero(acc)) # allocations :(
+    Threads.@threads for i in Base.OneTo(runthreads)
+        # batch nodes into `runthreads` continguous groups of size d or d+1 (remainder)
+        jmax = (i <= r ? d+1 : d)
+        offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
+        @inbounds for j in 1:jmax
+            partial_sums[i] += f.f(rule_.x[offset + j], f.p...)
+        end
+    end
+    for part in partial_sums
+        acc += part
+    end
+    acc*det(B)/npt^N
+end
+
+
 # general symmetries
-@generated function fourier_ptr!(rule, npt, f::AbstractFourierSeries{N}, ::Val{N}, ::Type{T}, syms) where {N,T}
+struct FourierSymPTRRule{X,S<:AbstractFourierSeries}
+    w::Vector{Int}
+    x::Vector{X}
+    s::S
+end
+Base.length(r::FourierSymPTRRule) = length(r.x)
+function Base.copy!(r::T, s::T) where {T<:FourierSymPTRRule}
+    copy!(r.w, s.w)
+    copy!(r.x, s.x)
+    r
+end
+
+struct FourierSymPTR{T<:AbstractFourierSeries}
+    s::T
+end
+function (f::FourierSymPTR)(::Type{T}, ::Val{N}) where {T,N}
+    S = Base.promote_op(f.s, NTuple{N,T})
+    w = Vector{Int}(undef, 0); x = Vector{S}(undef, 0)
+    FourierSymPTRRule(w, x, f.s)
+end
+(f::FourierSymPTR)(::Type{T}, npt, ::Val{N}, syms) where {T,N} =
+    symptr_rule!(f(T, Val(N)), npt, Val(N), syms)
+
+@generated function symptr_rule!(rule::FourierSymPTRRule, npt, ::Val{N}, syms) where {N}
     f_N = Symbol(:f_, N)
     quote
-        $f_N = f
-        flag, wsym, nsym = ptr_(Val(N), npt, syms)
+        $f_N = rule.s
+        flag, wsym, nsym = symptr_rule(npt, Val(N), syms)
         n = 0
-        box = period(f)
-        resize!(rule.x, nsym)
+        box = period($f_N)
         resize!(rule.w, nsym)
+        resize!(rule.x, nsym)
         Base.Cartesian.@nloops $N i flag (d -> d==1 ? nothing : f_{d-1} = contract(f_d, box[d]*(i_d-1)/npt, Val(d))) begin
             (Base.Cartesian.@nref $N flag i) || continue
             n += 1
@@ -107,29 +150,41 @@ end
     end
 end
 
-ptr_integrand(f::FourierIntegrand, s_x) = f.f(s_x, f.p...)
+# enables kpt parallelization by default for all BZ integrals
+# with symmetries
+function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
+    N = checksquare(B); T = float(eltype(B))
+    rule_ = (rule===nothing) ? FourierSymPTR(f.s)(T, npt, Val(N), syms) : rule
+    n = length(rule_)
 
-function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{d,d}, syms) where d
-    int = mapreduce((w, x) -> w*ptr_integrand(f, x), +, rule.w, rule.x)
-    int * det(B)/npt^d/length(syms)
+    acc = rule_.w[n]*f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
+    n == 1 && return acc*det(B)/length(syms)/npt^N
+    runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
+    d, r = divrem(n-1, runthreads)
+    partial_sums = fill!(Vector{typeof(acc)}(undef, runthreads), zero(acc)) # allocations :(
+    Threads.@threads for i in Base.OneTo(runthreads)
+        # batch nodes into `runthreads` continguous groups of size d or d+1 (remainder)
+        jmax = (i <= r ? d+1 : d)
+        offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
+        @inbounds for j in 1:jmax
+            partial_sums[i] += rule_.w[offset + j]*f.f(rule_.x[offset + j], f.p...)
+        end
+    end
+    for part in partial_sums
+        acc += part
+    end
+    acc*det(B)/length(syms)/npt^N
 end
 
-function evalptr(rule, npt, f::FourierIntegrand, B::SMatrix{d,d}, ::Nothing) where d
-    int = sum(x -> ptr_integrand(f, x), rule.x)
-    int * det(B)/npt^d
-end
+# Defining defaults without symmetry
 
-"""
-    FourierIntegrator(routine, f, bz, s, p...; kwargs...)
+symptr_rule!(rule::FourierPTRRule, npt, ::Val{d}, ::Nothing) where d =
+    ptr_rule!(rule, npt, Val(d))
 
-An [`Integrator`](@ref) that is specialized for [`FourierIntegrand`](@ref).
+symptr(f::FourierIntegrand, B::AbstractMatrix, ::Nothing; kwargs...) =
+    ptr(f, B; kwargs...)
 
-    FourierIntegrator{F}(routine, bz, s, p...; kwargs...) where {F<:Function}
-
-Defining a type alias for `FourierIntegrand{F}` allows for omitting `f`.
-"""
-const FourierIntegrator{F} = Integrator{FourierIntegrand,F}
-
-# hack to allow integrators via type alias
-FourierIntegrator{F}(routine, bz, s, p...; kwargs...) where {F<:Function} =
-    FourierIntegrator(routine, F.instance, bz, s, p...; kwargs...)
+autosymptr(f::FourierIntegrand, B::AbstractMatrix, ::Nothing; kwargs...) =
+    autosymptr(f, B, nothing, FourierPTR(f.s); kwargs...)
+autosymptr(f::FourierIntegrand, B::AbstractMatrix, syms; kwargs...) =
+    autosymptr(f, B, syms, FourierSymPTR(f.s); kwargs...)

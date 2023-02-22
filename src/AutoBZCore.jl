@@ -33,29 +33,31 @@ For example, computing the local Green's function can be done as follows:
 """
 module AutoBZCore
 
+using Printf: @sprintf
 using LinearAlgebra: I, norm, det, checksquare
 
 using StaticArrays: SMatrix
-using QuadGK: quadgk
-
-using FourierSeriesEvaluators
 using IteratedIntegration
 using AutoSymPTR
+using Reexport
+@reexport using Integrals
+@reexport using FourierSeriesEvaluators
 
-import AutoSymPTR: symptr, autosymptr, ptr, ptr!, ptr_, evalptr, ptr_integrand,
-    symptr_kwargs, autosymptr_kwargs
-import IteratedIntegration: iterated_integration, iterated_integration_kwargs,
-    iterated_integrand, iterated_pre_eval
+import Integrals: IntegralProblem, __solvebp_call
+import AutoSymPTR: symptr, autosymptr, symptr_rule, symptr_rule!, ptr, autoptr, ptr_rule, ptr_rule!
+import IteratedIntegration: iterated_integration, iterated_integrand, iterated_pre_eval
 
-
-export AbstractIntegrand, QuadIntegrand, Integrator, quad_args
-include("definitions.jl")
 
 export SymmetricBZ, FullBZ, nsyms, symmetrize
 include("brillouin_zone.jl")
 
-export FourierIntegrand, FourierIntegrator
+export FourierFunction
 include("fourier_integration.jl")
 
+export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
+include("algorithms.jl")
+
+export parallel_solve
+include("jobs.jl")
 
 end
