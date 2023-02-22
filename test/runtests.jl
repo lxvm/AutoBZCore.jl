@@ -4,14 +4,7 @@ using LinearAlgebra
 using StaticArrays
 using OffsetArrays
 
-# using FourierSeriesEvaluators
-# using IteratedIntegration
-# using AutoSymPTR
-
 using AutoBZCore
-using AutoBZCore.IteratedIntegration
-using AutoBZCore.AutoSymPTR
-using AutoBZCore.FourierSeriesEvaluators
 
 
 function integer_lattice(n)
@@ -23,15 +16,12 @@ function integer_lattice(n)
 end
 
 @testset "AutoBZCore" begin
-    
-    @testset "QuadGKIntegrator" begin
-    end
 
     @testset "SymmetricBZ" begin
         dims = 3
         A = I(dims)
         B = AutoBZCore.canonical_reciprocal_basis(A)
-        lims = CubicLimits(zeros(3), ones(3))
+        lims = AutoBZCore.CubicLimits(zeros(3), ones(3))
         @test SymmetricBZ(A, B, lims) isa FullBZ
         fbz = FullBZ(A, B, lims)
         @test fbz isa FullBZ
@@ -42,7 +32,7 @@ end
         @test ndims(fbz) == dims
         @test eltype(fbz) == float(eltype(B))
         fbz = FullBZ(A)
-        @test fbz.lims isa CubicLimits
+        @test fbz.lims isa AutoBZCore.CubicLimits
 
         nsym = 8
         syms = rand(SMatrix{dims,dims}, nsym)
@@ -53,74 +43,38 @@ end
         @test eltype(bz) == float(eltype(B))
     end
 
-    @testset "FourierIntegrand" begin
+    @testset "FourierFunction" begin
         dos_integrand(H::AbstractMatrix, M) = imag(tr(inv(M-H)))/(-pi)
         s = InplaceFourierSeries(rand(SMatrix{3,3,ComplexF64}, 3,3,3))
         p = -I
-        f = FourierIntegrand(dos_integrand, s, p)
-        @test FourierIntegrand{typeof(dos_integrand)}(s, p) == f
-        @test iterated_integrand(f, (1.0, 1.0, 1.0), Val(1)) == f((1.0, 1.0, 1.0))
-        @test iterated_integrand(f, 809, Val(0)) == iterated_integrand(f, 809, Val(2)) == 809
+        f = AutoBZCore.construct_integrand(FourierFunction(dos_integrand, s), false, tuple(p))
+        @test AutoBZCore.iterated_integrand(f, (1.0, 1.0, 1.0), Val(1)) == f((1.0, 1.0, 1.0))
+        @test AutoBZCore.iterated_integrand(f, 809, Val(0)) == AutoBZCore.iterated_integrand(f, 809, Val(2)) == 809
     end
 
-    @testset "IAI" begin
-        dims = 3
-        A = I(dims)
-        B = AutoBZCore.canonical_reciprocal_basis(A)
-        fbz = FullBZ(A, B)
+    dims = 3
+    A = I(dims)
+    B = AutoBZCore.canonical_reciprocal_basis(A)
+    fbz = FullBZ(A, B)
+    bz = SymmetricBZ(A, B, fbz.lims, (I,))
 
-        dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
-        s = InplaceFourierSeries(integer_lattice(dims))
-        p = complex(1.0,1.0)*I
-        f = FourierIntegrand(dos_integrand, s, p)
+    dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
+    s = InplaceFourierSeries(integer_lattice(dims), period=1)
+    p = complex(1.0,1.0)*I
+    f = FourierFunction(dos_integrand, s)
 
-        iterated_integration(f, fbz)
-    end
+    ip_fbz = IntegralProblem(f, fbz, p)
+    ip_bz = IntegralProblem(f, bz, p)
 
-    @testset "PTR" begin
-        dims = 3
-        A = I(dims)
-        B = AutoBZCore.canonical_reciprocal_basis(A)
-        fbz = FullBZ(A, B)
-        bz = SymmetricBZ(A, B, fbz.lims, (I,))
-
-        dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
-        s = InplaceFourierSeries(integer_lattice(dims))
-        p = complex(1.0,1.0)*I
-        f = FourierIntegrand(dos_integrand, s, p)
-
-        @test symptr(f, fbz)[1] ≈ symptr(f, bz)[1]
-        @test autosymptr(f, fbz)[1] ≈ autosymptr(f, bz)[1]
-
-    end
-
-    @testset "FourierIntegrator" begin
-        dims = 3
-        A = I(dims)
-        B = AutoBZCore.canonical_reciprocal_basis(A)
-        fbz = FullBZ(A, B)
-        bz = SymmetricBZ(A, B, fbz.lims, (I,))
-
-        dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
-        s = InplaceFourierSeries(integer_lattice(dims))
-        M = complex(1.0,1.0)*I
-        
-        for routine in (iterated_integration, symptr, autosymptr)
-            # test the interface without callargs
-            f1 = FourierIntegrator(routine, dos_integrand, fbz, s)
-            f2 = FourierIntegrator(routine, dos_integrand,  bz, s)
-            @test f1(M)[1] ≈ f2(M)[1]
-            
-            # test the interface with callargs
-            f3 = FourierIntegrator(routine, dos_integrand, fbz, s; callargs=(M,))
-            f4 = FourierIntegrator(routine, dos_integrand,  bz, s; callargs=(M,))
-            @test f3(M)[1] ≈ f4(M)[1]
-
-            # test the interface without additional args
-            f5 = FourierIntegrator(routine, dos_integrand, fbz, s, M)
-            f6 = FourierIntegrator(routine, dos_integrand,  bz, s, M)
-            @test f5()[1] ≈ f6()[1]
-        end
+    @testset "Algorithms" begin
+        @test solve(ip_fbz, IAI()) ≈ solve(ip_bz, IAI())
+        @test solve(ip_fbz, TAI()) ≈ solve(ip_bz, TAI())
+        @test solve(ip_fbz, PTR()) ≈ solve(ip_bz, PTR())
+        @test solve(ip_fbz, AutoPTR()) ≈ solve(ip_bz, AutoPTR())
+        @test solve(ip_fbz, PTR_IAI()) ≈ solve(ip_bz, PTR_IAI())
+        @test solve(ip_fbz, AutoPTR_IAI()) ≈ solve(ip_bz, AutoPTR_IAI())
+        # @test solve(ip_fbz, VEGAS()) ≈ solve(ip_bz, VEGAS()) # skip for now or
+        # set larger tolerance
     end
 
 end
