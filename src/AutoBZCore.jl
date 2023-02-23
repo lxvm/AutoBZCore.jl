@@ -51,7 +51,7 @@ import IteratedIntegration: iterated_integration, iterated_integrand, iterated_p
 export SymmetricBZ, FullBZ, nsyms, symmetrize
 include("brillouin_zone.jl")
 
-export FourierFunction
+export FourierIntegrand
 include("fourier_integration.jl")
 
 export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI

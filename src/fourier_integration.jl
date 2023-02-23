@@ -9,18 +9,15 @@ Therefore the caller is expected to know the type of `s(x)` (hint: `eltype(s)`)
 and the layout of the parameters in the tuple `ps`. Additionally, `f` is assumed
 to be type-stable, and is compatible with the equispace integration routines.
 """
-struct FourierIntegrand{F,S<:AbstractFourierSeries,P}
+struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:Tuple}
     f::F
     s::S
     p::P
 end
-
-struct FourierFunction{F,S}
-    f::F
-    s::S
-end
-construct_integrand(f::FourierFunction, iip, p) = FourierIntegrand(f.f, f.s, p)
-(f::FourierFunction)(x, p) = f.f(f.s(x), p...)
+FourierIntegrand(f, s, p...) = FourierIntegrand(f, s, p)
+(f::FourierIntegrand)(x, p) = f.f(f.s(x), f.p..., p...)
+construct_integrand(f::FourierIntegrand, iip, p) =
+    FourierIntegrand(f.f, f.s, (f.p..., p...))
 
 # IAI customizations that copy behavior of AbstractIteratedIntegrand
 

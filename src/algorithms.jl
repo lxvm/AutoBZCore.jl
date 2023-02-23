@@ -39,7 +39,7 @@ TAI(; kwargs...) = HCubatureJL(; kwargs...)
 IntegralProblem(f, bz::SymmetricBZ, args...; kwargs...) =
     IntegralProblem(f, (bz,), (), args...; kwargs...)
 # Allow splatting of arguments
-IntegralProblem(f::FourierFunction, bz::SymmetricBZ, args...; kwargs...) =
+IntegralProblem(f::FourierIntegrand, bz::SymmetricBZ, args...; kwargs...) =
     IntegralProblem(f, (bz,), (), args; kwargs...)
 
 # layer to intercept integrand construction

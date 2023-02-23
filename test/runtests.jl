@@ -43,11 +43,11 @@ end
         @test eltype(bz) == float(eltype(B))
     end
 
-    @testset "FourierFunction" begin
+    @testset "FourierIntegrand" begin
         dos_integrand(H::AbstractMatrix, M) = imag(tr(inv(M-H)))/(-pi)
         s = InplaceFourierSeries(rand(SMatrix{3,3,ComplexF64}, 3,3,3))
         p = -I
-        f = AutoBZCore.construct_integrand(FourierFunction(dos_integrand, s), false, tuple(p))
+        f = AutoBZCore.construct_integrand(FourierIntegrand(dos_integrand, s), false, tuple(p))
         @test AutoBZCore.iterated_integrand(f, (1.0, 1.0, 1.0), Val(1)) == f((1.0, 1.0, 1.0))
         @test AutoBZCore.iterated_integrand(f, 809, Val(0)) == AutoBZCore.iterated_integrand(f, 809, Val(2)) == 809
     end
@@ -61,10 +61,19 @@ end
     dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
     s = InplaceFourierSeries(integer_lattice(dims), period=1)
     p = complex(1.0,1.0)*I
-    f = FourierFunction(dos_integrand, s)
+    f1 = FourierIntegrand(dos_integrand, s)
+    f2 = FourierIntegrand(dos_integrand, s, p)
 
-    ip_fbz = IntegralProblem(f, fbz, p)
-    ip_bz = IntegralProblem(f, bz, p)
+    ip_fbz = IntegralProblem(f1, fbz, p)
+    ip_bz = IntegralProblem(f1, bz, p)
+    ip_fbz2 = IntegralProblem(f2, fbz, p)
+    ip_bz2 = IntegralProblem(f2, bz, p)
+
+    for (ip1, ip2) in ((ip_fbz, ip_fbz2), (ip_bz, ip_bz2))
+        int1 = AutoBZCore.construct_integrand(ip1.f, isinplace(ip1), tuple(p))
+        int2 = AutoBZCore.construct_integrand(ip2.f, isinplace(ip2), ())
+        @test int1 == int2
+    end
 
     @testset "Algorithms" begin
         @test solve(ip_fbz, IAI()) ≈ solve(ip_bz, IAI())
