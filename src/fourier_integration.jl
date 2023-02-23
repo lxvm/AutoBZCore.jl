@@ -20,6 +20,8 @@ FourierIntegrand(f, s, p...) = FourierIntegrand(f, s, p)
 # intercept integrand construction when solving integral problem
 # because the IAI routines dispatch on the integrand type
 construct_integrand(f::FourierIntegrand, iip, p) =
+    FourierIntegrand(f.f, f.s, (f.p..., p))
+construct_integrand(f::FourierIntegrand, iip, p::Tuple) =
     FourierIntegrand(f.f, f.s, (f.p..., p...))
 construct_integrand(f::FourierIntegrand, iip, ::NullParameters) = f
 

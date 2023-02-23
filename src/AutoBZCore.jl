@@ -58,7 +58,7 @@ include("fourier_integration.jl")
 export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
 include("algorithms.jl")
 
-export parallel_solve
+export IntegralSolver, parallel_solve
 include("jobs.jl")
 
 end

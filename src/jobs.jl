@@ -1,3 +1,31 @@
+struct IntegralSolver{iip,F,L,U,A,K}
+    f::F
+    lb::L
+    ub::U
+    alg::A
+    abstol::Float64
+    reltol::Float64
+    maxiters::Int
+    kwargs::K
+    function IntegralSolver{iip}(f, lb, ub, alg;
+                                abstol=0.0, reltol=iszero(abstol) ? sqrt(eps()) : zero(abstol),
+                                maxiters=typemax(Int), kwargs...) where iip
+        new{iip, typeof(f), typeof(lb), typeof(ub), typeof(alg),
+            typeof(kwargs)}(f, lb, ub, alg, abstol, reltol, maxiters, kwargs)
+    end
+end
+
+IntegralSolver(f, lb, ub, alg; kwargs...) =
+    IntegralSolver{isinplace(f, 3)}(f, lb, ub, alg; kwargs...)
+
+(s::IntegralSolver{iip})(p) where {iip} =
+    solve(IntegralProblem{iip}(s.f, s.lb, s.ub, p; s.kwargs...), s.alg,
+        abstol = s.abstol, reltol = s.reltol, maxiters = s.maxiters).u
+
+# imitate general interface
+IntegralSolver(f, bz::SymmetricBZ, alg; kwargs...) =
+    IntegralSolver(f, (bz,), (), alg; kwargs...)
+
 # parallelization
 
 """

@@ -89,4 +89,10 @@ end
         # set larger tolerance
     end
 
+    @testset "IntegralSolver" begin
+        sol = IntegralSolver(f, fbz, IAI())
+        @test sol(p) == solve(ip_fbz, IAI()).u
+    end
+
+
 end
