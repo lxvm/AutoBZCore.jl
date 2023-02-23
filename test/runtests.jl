@@ -22,9 +22,8 @@ end
         A = I(dims)
         B = AutoBZCore.canonical_reciprocal_basis(A)
         lims = AutoBZCore.CubicLimits(zeros(3), ones(3))
-        @test SymmetricBZ(A, B, lims) isa FullBZ
         fbz = FullBZ(A, B, lims)
-        @test fbz isa FullBZ
+        @test fbz == SymmetricBZ(A, B, lims, nothing)
         @test fbz.A ≈ A
         @test fbz.B ≈ B
         @test nsyms(fbz) == 1

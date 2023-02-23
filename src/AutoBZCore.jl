@@ -49,6 +49,7 @@ import IteratedIntegration: iterated_integration, iterated_integrand, iterated_p
 
 
 export SymmetricBZ, FullBZ, nsyms, symmetrize
+export AbstractSymRep, SymRep, UnknownRep, TrivialRep, FaithfulRep
 include("brillouin_zone.jl")
 
 export FourierIntegrand

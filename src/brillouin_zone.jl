@@ -10,7 +10,7 @@ canonical_reciprocal_basis(A::AbstractMatrix) = A' \ (2pi*one(A))
 
 # main data type
 """
-    SymmetricBZ(A, B, lims::AbstractLimits, syms=nothing; atol=sqrt(eps()))
+    SymmetricBZ(A, B, lims::AbstractLimits, syms; atol=sqrt(eps()))
 
 Data type representing a Brillouin zone reduced by a set of symmetries, `syms`
 with iterated integration limits `lims`, both of which are assumed to be in the
@@ -33,7 +33,7 @@ struct SymmetricBZ{S,L,d,T,d2}
 end
 
 # eventually limits could be computed from B and symmetries
-function SymmetricBZ(A::AbstractMatrix{T}, B::AbstractMatrix{S}, lims, syms=nothing; atol=nothing) where {T,S}
+function SymmetricBZ(A::AbstractMatrix{T}, B::AbstractMatrix{S}, lims, syms; atol=nothing) where {T,S}
     F = float(promote_type(T, S))
     (d = checksquare(A)) == checksquare(B) ||
         throw(DimensionMismatch("Bravais lattices $A and $B must have the same shape"))
@@ -46,6 +46,19 @@ nsyms(bz::SymmetricBZ) = length(bz.syms)
 Base.ndims(::SymmetricBZ{S,L,d}) where {S,L,d} = d
 Base.eltype(::Type{<:SymmetricBZ{S,L,d,T}}) where {S,L,d,T} = T
 
+# Define traits for symmetrization based on symmetry representations
+
+abstract type AbstractSymRep end
+
+struct UnknownRep <: AbstractSymRep end
+struct TrivialRep <: AbstractSymRep end
+struct FaithfulRep <: AbstractSymRep end
+# FaithfulRep may not be specific enough, since there could be multiple faithful
+# representations of a group. Here we just refer to the one given by syms itself
+
+SymRep(::Any) = UnknownRep()
+const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
+
 """
     symmetrize(f, ::SymmetricBZ, xs...)
     symmetrize(f, ::SymmetricBZ, x::Number)
@@ -54,10 +67,26 @@ Tranform `x` by the symmetries of the parametrization used to reduce the
 domain, thus mapping the value of `x` on the parametrization to the full domain.
 """
 symmetrize(f, bz::SymmetricBZ, xs...) = map(x -> symmetrize(f, bz, x), xs)
-symmetrize(_, bz::SymmetricBZ, x::Number) = nsyms(bz)*x
-function symmetrize(f, ::SymmetricBZ, x)
-    @warn "Symmetric BZ detected and returning integral computed from limits. Define a method for symmetrize() for your integrand type that maps to the full BZ value"
-    @show f
+symmetrize(f, bz::SymmetricBZ, x) = symmetrize_(SymRep(f), bz, x)
+symmetrize(f, bz::SymmetricBZ, x::TrivialRepType) =
+    symmetrize_(TrivialRep(), bz, x)
+symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
+function symmetrize_(::FaithfulRep, bz::SymmetricBZ, x::AbstractVector)
+    r = zero(x)
+    for S in bz.syms
+        r += S * x
+    end
+    r
+end
+function symmetrize_(::FaithfulRep, bz::SymmetricBZ, x::AbstractMatrix)
+    r = zero(x)
+    for S in bz.syms
+        r += S * x * S'
+    end
+    r
+end
+function symmetrize_(::UnknownRep, ::SymmetricBZ, x)
+    @warn "Symmetric BZ detected but the integrand's symmetry representation is unknown. Define a trait SymRep(f::$(nameof(typeof)))"
     x
 end
 
@@ -67,10 +96,10 @@ end
 
 A type alias for `SymmetricBZ{Nothing}` when there are no symmetries applied to BZ
 """
-const FullBZ = SymmetricBZ{Nothing}
 FullBZ(A, B=canonical_reciprocal_basis(A), lims=lattice_bz_limits(B); kwargs...) =
-    SymmetricBZ(A, B, lims; kwargs...)
+    SymmetricBZ(A, B, lims, nothing; kwargs...)
 
-nsyms(::FullBZ) = 1
-symmetrize(_, ::FullBZ, x) = x
-symmetrize(_, ::FullBZ, x::Number) = x
+const FullBZType = SymmetricBZ{Nothing}
+nsyms(::FullBZType) = 1
+symmetrize(_, ::FullBZType, x) = x
+symmetrize(_, ::FullBZType, x::TrivialRepType) = x
