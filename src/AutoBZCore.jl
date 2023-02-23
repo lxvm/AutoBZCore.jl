@@ -44,7 +44,7 @@ using Reexport
 @reexport using FourierSeriesEvaluators
 
 import Integrals: IntegralProblem, __solvebp_call
-import AutoSymPTR: symptr, autosymptr, symptr_rule, symptr_rule!, ptr, autoptr, ptr_rule, ptr_rule!
+import AutoSymPTR: autosymptr, symptr, symptr_rule!, symptr_rule, ptr, ptr_rule!, ptrindex
 import IteratedIntegration: iterated_integration, iterated_integrand, iterated_pre_eval
 
 

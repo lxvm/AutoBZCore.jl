@@ -41,14 +41,25 @@ end
 # PTR customizations
 
 # no symmetries
-struct FourierPTRRule{X,S<:AbstractFourierSeries}
+struct FourierPTRRule{N,X,S<:AbstractFourierSeries{N}}
     x::Vector{X}
     s::S
+    n::Array{Int,0}
 end
+Base.size(r::FourierPTRRule{N}) where N = ntuple(_->r.n[], Val(N))
 Base.length(r::FourierPTRRule) = length(r.x)
 function Base.copy!(r::T, s::T) where {T<:FourierPTRRule}
     copy!(r.x, s.x)
     r
+end
+Base.getindex(p::FourierPTRRule{N}, i::Int) where {N} = p.x[i]
+Base.getindex(p::FourierPTRRule{N}, i::CartesianIndex{N}) where {N} =
+    p.x[ptrindex(p.n[], i)]
+
+Base.isdone(p::FourierPTRRule, state) = !(1 <= state <= length(p))
+function Base.iterate(p::FourierPTRRule, state=1)
+    Base.isdone(p, state) && return nothing
+    (p[state], state+1)
 end
 
 struct FourierPTR{T<:AbstractFourierSeries}
@@ -57,16 +68,14 @@ end
 function (f::FourierPTR)(::Type{T}, ::Val{N}) where {T,N}
     S = Base.promote_op(f.s, NTuple{N,T})
     x = Vector{S}(undef, 0)
-    FourierPTRRule(x, f.s)
+    FourierPTRRule(x, f.s, Array{Int,0}(undef))
 end
-
-(f::FourierPTR)(::Type{T}, npt, ::Val{N}) where {T,N} =
-    ptr_rule!(f(T, Val(N)), npt, Val(N))
 
 @generated function ptr_rule!(rule::FourierPTRRule, npt, ::Val{N}) where {N}
     f_N = Symbol(:f_, N)
     quote
         $f_N = rule.s
+        rule.n[] = npt
         resize!(rule.x, npt^N)
         box = period($f_N)
         n = 0
@@ -80,7 +89,7 @@ end
 
 function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
-    rule_ = (rule===nothing) ? FourierPTR(f.s)(T, npt, Val(N)) : rule
+    rule_ = (rule===nothing) ? ptr_rule!(FourierPTR(f.s)(T, Val(N)), npt, Val(N)) : rule
     n = length(rule_)
 
     acc = f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
@@ -124,8 +133,6 @@ function (f::FourierSymPTR)(::Type{T}, ::Val{N}) where {T,N}
     w = Vector{Int}(undef, 0); x = Vector{S}(undef, 0)
     FourierSymPTRRule(w, x, f.s)
 end
-(f::FourierSymPTR)(::Type{T}, npt, ::Val{N}, syms) where {T,N} =
-    symptr_rule!(f(T, Val(N)), npt, Val(N), syms)
 
 @generated function symptr_rule!(rule::FourierSymPTRRule, npt, ::Val{N}, syms) where {N}
     f_N = Symbol(:f_, N)
@@ -151,7 +158,7 @@ end
 # with symmetries
 function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
-    rule_ = (rule===nothing) ? FourierSymPTR(f.s)(T, npt, Val(N), syms) : rule
+    rule_ = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
     n = length(rule_)
 
     acc = rule_.w[n]*f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
