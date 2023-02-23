@@ -15,7 +15,9 @@ struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:Tuple}
     p::P
 end
 FourierIntegrand(f, s, p...) = FourierIntegrand(f, s, p)
-(f::FourierIntegrand)(x, p) = f.f(f.s(x), f.p..., p...) # provide Integrals.jl interface
+(f::FourierIntegrand)(x, p) = f.f(f.s(x), f.p..., p) # provide Integrals.jl interface
+(f::FourierIntegrand)(x, p::Tuple) = f.f(f.s(x), f.p..., p...) # provide Integrals.jl interface
+(f::FourierIntegrand)(x, ::NullParameters) = f.f(f.s(x), f.p...) # provide Integrals.jl interface
 
 # intercept integrand construction when solving integral problem
 # because the IAI routines dispatch on the integrand type
@@ -96,10 +98,11 @@ end
 function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
     rule_ = (rule===nothing) ? ptr_rule!(FourierPTR(f.s)(T, Val(N)), npt, Val(N)) : rule
-    n = length(rule_)
+    n = length(rule_); dvol = abs(det(B))/npt^N
+    nthreads == 1 && return sum(x -> f.f(x, f.p...), rule_)*dvol
 
     acc = f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
-    n == 1 && return acc*det(B)/npt^N
+    n == 1 && return acc*dvol
     runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
     d, r = divrem(n-1, runthreads)
     partial_sums = fill!(Vector{typeof(acc)}(undef, runthreads), zero(acc)) # allocations :(
@@ -108,13 +111,13 @@ function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=n
         jmax = (i <= r ? d+1 : d)
         offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
         @inbounds for j in 1:jmax
-            partial_sums[i] += f.f(rule_.x[offset + j], f.p...)
+            partial_sums[i] += f.f(rule_[offset + j], f.p...)
         end
     end
     for part in partial_sums
         acc += part
     end
-    acc*det(B)/npt^N
+    acc*dvol
 end
 
 
@@ -165,10 +168,11 @@ end
 function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
     rule_ = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
-    n = length(rule_)
+    n = length(rule_); dvol = abs(det(B))/length(syms)/npt^N
+    nthreads == 1 && return mapreduce((w, x) -> w*f.f(x, f.p...), +, rule_.w, rule_.x)*dvol
 
     acc = rule_.w[n]*f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
-    n == 1 && return acc*det(B)/length(syms)/npt^N
+    n == 1 && return acc*dvol
     runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
     d, r = divrem(n-1, runthreads)
     partial_sums = fill!(Vector{typeof(acc)}(undef, runthreads), zero(acc)) # allocations :(
@@ -183,7 +187,7 @@ function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 
     for part in partial_sums
         acc += part
     end
-    acc*det(B)/length(syms)/npt^N
+    acc*dvol
 end
 
 # Defining defaults without symmetry

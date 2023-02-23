@@ -57,7 +57,7 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
     f = construct_integrand(prob.f, isinplace(prob), prob.p)
 
     if alg isa IAI
-        j = det(bz.B)  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
+        j = abs(det(bz.B))  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
         atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
         val, err = iterated_integration(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
                                         norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
@@ -92,8 +92,9 @@ for alg in (:HCubatureJL, :VEGAS)
     @eval function __solvebp_call(prob::IntegralProblem, alg::$alg,
         sensealg, (bz,)::Tuple{SymmetricBZ}, ::Tuple{}, p; kwargs...)
         (; a, b) = lattice_bz_limits(bz.B)
-        # TODO: multiply by j = det(bz.B)
-        return __solvebp_call(prob, alg, sensealg, a, b, p; kwargs...)
+        j = abs(det(bz.B))
+        sol = __solvebp_call(prob, alg, sensealg, a, b, p; kwargs...)
+        SciMLBase.build_solution(sol.prob, sol.alg, sol.u*j, sol.resid*j, retcode = sol.retcode, chi = sol.chi)
     end
 
 end
