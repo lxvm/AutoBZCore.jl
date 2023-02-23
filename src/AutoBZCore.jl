@@ -43,7 +43,7 @@ using Reexport
 @reexport using Integrals
 @reexport using FourierSeriesEvaluators
 
-import Integrals: IntegralProblem, __solvebp_call
+import Integrals: IntegralProblem, __solvebp_call, SciMLBase.NullParameters
 import AutoSymPTR: autosymptr, symptr, symptr_rule!, symptr_rule, ptr, ptr_rule!, ptrindex
 import IteratedIntegration: iterated_integration, iterated_integrand, iterated_pre_eval
 

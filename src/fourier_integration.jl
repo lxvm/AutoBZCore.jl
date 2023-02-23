@@ -1,13 +1,13 @@
 """
-    FourierIntegrand(f, s::AbstractFourierSeries)
+    FourierIntegrand(f, s::AbstractFourierSeries, p...)
 
 A type generically representing an integrand `f` whose entire dependence on the
 variables of integration is in a Fourier series `s`, and which may also accept
-some input parameters `ps`. The caller must know that their function, `f`, will
-be evaluated at many points, `x`, in the following way: `f(s(x), ps...)`.
+some input parameters `p`. The caller must know that their function, `f`, will
+be evaluated at many points, `x`, in the following way: `f(s(x), p...)`.
 Therefore the caller is expected to know the type of `s(x)` (hint: `eltype(s)`)
-and the layout of the parameters in the tuple `ps`. Additionally, `f` is assumed
-to be type-stable, and is compatible with the equispace integration routines.
+and the layout of the parameters in the tuple `p` (hint: it should correspond to
+the arguments of the function). This type is optimized for the IAI and PTR routines.
 """
 struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:Tuple}
     f::F
@@ -15,9 +15,13 @@ struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:Tuple}
     p::P
 end
 FourierIntegrand(f, s, p...) = FourierIntegrand(f, s, p)
-(f::FourierIntegrand)(x, p) = f.f(f.s(x), f.p..., p...)
+(f::FourierIntegrand)(x, p) = f.f(f.s(x), f.p..., p...) # provide Integrals.jl interface
+
+# intercept integrand construction when solving integral problem
+# because the IAI routines dispatch on the integrand type
 construct_integrand(f::FourierIntegrand, iip, p) =
     FourierIntegrand(f.f, f.s, (f.p..., p...))
+construct_integrand(f::FourierIntegrand, iip, ::NullParameters) = f
 
 # IAI customizations that copy behavior of AbstractIteratedIntegrand
 
