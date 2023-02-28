@@ -62,29 +62,30 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         val, err = iterated_integration(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
                                         norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
         val, err = symmetrize(f, bz, j*val, j*err)
+        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
     elseif alg isa PTR
         val = symptr(f, bz.B, bz.syms; npt = alg.npt, rule = alg.rule)
         val = symmetrize(f, bz, val)
         err = nothing
+        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
     elseif alg isa AutoPTR
         val, err = autosymptr(f, bz.B, bz.syms;
                         atol = abstol_, rtol = reltol_, maxevals = maxiters, norm=alg.norm, buffer=alg.buffer)
         val, err = symmetrize(f, bz, val, err)
+        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
     elseif alg isa PTR_IAI
         sol = __solvebp_call(prob, alg.ptr, sensealg, (bz,), (), p;
                                 reltol = reltol_, abstol = abstol_, maxiters = maxiters)
         atol = max(abstol_, reltol_*alg.iai.norm(sol))
-        return __solvebp_call(prob, alg.iai, sensealg, (bz,), (), p;
+        __solvebp_call(prob, alg.iai, sensealg, (bz,), (), p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa AutoPTR_IAI
         sol = __solvebp_call(prob, alg.ptr, sensealg, (bz,), (), p;
                                 reltol = alg.reltol, abstol = abstol_, maxiters = maxiters)
         atol = max(abstol_, reltol_*alg.iai.norm(sol))
-        return __solvebp_call(prob, alg.iai, sensealg, (bz,), (), p;
+        __solvebp_call(prob, alg.iai, sensealg, (bz,), (), p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
     end
-
-    SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
 end
 
 for alg in (:HCubatureJL, :VEGAS)

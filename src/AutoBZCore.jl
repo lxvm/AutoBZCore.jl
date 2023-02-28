@@ -48,8 +48,8 @@ import AutoSymPTR: autosymptr, symptr, symptr_rule!, symptr_rule, ptr, ptr_rule!
 import IteratedIntegration: iterated_integration, iterated_integrand, iterated_pre_eval
 
 
-export SymmetricBZ, FullBZ, nsyms, symmetrize
-export AbstractSymRep, SymRep, UnknownRep, TrivialRep, FaithfulRep
+export SymmetricBZ, FullBZ, nsyms
+export AbstractSymRep, SymRep, UnknownRep, TrivialRep, FaithfulRep, LatticeRep
 include("brillouin_zone.jl")
 
 export FourierIntegrand
@@ -58,7 +58,7 @@ include("fourier_integration.jl")
 export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
 include("algorithms.jl")
 
-export IntegralSolver, parallel_solve
-include("jobs.jl")
+export IntegralSolver, batchsolve
+include("solver.jl")
 
 end

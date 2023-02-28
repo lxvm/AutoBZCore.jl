@@ -18,9 +18,13 @@ end
 IntegralSolver(f, lb, ub, alg; kwargs...) =
     IntegralSolver{isinplace(f, 3)}(f, lb, ub, alg; kwargs...)
 
-(s::IntegralSolver{iip})(p) where {iip} =
-    solve(IntegralProblem{iip}(s.f, s.lb, s.ub, p; s.kwargs...), s.alg,
-        abstol = s.abstol, reltol = s.reltol, maxiters = s.maxiters).u
+construct_problem(s::IntegralSolver{iip}, p) where iip =
+    IntegralProblem{iip}(s.f, s.lb, s.ub, p; s.kwargs...)
+
+do_solve(s::IntegralSolver, p) = solve(construct_problem(s, p), s.alg,
+    abstol = s.abstol, reltol = s.reltol, maxiters = s.maxiters)
+
+(s::IntegralSolver)(p) = do_solve(s, p).u
 
 # imitate general interface
 IntegralSolver(f, bz::SymmetricBZ, alg; kwargs...) =
@@ -44,19 +48,16 @@ function batch_smooth_param(xs, nthreads)
 end
 
 """
-    parallel_integration(f, ps; nthreads=Threads.nthreads())
+    batchsolve(f, ps; nthreads=Threads.nthreads())
 
-Evaluate the `AbstractIntegrator` `f` at each of the parameters `ps` in
-parallel. Returns a named tuple `(I, E, t, p)` containing the integrals `I`, the
-extra data from the integration routine `E`, timings `t`, and the original
-parameters `p`. The parameter layout in `ps` should such that `f(ps[i]...)` runs
+Evaluate the [`IntegralSolver`](@ref) `f` at each of the parameters `ps` in
+parallel. Returns a named tuple `(I, t)` containing the integrals `I`, and
+timings `t`.
 """
-function parallel_integration(f, ps; nthreads=Threads.nthreads())
-    T = Base.promote_op(first∘f, eltype(ps))
+function batchsolve(f::IntegralSolver, ps; nthreads=Threads.nthreads(), callback=(w,x,y,z)->nothing)
+    T = Base.promote_op(f, eltype(ps))
     ints = Vector{T}(undef, length(ps))
-    # extra = Vector{???}(undef, length(ps))
     ts = Vector{Float64}(undef, length(ps))
-    @info "Beginning parameter sweep using $(f.routine)"
     @info "using $nthreads threads for parameter parallelization"
     batches = batch_smooth_param(ps, nthreads)
     t = time()
@@ -65,12 +66,13 @@ function parallel_integration(f, ps; nthreads=Threads.nthreads())
         for (i, p) in batch
             @info @sprintf "starting parameter %i" i
             t_ = time()
-            ints[i], = f_(p...)
-            # TODO: ints[i], extra[i] = quad_return(routine(f), f_(p...))
+            sol = do_solve(f_, p)
+            ints[i] = sol.u
             ts[i] = time() - t_
             @info @sprintf "finished parameter %i in %e (s) wall clock time" i ts[i]
+            callback(f_, p, sol, ts[i])
         end
     end
     @info @sprintf "Finished parameter sweep in %e (s) CPU time and %e (s) wall clock time" sum(ts) (time()-t)
-    (I=ints, t=ts, p=ps)
+    (I=ints, t=ts)
 end

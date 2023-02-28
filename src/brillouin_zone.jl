@@ -49,12 +49,11 @@ Base.eltype(::Type{<:SymmetricBZ{S,L,d,T}}) where {S,L,d,T} = T
 # Define traits for symmetrization based on symmetry representations
 
 abstract type AbstractSymRep end
+abstract type FaithfulRep <: AbstractSymRep end
 
 struct UnknownRep <: AbstractSymRep end
 struct TrivialRep <: AbstractSymRep end
-struct FaithfulRep <: AbstractSymRep end
-# FaithfulRep may not be specific enough, since there could be multiple faithful
-# representations of a group. Here we just refer to the one given by syms itself
+struct LatticeRep <: FaithfulRep end
 
 SymRep(::Any) = UnknownRep()
 const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
@@ -71,14 +70,14 @@ symmetrize(f, bz::SymmetricBZ, x) = symmetrize_(SymRep(f), bz, x)
 symmetrize(f, bz::SymmetricBZ, x::TrivialRepType) =
     symmetrize_(TrivialRep(), bz, x)
 symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
-function symmetrize_(::FaithfulRep, bz::SymmetricBZ, x::AbstractVector)
+function symmetrize_(::LatticeRep, bz::SymmetricBZ, x::AbstractVector)
     r = zero(x)
     for S in bz.syms
         r += S * x
     end
     r
 end
-function symmetrize_(::FaithfulRep, bz::SymmetricBZ, x::AbstractMatrix)
+function symmetrize_(::LatticeRep, bz::SymmetricBZ, x::AbstractMatrix)
     r = zero(x)
     for S in bz.syms
         r += S * x * S'
@@ -86,7 +85,7 @@ function symmetrize_(::FaithfulRep, bz::SymmetricBZ, x::AbstractMatrix)
     r
 end
 function symmetrize_(::UnknownRep, ::SymmetricBZ, x)
-    @warn "Symmetric BZ detected but the integrand's symmetry representation is unknown. Define a trait SymRep(f::$(nameof(typeof)))"
+    @warn "Symmetric BZ detected but the integrand's symmetry representation is unknown. Define a trait for your integrand by extending SymRep"
     x
 end
 
