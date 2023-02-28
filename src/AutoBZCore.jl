@@ -33,15 +33,14 @@ For example, computing the local Green's function can be done as follows:
 """
 module AutoBZCore
 
-using Printf: @sprintf
 using LinearAlgebra: I, norm, det, checksquare
 
 using StaticArrays: SMatrix
-using IteratedIntegration
-using AutoSymPTR
 using Reexport
 @reexport using Integrals
 @reexport using FourierSeriesEvaluators
+@reexport using AutoSymPTR
+@reexport using IteratedIntegration
 
 import Integrals: IntegralProblem, __solvebp_call, SciMLBase.NullParameters
 import AutoSymPTR: autosymptr, symptr, symptr_rule!, symptr_rule, ptr, ptr_rule!, ptrindex

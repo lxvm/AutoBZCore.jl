@@ -33,13 +33,13 @@ IntegralSolver(f, bz::SymmetricBZ, alg; kwargs...) =
 # parallelization
 
 """
-    batch_smooth_param(xs, nthreads)
+    batchparam(xs, nthreads)
 
 If the cost of a calculation smoothly varies with the parameters `xs`, then
 batch `xs` into `nthreads` groups where the `i`th element of group `j` is
 `xs[j+(i-1)*nthreads]`
 """
-function batch_smooth_param(xs, nthreads)
+function batchparam(xs, nthreads)
     batches = [Tuple{Int,eltype(xs)}[] for _ in 1:min(nthreads, length(xs))]
     for (i, x) in enumerate(xs)
         push!(batches[mod(i-1, nthreads)+1], (i, x))
@@ -47,32 +47,31 @@ function batch_smooth_param(xs, nthreads)
     batches
 end
 
+function batcheval(i, p, f, callback)
+    t = time()
+    sol = do_solve(f, p)
+    t = time() - t
+    callback(f, i, p, sol, t)
+    sol.u
+end
+
+
+function batchsolve!(out::Vector, f::IntegralSolver, ps, nthreads, callback)
+    Threads.@threads for batch in batchparam(ps, nthreads)
+        f_ = deepcopy(f) # to avoid data races for in place integrators
+        for (i, p) in batch
+            out[i] = batcheval(i, p, f_, callback)
+        end
+    end
+    out
+end
+
 """
     batchsolve(f, ps; nthreads=Threads.nthreads())
 
 Evaluate the [`IntegralSolver`](@ref) `f` at each of the parameters `ps` in
-parallel. Returns a named tuple `(I, t)` containing the integrals `I`, and
-timings `t`.
+parallel. Returns a vector containing the evaluated integrals `I`.
 """
-function batchsolve(f::IntegralSolver, ps; nthreads=Threads.nthreads(), callback=(w,x,y,z)->nothing)
-    T = Base.promote_op(f, eltype(ps))
-    ints = Vector{T}(undef, length(ps))
-    ts = Vector{Float64}(undef, length(ps))
-    @info "using $nthreads threads for parameter parallelization"
-    batches = batch_smooth_param(ps, nthreads)
-    t = time()
-    Threads.@threads for batch in batches
-        f_ = deepcopy(f) # to avoid data races for in place integrators
-        for (i, p) in batch
-            @info @sprintf "starting parameter %i" i
-            t_ = time()
-            sol = do_solve(f_, p)
-            ints[i] = sol.u
-            ts[i] = time() - t_
-            @info @sprintf "finished parameter %i in %e (s) wall clock time" i ts[i]
-            callback(f_, p, sol, ts[i])
-        end
-    end
-    @info @sprintf "Finished parameter sweep in %e (s) CPU time and %e (s) wall clock time" sum(ts) (time()-t)
-    (I=ints, t=ts)
+function batchsolve(f, ps; T=Base.promote_op(f, eltype(ps)), nthreads=Threads.nthreads(), callback=(w,v,x,y,z)->nothing)
+    batchsolve!(Vector{T}(undef, length(ps)), f, ps, nthreads, callback)
 end
