@@ -67,11 +67,11 @@ function batchsolve!(out::Vector, f::IntegralSolver, ps, nthreads, callback)
 end
 
 """
-    batchsolve(f, ps; nthreads=Threads.nthreads())
+    batchsolve(f, ps, [T=Base.promote_op(f, eltype(ps))]; nthreads=Threads.nthreads())
 
 Evaluate the [`IntegralSolver`](@ref) `f` at each of the parameters `ps` in
-parallel. Returns a vector containing the evaluated integrals `I`.
+parallel. Returns a vector containing the evaluated integrals `I`. This is
+a form of multithreaded broadcasting.
 """
-function batchsolve(f, ps; T=Base.promote_op(f, eltype(ps)), nthreads=Threads.nthreads(), callback=(w,v,x,y,z)->nothing)
+batchsolve(f, ps, T=Base.promote_op(f, eltype(ps)); nthreads=Threads.nthreads(), callback=(x...)->nothing) =
     batchsolve!(Vector{T}(undef, length(ps)), f, ps, nthreads, callback)
-end
