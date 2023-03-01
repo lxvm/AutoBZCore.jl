@@ -15,9 +15,11 @@ struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:Tuple}
     p::P
 end
 FourierIntegrand(f, s, p...) = FourierIntegrand(f, s, p)
-(f::FourierIntegrand)(x, p) = f.f(f.s(x), f.p..., p) # provide Integrals.jl interface
-(f::FourierIntegrand)(x, p::Tuple) = f.f(f.s(x), f.p..., p...) # provide Integrals.jl interface
-(f::FourierIntegrand)(x, ::NullParameters) = f.f(f.s(x), f.p...) # provide Integrals.jl interface
+
+# provide Integrals.jl interface while still using functor interface
+(f::FourierIntegrand)(x, p) = FourierIntegrand(f.f, f.s, (f.p..., p))(x)
+(f::FourierIntegrand)(x, p::Tuple) = FourierIntegrand(f.f, f.s, (f.p..., p...))(x)
+(f::FourierIntegrand)(x, ::NullParameters) = f(x)
 
 # intercept integrand construction when solving integral problem
 # because the IAI routines dispatch on the integrand type
@@ -202,3 +204,14 @@ autosymptr(f::FourierIntegrand, B::AbstractMatrix, ::Nothing; kwargs...) =
     autosymptr(f, B, nothing, FourierPTR(f.s); kwargs...)
 autosymptr(f::FourierIntegrand, B::AbstractMatrix, syms; kwargs...) =
     autosymptr(f, B, syms, FourierSymPTR(f.s); kwargs...)
+
+# helper routine to allocate rules
+alloc_rule(f::AbstractFourierSeries{N}, ::Type{T}, ::Nothing, npt::Int) where {N,T} =
+    ptr_rule!(FourierPTR(f)(T, Val(N)), npt, Val(N))
+alloc_rule(f::AbstractFourierSeries{N}, ::Type{T}, syms, npt::Int) where {N,T}=
+    symptr_rule!(FourierSymPTR(f)(T, Val(N)), npt, Val(N), syms)
+
+alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, ::Nothing) where {N,T} =
+    alloc_autobuffer(T, Val(N), FourierPTR(f))
+alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, syms) where {N,T} =
+    alloc_autobuffer(T, Val(N), FourierSymPTR(f))
