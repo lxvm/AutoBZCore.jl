@@ -1,34 +1,45 @@
-struct IntegralSolver{iip,F,L,U,A,K}
+struct IntegralSolver{iip,F,L,U,A,P,K}
     f::F
     lb::L
     ub::U
     alg::A
+    p::P
     abstol::Float64
     reltol::Float64
     maxiters::Int
     kwargs::K
-    function IntegralSolver{iip}(f, lb, ub, alg;
+    function IntegralSolver{iip}(f, lb, ub, alg, p=NullParameters();
                                 abstol=0.0, reltol=iszero(abstol) ? sqrt(eps()) : zero(abstol),
                                 maxiters=typemax(Int), kwargs...) where iip
-        new{iip, typeof(f), typeof(lb), typeof(ub), typeof(alg),
-            typeof(kwargs)}(f, lb, ub, alg, abstol, reltol, maxiters, kwargs)
+        new{iip, typeof(f), typeof(lb), typeof(ub), typeof(alg), typeof(p),
+            typeof(kwargs)}(f, lb, ub, alg, p, abstol, reltol, maxiters, kwargs)
     end
 end
 
-IntegralSolver(f, lb, ub, alg; kwargs...) =
-    IntegralSolver{isinplace(f, 3)}(f, lb, ub, alg; kwargs...)
+IntegralSolver(f, args...; kwargs...) =
+    IntegralSolver{isinplace(f, 3)}(f, args...; kwargs...)
+
+merge_parameters(::NullParameters, ::NullParameters) = NullParameters()
+merge_parameters(::NullParameters, p) = p
+merge_parameters(p, ::NullParameters) = p
+merge_parameters(::NullParameters, p::Tuple) = p
+merge_parameters(p::Tuple, ::NullParameters) = p
+merge_parameters(p1::Tuple, p2::Tuple) = (p1..., p2...)
+merge_parameters(ps::Tuple, p) = (ps..., p)
+merge_parameters(p, ps::Tuple) = (p, ps...)
+merge_parameters(p1, p2) = (p1, p2)
 
 construct_problem(s::IntegralSolver{iip}, p) where iip =
-    IntegralProblem{iip}(s.f, s.lb, s.ub, p; s.kwargs...)
+    IntegralProblem{iip}(s.f, s.lb, s.ub, merge_parameters(s.p, p); s.kwargs...)
 
 do_solve(s::IntegralSolver, p) = solve(construct_problem(s, p), s.alg,
     abstol = s.abstol, reltol = s.reltol, maxiters = s.maxiters)
 
-(s::IntegralSolver)(p) = do_solve(s, p).u
+(s::IntegralSolver)(p=NullParameters()) = do_solve(s, p).u
 
 # imitate general interface
-IntegralSolver(f, bz::SymmetricBZ, alg; kwargs...) =
-    IntegralSolver(f, (bz,), (), alg; kwargs...)
+IntegralSolver(f, bz::SymmetricBZ, args...; kwargs...) =
+    IntegralSolver(f, (bz,), (), args...; kwargs...)
 
 # parallelization
 
@@ -58,7 +69,7 @@ end
 
 function batchsolve!(out::Vector, f::IntegralSolver, ps, nthreads, callback)
     Threads.@threads for batch in batchparam(ps, nthreads)
-        f_ = deepcopy(f) # to avoid data races for in place integrators
+        f_ = Threads.threadid() == 1 ? f : deepcopy(f) # avoid data races for in place integrators
         for (i, p) in batch
             out[i] = batcheval(i, p, f_, callback)
         end
