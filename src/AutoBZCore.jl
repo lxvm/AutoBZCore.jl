@@ -54,8 +54,11 @@ include("brillouin_zone.jl")
 export FourierIntegrand
 include("fourier_integration.jl")
 
-export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
+export AbstractAutoBZAlgorithm, IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
 include("algorithms.jl")
+
+export Integrand
+include("integrand.jl")
 
 export IntegralSolver, batchsolve
 include("solver.jl")

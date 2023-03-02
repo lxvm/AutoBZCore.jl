@@ -33,7 +33,10 @@ struct AutoPTR_IAI{P,I} <: AbstractAutoBZAlgorithm
 end
 AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI()) = AutoPTR_IAI(reltol, ptr, iai)
 
-TAI(; kwargs...) = HCubatureJL(; kwargs...)
+struct TAI{T<:HCubatureJL} <: AbstractAutoBZAlgorithm
+    rule::T
+end
+TAI(; rule=HCubatureJL()) = TAI(rule)
 
 # Imitate original interface
 IntegralProblem(f, bz::SymmetricBZ, args...; kwargs...) =
@@ -85,17 +88,12 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         atol = max(abstol_, reltol_*alg.iai.norm(sol))
         __solvebp_call(prob, alg.iai, sensealg, (bz,), (), p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
-    end
-end
-
-for alg in (:HCubatureJL, :VEGAS)
-
-    @eval function __solvebp_call(prob::IntegralProblem, alg::$alg,
-        sensealg, (bz,)::Tuple{SymmetricBZ}, ::Tuple{}, p; kwargs...)
+    elseif alg isa TAI
         (; a, b) = lattice_bz_limits(bz.B)
         j = abs(det(bz.B))
-        sol = __solvebp_call(prob, alg, sensealg, a, b, p; kwargs...)
+        sol = __solvebp_call(prob, alg.rule, sensealg, a, b, p;
+                                abstol=abstol, reltol=reltol, maxiters=maxiters)
         SciMLBase.build_solution(sol.prob, sol.alg, sol.u*j, sol.resid*j, retcode = sol.retcode, chi = sol.chi)
     end
-
 end
+
