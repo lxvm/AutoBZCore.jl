@@ -89,7 +89,7 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         __solvebp_call(prob, alg.iai, sensealg, (bz,), (), p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa TAI
-        (; a, b) = lattice_bz_limits(bz.B)
+        l = lattice_bz_limits(bz.B); a = l.a; b = l.b
         j = abs(det(bz.B))
         sol = __solvebp_call(prob, alg.rule, sensealg, a, b, p;
                                 abstol=abstol_, reltol=reltol_, maxiters=maxiters)
