@@ -1,0 +1,8 @@
+[deps]
+AutoBZCore = "66bd3e16-1600-45cf-8f55-0b550710682b"
+AutoSymPTR = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
+FourierSeriesEvaluators = "2a892dea-6eef-4bb5-9d1c-de966c9f6db5"
+HChebInterp = "78faba9b-a54b-441f-8118-62407cbe4e59"
+IteratedIntegration = "3ecdc4d6-ee34-4049-885a-a4e3631db98b"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
