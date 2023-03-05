@@ -62,7 +62,7 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
     if alg isa IAI
         j = abs(det(bz.B))  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
         atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
-        val, err = iterated_integration(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
+        val, err = nested_quadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
                                         norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
         val, err = symmetrize(f, bz, j*val, j*err)
         SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
@@ -92,7 +92,7 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         (; a, b) = lattice_bz_limits(bz.B)
         j = abs(det(bz.B))
         sol = __solvebp_call(prob, alg.rule, sensealg, a, b, p;
-                                abstol=abstol, reltol=reltol, maxiters=maxiters)
+                                abstol=abstol_, reltol=reltol_, maxiters=maxiters)
         SciMLBase.build_solution(sol.prob, sol.alg, sol.u*j, sol.resid*j, retcode = sol.retcode, chi = sol.chi)
     end
 end
