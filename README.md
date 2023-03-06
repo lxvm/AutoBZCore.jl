@@ -21,6 +21,18 @@ the structure of the algorithms.
 Thus, it provides the core, user-extensible functionality of
 [AutoBZ.jl](https://lxvm.github.io/AutoBZ.jl/dev/).
 
+
+## Usage
+
+For an example of defining a BZ integral for density of states, see the
+[aps_example](https://github.com/lxvm/AutoBZCore.jl/tree/main/aps_example/). To
+do additional integrals that are not over a BZ, directly use the
+`IntegralSolver` with a provided function or with an `Integrand`, which is a
+type similar to `FourierIntegrand` that is exported for convenience.
+Also note that `IntegralSolver`s can be composed in order to do multiple nested
+integrals.
+
+
 ## Research
 
 The paper by [Kaye et
