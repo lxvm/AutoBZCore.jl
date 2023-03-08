@@ -36,9 +36,9 @@ version = "0.1.0"
 
 [[deps.AutoSymPTR]]
 deps = ["LinearAlgebra", "StaticArrays"]
-git-tree-sha1 = "e26827127e7d4931e1378887c1d6f74c760567d2"
+git-tree-sha1 = "fe80a817a4eca5b442bb34a0f5636c4d29727be2"
 uuid = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
-version = "0.1.0"
+version = "0.1.1"
 
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
@@ -321,9 +321,9 @@ version = "1.4.0"
 
 [[deps.IteratedIntegration]]
 deps = ["DataStructures", "IntervalSets", "LinearAlgebra", "Polyhedra", "QuadGK", "StaticArrays"]
-git-tree-sha1 = "6e1d3980cea4fb64e238d46be871a065c8436640"
+git-tree-sha1 = "879f31714c28fdeb319afcfc170004dc246576a4"
 uuid = "3ecdc4d6-ee34-4049-885a-a4e3631db98b"
-version = "0.1.0"
+version = "0.1.1"
 
 [[deps.IteratorInterfaceExtensions]]
 git-tree-sha1 = "a3f24677c21f5bbe9d2a714f95dcd58337fb2856"
