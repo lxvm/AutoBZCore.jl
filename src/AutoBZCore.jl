@@ -42,7 +42,7 @@ using Reexport
 @reexport using AutoSymPTR
 @reexport using IteratedIntegration
 
-import Integrals: IntegralProblem, __solvebp_call, SciMLBase.NullParameters
+import Integrals: IntegralProblem, __solvebp_call, SciMLBase.NullParameters, ReCallVJP, ZygoteVJP
 import AutoSymPTR: autosymptr, symptr, symptr_rule!, symptr_rule, ptr, ptr_rule!, ptrindex, alloc_autobuffer
 import IteratedIntegration: iterated_integrand, iterated_pre_eval, alloc_segbufs
 

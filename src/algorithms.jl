@@ -40,7 +40,7 @@ TAI(; rule=HCubatureJL()) = TAI(rule)
 
 # Imitate original interface
 IntegralProblem(f, bz::SymmetricBZ, args...; kwargs...) =
-    IntegralProblem(f, (bz,), (bz,), args...; kwargs...)
+    IntegralProblem{isinplace(f, 3)}(f, bz, bz, args...; kwargs...)
 
 # layer to intercept integrand construction
 function construct_integrand(f, iip, p)
@@ -52,7 +52,7 @@ function construct_integrand(f, iip, p)
 end
 
 function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
-                                sensealg, (bz,)::Tuple{SymmetricBZ}, ::Tuple{SymmetricBZ}, p;
+                                sensealg, bz::SymmetricBZ, ::SymmetricBZ, p;
                                 reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
     abstol_ = (abstol===nothing) ? zero(eltype(bz)) : abstol
@@ -77,16 +77,16 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         val, err = symmetrize(f, bz, val, err)
         SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
     elseif alg isa PTR_IAI
-        sol = __solvebp_call(prob, alg.ptr, sensealg, (bz,), (bz,), p;
+        sol = __solvebp_call(prob, alg.ptr, sensealg, bz, bz, p;
                                 reltol = reltol_, abstol = abstol_, maxiters = maxiters)
         atol = max(abstol_, reltol_*alg.iai.norm(sol))
-        __solvebp_call(prob, alg.iai, sensealg, (bz,), (bz,), p;
+        __solvebp_call(prob, alg.iai, sensealg, bz, bz, p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa AutoPTR_IAI
-        sol = __solvebp_call(prob, alg.ptr, sensealg, (bz,), (bz,), p;
+        sol = __solvebp_call(prob, alg.ptr, sensealg, bz, bz, p;
                                 reltol = alg.reltol, abstol = abstol_, maxiters = maxiters)
         atol = max(abstol_, reltol_*alg.iai.norm(sol))
-        __solvebp_call(prob, alg.iai, sensealg, (bz,), (bz,), p;
+        __solvebp_call(prob, alg.iai, sensealg, bz, bz, p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa TAI
         l = lattice_bz_limits(bz.B); a = l.a; b = l.b

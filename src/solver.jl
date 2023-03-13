@@ -1,18 +1,22 @@
-struct IntegralSolver{iip,F,B,A,K}
+struct IntegralSolver{iip,F,B,A,S,D,K}
     f::F
     lb::B
     ub::B
     alg::A
+    sensealg::S
+    do_inf_transformation::D
     abstol::Float64
     reltol::Float64
     maxiters::Int
     kwargs::K
     function IntegralSolver{iip}(f, lb, ub, alg, ;
+                                sensealg = ReCallVJP(ZygoteVJP()),
+                                do_inf_transformation = nothing,
                                 abstol=0.0, reltol=iszero(abstol) ? sqrt(eps()) : zero(abstol),
                                 maxiters=typemax(Int), kwargs...) where iip
         @assert typeof(lb)==typeof(ub) "Type of lower and upper bound must match"
-        new{iip, typeof(f), typeof(lb), typeof(alg),
-            typeof(kwargs)}(f, lb, ub, alg, abstol, reltol, maxiters, kwargs)
+        new{iip, typeof(f), typeof(lb), typeof(alg), typeof(sensealg), typeof(do_inf_transformation),
+            typeof(kwargs)}(f, lb, ub, alg, sensealg, do_inf_transformation, abstol, reltol, maxiters, kwargs)
     end
 end
 
@@ -23,13 +27,14 @@ construct_problem(s::IntegralSolver{iip}, p) where iip =
     IntegralProblem{iip}(s.f, s.lb, s.ub, p; s.kwargs...)
 
 do_solve(s::IntegralSolver, p) = solve(construct_problem(s, p), s.alg,
-    abstol = s.abstol, reltol = s.reltol, maxiters = s.maxiters)
+    abstol = s.abstol, reltol = s.reltol, maxiters = s.maxiters,
+    do_inf_transformation=s.do_inf_transformation, sensealg=s.sensealg)
 
 (s::IntegralSolver)(p=NullParameters()) = do_solve(s, p).u
 
 # imitate general interface
 IntegralSolver(f, bz::SymmetricBZ, args...; kwargs...) =
-    IntegralSolver(f, (bz,), (bz,), args...; kwargs...)
+    IntegralSolver{isinplace(f, 3)}(f, bz, bz, args...; do_inf_transformation=Val(false), kwargs...)
 
 # parallelization
 
