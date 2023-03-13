@@ -211,6 +211,12 @@ alloc_rule(f::AbstractFourierSeries{N}, ::Type{T}, ::Nothing, npt::Int) where {N
 alloc_rule(f::AbstractFourierSeries{N}, ::Type{T}, syms, npt::Int) where {N,T}=
     symptr_rule!(FourierSymPTR(f)(T, Val(N)), npt, Val(N), syms)
 
+"""
+    alloc_autobuffer(f::AbstractFourierSeries, ::Type{T}, syms)
+
+Initialize an empty buffer of PTR rules with pre-evaluated Fourier series
+evaluated on a domain of type `T` with symmetries `syms`
+"""
 alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, ::Nothing) where {N,T} =
     alloc_autobuffer(T, Val(N), FourierPTR(f))
 alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, syms) where {N,T} =
