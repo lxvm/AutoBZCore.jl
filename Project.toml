@@ -1,7 +1,7 @@
 name = "AutoBZCore"
 uuid = "66bd3e16-1600-45cf-8f55-0b550710682b"
 authors = ["lxvm <lorenzo@vanmunoz.com>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 AutoSymPTR = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
@@ -15,7 +15,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 [compat]
 AutoSymPTR = "0.1"
 FourierSeriesEvaluators = "0.1"
-Integrals = "3"
+Integrals = "3.1.1"
 IteratedIntegration = "0.1"
 Reexport = "1"
 StaticArrays = "1"
