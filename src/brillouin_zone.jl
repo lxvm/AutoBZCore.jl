@@ -62,7 +62,7 @@ const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
     symmetrize(f, ::SymmetricBZ, xs...)
     symmetrize(f, ::SymmetricBZ, x::Number)
 
-Tranform `x` by the symmetries of the parametrization used to reduce the
+Transform `x` by the symmetries of the parametrization used to reduce the
 domain, thus mapping the value of `x` on the parametrization to the full domain.
 """
 symmetrize(f, bz::SymmetricBZ, xs...) = map(x -> symmetrize(f, bz, x), xs)
@@ -91,9 +91,9 @@ end
 
 
 """
-    FullBZ(A, B=canonical_reciprocal_basis(A), lims=lattice_bz_limits(B); atol=sqrt(eps()))
+    FullBZ(A, B=canonical_reciprocal_basis(A); atol=sqrt(eps()))
 
-A type alias for `SymmetricBZ{Nothing}` when there are no symmetries applied to BZ
+Constructs a [`SymmetricBZ`](@ref) with trivial symmetries.
 """
 FullBZ(A, B=canonical_reciprocal_basis(A), lims=lattice_bz_limits(B); kwargs...) =
     SymmetricBZ(A, B, lims, nothing; kwargs...)

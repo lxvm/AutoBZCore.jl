@@ -14,12 +14,13 @@ For example, computing the local Green's function can be done as follows:
     using FourierSeriesEvaluators
     using AutoBZCore
 
-    gloc_integrand(H, η, ω) = inv(complex(ω,η)*I-H) # define integrand evaluator
-    h = FourierSeries([0.5, 0.0, 0.5]; offset=-2) # define 1D integer lattice Hamiltonian
-    fbz = FullBZ(I(1)) # construct BZ from lattice with default limits of integration
-    ps = (1.0, 0.0) # representative values for (η,ω), the last arguments of the integrand evaluator
-    gloc = FourierIntegrator(gloc_integrand, fbz, h; ps=ps) # initialize default integration routine
-    gloc(ps...) # evaluate gloc at parameter points
+    gloc_integrand(h_k, η, ω) = inv(complex(ω,η)*I-h_k)     # define integrand evaluator
+    h = FourierSeries([0.5, 0.0, 0.5]; offset=-2)           # construct cos(k) 1D integer lattice Hamiltonian
+    bz = FullBZ(2pi*I(1))                                   # construct BZ from lattice vectors A=2pi*I
+    integrand = FourierIntegrand(gloc_integrand, h, 0.1)    # construct integrand with Fourier series h and parameter η=0.1
+    alg = IAI()                                             # choose integration algorithm (also AutoPTR() and PTR())
+    gloc = IntegralSolver(integrand, bz, alg; abstol=1e-3)  # construct a solver for gloc to within specified tolerance
+    gloc(0.0)                                               # evaluate gloc at frequency ω=0.0
 
 !!! note "Assumptions"
     `AutoBZCore` assumes that all calculations occur in the reciprocal lattice

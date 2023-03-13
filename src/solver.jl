@@ -1,3 +1,18 @@
+"""
+    IntegralSolver(f, lb, ub, alg; abstol=0, reltol=sqrt(eps()), maxiters=typemax(Int))
+    IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...)
+
+Constructs a functor that solves an integral of `f` over the given domain (e.g.
+`lb` to `ub` or a `bz`) using the given `alg` to within the given tolerances.
+Calling this functor, `fun` with parameters `p` using the syntax `fun(p)`
+returns the estimated integral `I`. Under the hood, this uses the [Integrals.jl
+interface](https://docs.sciml.ai/Integrals/stable/) for defining an
+`IntegralProblem`, so `f` must 
+
+Also, the types [`Integrand`](@ref) and [`FourierIntegrand`](@ref) allow for
+providing a partial set of parameters so that the `IntegralSolver` can interface
+easily with other algorithms, such as root-finding and interpolation.
+"""
 struct IntegralSolver{iip,F,B,A,S,D,K}
     f::F
     lb::B
@@ -9,7 +24,7 @@ struct IntegralSolver{iip,F,B,A,S,D,K}
     reltol::Float64
     maxiters::Int
     kwargs::K
-    function IntegralSolver{iip}(f, lb, ub, alg, ;
+    function IntegralSolver{iip}(f, lb, ub, alg;
                                 sensealg = ReCallVJP(ZygoteVJP()),
                                 do_inf_transformation = nothing,
                                 abstol=0.0, reltol=iszero(abstol) ? sqrt(eps()) : zero(abstol),
@@ -20,8 +35,8 @@ struct IntegralSolver{iip,F,B,A,S,D,K}
     end
 end
 
-IntegralSolver(f, args...; kwargs...) =
-    IntegralSolver{isinplace(f, 3)}(f, args...; kwargs...)
+IntegralSolver(f, lb, ub, alg; kwargs...) =
+    IntegralSolver{isinplace(f, 3)}(f, lb, ub, alg; kwargs...)
 
 construct_problem(s::IntegralSolver{iip}, p) where iip =
     IntegralProblem{iip}(s.f, s.lb, s.ub, p; s.kwargs...)
@@ -33,8 +48,8 @@ do_solve(s::IntegralSolver, p) = solve(construct_problem(s, p), s.alg,
 (s::IntegralSolver)(p=NullParameters()) = do_solve(s, p).u
 
 # imitate general interface
-IntegralSolver(f, bz::SymmetricBZ, args...; kwargs...) =
-    IntegralSolver{isinplace(f, 3)}(f, bz, bz, args...; do_inf_transformation=Val(false), kwargs...)
+IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...) =
+    IntegralSolver{isinplace(f, 3)}(f, bz, bz, alg; do_inf_transformation=Val(false), kwargs...)
 
 # parallelization
 
