@@ -1,7 +1,7 @@
-struct IntegralSolver{iip,F,L,U,A,K}
+struct IntegralSolver{iip,F,B,A,K}
     f::F
-    lb::L
-    ub::U
+    lb::B
+    ub::B
     alg::A
     abstol::Float64
     reltol::Float64
@@ -10,7 +10,8 @@ struct IntegralSolver{iip,F,L,U,A,K}
     function IntegralSolver{iip}(f, lb, ub, alg, ;
                                 abstol=0.0, reltol=iszero(abstol) ? sqrt(eps()) : zero(abstol),
                                 maxiters=typemax(Int), kwargs...) where iip
-        new{iip, typeof(f), typeof(lb), typeof(ub), typeof(alg),
+        @assert typeof(lb)==typeof(ub) "Type of lower and upper bound must match"
+        new{iip, typeof(f), typeof(lb), typeof(alg),
             typeof(kwargs)}(f, lb, ub, alg, abstol, reltol, maxiters, kwargs)
     end
 end
@@ -28,7 +29,7 @@ do_solve(s::IntegralSolver, p) = solve(construct_problem(s, p), s.alg,
 
 # imitate general interface
 IntegralSolver(f, bz::SymmetricBZ, args...; kwargs...) =
-    IntegralSolver(f, (bz,), (), args...; kwargs...)
+    IntegralSolver(f, (bz,), (bz,), args...; kwargs...)
 
 # parallelization
 
