@@ -48,19 +48,59 @@ Base.eltype(::Type{<:SymmetricBZ{S,L,d,T}}) where {S,L,d,T} = T
 
 # Define traits for symmetrization based on symmetry representations
 
+"""
+    AbstractSymRep
+
+Abstract supertype of symmetry representation traits.
+"""
 abstract type AbstractSymRep end
+
+"""
+    FaithfulRep
+
+Abstract supertype of traits for faithful symmetry representations.
+"""
 abstract type FaithfulRep <: AbstractSymRep end
 
+"""
+    UnknownRep()
+
+Fallback symmetry representation for array types without a user-defined `SymRep`.
+"""
 struct UnknownRep <: AbstractSymRep end
+
+"""
+    TrivialRep()
+
+Symmetry representation of objects with trivial transformation under the group.
+"""
 struct TrivialRep <: AbstractSymRep end
+
+"""
+    LatticeRep()
+
+Symmetry representation of objects that transform under the group action in the
+same way as the lattice.
+"""
 struct LatticeRep <: FaithfulRep end
 
+"""
+    SymRep(f)
+
+`SymRep` specifies the symmetry representation of the integral of the function
+`f`. When you define a new integrand, you can choose to implement this trait to
+specify how the integral is transformed under the symmetries of the lattice in
+order to map the integral of `f` on the IBZ to the result for the FBZ.
+
+New types for `SymRep` should also extend a corresponding method for
+[`symmetrize_`](@rep).
+"""
 SymRep(::Any) = UnknownRep()
 const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
 
 """
     symmetrize(f, ::SymmetricBZ, xs...)
-    symmetrize(f, ::SymmetricBZ, x::Number)
+    symmetrize(f, ::SymmetricBZ, x::Union{Number,AbstractArray{<:Any,0}})
 
 Transform `x` by the symmetries of the parametrization used to reduce the
 domain, thus mapping the value of `x` on the parametrization to the full domain.
@@ -69,6 +109,13 @@ symmetrize(f, bz::SymmetricBZ, xs...) = map(x -> symmetrize(f, bz, x), xs)
 symmetrize(f, bz::SymmetricBZ, x) = symmetrize_(SymRep(f), bz, x)
 symmetrize(f, bz::SymmetricBZ, x::TrivialRepType) =
     symmetrize_(TrivialRep(), bz, x)
+
+"""
+    symmetrize_(rep::AbstractSymRep, bz::SymmetricBZ, x)
+
+Transform `x` under representation `rep` using the symmetries in `bz` to obtain
+the result of an integral on the FBZ from `x`, which was calculated on the IBZ.
+"""
 symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
 function symmetrize_(::LatticeRep, bz::SymmetricBZ, x::AbstractVector)
     r = zero(x)
