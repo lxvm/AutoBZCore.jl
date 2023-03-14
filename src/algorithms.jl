@@ -1,5 +1,17 @@
+"""
+    AbstractAutoBZAlgorithm
+
+Abstract supertype for Brillouin zone integration algorithms.
+"""
 abstract type AbstractAutoBZAlgorithm <: SciMLBase.AbstractIntegralAlgorithm end
 
+"""
+    IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing)
+
+Iterated-adaptive integration using `nested_quadgk` from IteratedIntegration.jl
+See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
+`nested_quadgk`.
+"""
 struct IAI{F,I,S} <: AbstractAutoBZAlgorithm
     order::Int
     norm::F
@@ -8,24 +20,62 @@ struct IAI{F,I,S} <: AbstractAutoBZAlgorithm
 end
 IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing) = IAI(order, norm, initdivs, segbufs)
 
+"""
+    PTR(; npt=50, rule=nothing)
+
+Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
+using the routine `ptr` from AutoSymPTR.jl
+See [`alloc_rule`](@ref) for how to pre-evaluate a PTR rule for use across calls
+with compatible integrands.
+"""
 struct PTR{R} <: AbstractAutoBZAlgorithm
     npt::Int
     rule::R
 end
 PTR(; npt=50, rule=nothing) = PTR(npt, rule)
 
+"""
+    AutoPTR(; norm=norm, buffer=nothing)
+
+Periodic trapezoidal rule with automatic convergence to tolerances passed to the
+solver with respect to `norm` using the routine `autosymptr` from AutoSymPTR.jl.
+See [`alloc_autobuffer`](@ref) for how to pre-evaluate a buffer for `autosymptr`
+for use across calls with compatible integrands.
+"""
 struct AutoPTR{F,B} <: AbstractAutoBZAlgorithm
     norm::F
     buffer::B
 end
 AutoPTR(; norm=norm, buffer=nothing) = AutoPTR(norm, buffer)
 
+"""
+    PTR_IAI(; ptr=PTR(), iai=IAI())
+
+Multi-algorithm that returns an `IAI` calculation with an `abstol` determined
+from the given `reltol` and a `PTR` estimate, `I`, as `reltol*norm(I)`.
+This addresses the issue that `IAI` does not currently use a globally-adaptive
+algorithm and may not have the expected scaling with localization length unless
+an `abstol` is used since computational effort may be wasted via a `reltol` with
+the naive `nested_quadgk`.
+"""
 struct PTR_IAI{P,I} <: AbstractAutoBZAlgorithm
     ptr::P
     iai::I
 end
 PTR_IAI(; ptr=PTR(), iai=IAI()) = PTR_IAI(ptr, iai)
 
+"""
+    AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI())
+
+
+Multi-algorithm that returns an `IAI` calculation with an `abstol` determined
+from an `AutoPTR` estimate, `I`, computed to `reltol` precision, and the `rtol`
+given to the solver as `rtol*norm(I)`.
+This addresses the issue that `IAI` does not currently use a globally-adaptive
+algorithm and may not have the expected scaling with localization length unless
+an `abstol` is used since computational effort may be wasted via a `reltol` with
+the naive `nested_quadgk`.
+"""
 struct AutoPTR_IAI{P,I} <: AbstractAutoBZAlgorithm
     reltol::Float64
     ptr::P
@@ -33,6 +83,11 @@ struct AutoPTR_IAI{P,I} <: AbstractAutoBZAlgorithm
 end
 AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI()) = AutoPTR_IAI(reltol, ptr, iai)
 
+"""
+    TAI(; rule=HCubatureJL())
+
+Tree-adaptive integration using `hcubature` from HCubature.jl
+"""
 struct TAI{T<:HCubatureJL} <: AbstractAutoBZAlgorithm
     rule::T
 end
