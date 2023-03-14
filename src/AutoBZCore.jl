@@ -1,12 +1,14 @@
 """
 The package providing the functionality and abstractions for `AutoBZ.jl`. It
 provides both [`SymmetricBZ`](@ref), which is a type that stores information
-about the Brillouin zone (BZ), and [`FourierIntegrator`](@ref), a type that
-provides a functor interface to compute user-defined Brillouin zone integrals
-depending on Wannier-interpolated quantities. The package integrates with
-[`FourierSeriesEvaluators`](@ref), [`IteratedIntegration`](@ref), and
-[`AutoSymPTR`](@ref) to provide a generic interface to efficient algorithms for
-BZ integration.
+about the Brillouin zone (BZ), and [`IntegralSolver`](@ref), a type that
+provides a functor interface to parametrize `IntegralProblem`s as defined by
+[Integrals.jl](https://docs.sciml.ai/Integrals/stable/). The package also
+provides the optimized [`FourierIntegrand`](@ref). The package integrates with
+[FourierSeriesEvaluators.jl](https://github.com/lxvm/FourierSeriesEvaluators.jl),
+[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl), and
+[AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl) to provide a generic
+interface to efficient algorithms for BZ integration.
 
 For example, computing the local Green's function can be done as follows:
 
@@ -23,14 +25,10 @@ For example, computing the local Green's function can be done as follows:
     gloc(0.0)                                               # evaluate gloc at frequency ω=0.0
 
 !!! note "Assumptions"
-    `AutoBZCore` assumes that all calculations occur in the reciprocal lattice
-    basis, since that is the basis in which Wannier interpolants are most
-    efficiently described. This means that user-provided integration limits and
-    symmetries should be in the reciprocal lattice basis and additionally they
-    should be in fractional coordinates (e.g. the BZ in these coordinates has
-    vertices (0,0,0) and (1,1,1)). All symmetry transformations must be dealt
-    with by the user, who can specialize the [`symmetrize`](@ref) routine to
-    automate that step.
+    `AutoBZCore` assumes that all calculations occur in the
+    reciprocal lattice basis, since that is the basis in which Wannier
+    interpolants are most efficiently described. See [`SymmetricBZ`](@ref) for
+    details.
 """
 module AutoBZCore
 

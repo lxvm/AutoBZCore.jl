@@ -16,12 +16,18 @@ Data type representing a Brillouin zone reduced by a set of symmetries, `syms`
 with iterated integration limits `lims`, both of which are assumed to be in the
 lattice basis (since the Fourier series is). `A` and `B` should be
 identically-sized square matrices containing the real and reciprocal basis
-vectors in their columns. `lims` should be limits compatible with the
-`IteratedIntegration` package that represent the BZ in fractional lattice
-coordinates (e.g. the full BZ with vertices (0,0,0) & (1,1,1)). `syms` should be
-a collection of symmetries compatible with `AutoSymPTR` and the symmetry
-operators should be in the lattice basis (if necessary, rotate them from the
-Cartesian basis).
+vectors in their columns. 
+
+!!! note "Convention"
+    This type assumes all integration limit data is in the reciprocal lattice
+    basis with fractional coordinates, where the FBZ is just the hypercube
+    spanned by the vertices (0,…,0) & (1,…,1). If necessary, use `A` or `B` to
+    rotate these quantities into the convention.
+
+`lims` should be limits compatible with
+[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
+`syms` should be an iterable collection of point group symmetries compatible
+with [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
 """
 struct SymmetricBZ{S,L,d,T,d2}
     A::SMatrix{d,d,T,d2}
@@ -93,7 +99,7 @@ specify how the integral is transformed under the symmetries of the lattice in
 order to map the integral of `f` on the IBZ to the result for the FBZ.
 
 New types for `SymRep` should also extend a corresponding method for
-[`symmetrize_`](@rep).
+[`AutoBZCore.symmetrize_`](@ref).
 """
 SymRep(::Any) = UnknownRep()
 const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
