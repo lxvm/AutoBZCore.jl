@@ -8,7 +8,9 @@ abstract type AbstractAutoBZAlgorithm <: SciMLBase.AbstractIntegralAlgorithm end
 """
     IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing)
 
-Iterated-adaptive integration using `nested_quadgk` from IteratedIntegration.jl
+Iterated-adaptive integration using `nested_quadgk` from
+[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
+**This algorithm is the most efficient for localized integrands**.
 See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
 `nested_quadgk`.
 """
@@ -24,7 +26,8 @@ IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing) = IAI(order, norm, 
     PTR(; npt=50, rule=nothing)
 
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
-using the routine `ptr` from AutoSymPTR.jl
+using the routine `ptr` from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
+**The caller should check that the integral is converged w.r.t. `npt`**.
 See [`alloc_rule`](@ref) for how to pre-evaluate a PTR rule for use across calls
 with compatible integrands.
 """
@@ -38,7 +41,9 @@ PTR(; npt=50, rule=nothing) = PTR(npt, rule)
     AutoPTR(; norm=norm, buffer=nothing)
 
 Periodic trapezoidal rule with automatic convergence to tolerances passed to the
-solver with respect to `norm` using the routine `autosymptr` from AutoSymPTR.jl.
+solver with respect to `norm` using the routine `autosymptr` from
+[AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
+**This algorithm is the most efficient for smooth integrands**.
 See [`alloc_autobuffer`](@ref) for how to pre-evaluate a buffer for `autosymptr`
 for use across calls with compatible integrands.
 """
@@ -86,7 +91,9 @@ AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI()) = AutoPTR_IAI(reltol, ptr, i
 """
     TAI(; rule=HCubatureJL())
 
-Tree-adaptive integration using `hcubature` from HCubature.jl
+Tree-adaptive integration using `hcubature` from
+[HCubature.jl](https://github.com/JuliaMath/HCubature.jl). This routine is
+limited to integration over hypercube domains and may not use all symmetries.
 """
 struct TAI{T<:HCubatureJL} <: AbstractAutoBZAlgorithm
     rule::T
@@ -144,7 +151,9 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         __solvebp_call(prob, alg.iai, sensealg, bz, bz, p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa TAI
-        l = lattice_bz_limits(bz.B); a = l.a; b = l.b
+        l = bz.lims isa CubicLimits ? bz.lims : lattice_bz_limits(bz.B)
+        a = l.a
+        b = l.b
         j = abs(det(bz.B))
         sol = __solvebp_call(prob, alg.rule, sensealg, a, b, p;
                                 abstol=abstol_, reltol=reltol_, maxiters=maxiters)
