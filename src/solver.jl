@@ -58,7 +58,7 @@ IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...) =
     batchparam(ps, nthreads)
 
 If the cost of a calculation smoothly varies with the parameters `ps`, then
-batch `xs` into `nthreads` groups where the `i`th element of group `j` is
+batch `ps` into `nthreads` groups where the `i`th element of group `j` is
 `ps[j+(i-1)*nthreads]`
 """
 function batchparam(xs, nthreads)

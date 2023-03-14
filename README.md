@@ -68,3 +68,4 @@ and is free/open-source software under the MIT license.
 - [FourierSeriesEvaluators.jl](https://github.com/lxvm/FourierSeriesEvaluators.jl)
 - [SymmetryReduceBZ.jl](https://github.com/jerjorg/SymmetryReduceBZ.jl)
 - [Brillouin.jl](https://github.com/thchr/Brillouin.jl)
+- [TightBinding.jl](https://github.com/cometscome/TightBinding.jl)
