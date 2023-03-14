@@ -17,7 +17,8 @@ makedocs(
     modules=[AutoBZCore],
     pages = [
         "Home" => "index.md",
-        "Manual" => "methods.md",
+        "Integration" => "integration.md",
+        "Brillouin zones" => "bz.md",
     ],
 )
 
