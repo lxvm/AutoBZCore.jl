@@ -7,7 +7,8 @@ Constructs a functor that solves an integral of `f` over the given domain (e.g.
 Calling this functor, `fun` with parameters `p` using the syntax `fun(p)`
 returns the estimated integral `I`. Under the hood, this uses the [Integrals.jl
 interface](https://docs.sciml.ai/Integrals/stable/) for defining an
-`IntegralProblem`, so `f` must 
+`IntegralProblem`, so `f` must be a 2-argument function `f(x,p)`, or if
+in-place, a 3-argument function `f(y,x,p)`.
 
 Also, the types [`Integrand`](@ref) and [`FourierIntegrand`](@ref) allow for
 providing a partial set of parameters so that the `IntegralSolver` can interface
