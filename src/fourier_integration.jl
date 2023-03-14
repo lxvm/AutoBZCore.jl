@@ -5,7 +5,7 @@ A type generically representing an integrand `f` whose entire dependence on the
 variables of integration is in a Fourier series `s`, and which may also accept
 some input parameters `p`. The caller must know that their function, `f`, will
 be evaluated at many points, `x`, in the following way: `f(s(x), p...)`.
-Therefore the caller is expected to know the type of `s(x)` (hint: `eltype(s)`)
+Therefore the caller is expected to know the type of `s(x)`
 and the layout of the parameters in the tuple `p` (hint: it should correspond to
 the arguments of the function). This type is optimized for the IAI and PTR routines.
 """
@@ -206,18 +206,35 @@ autosymptr(f::FourierIntegrand, B::AbstractMatrix, syms; kwargs...) =
     autosymptr(f, B, syms, FourierSymPTR(f.s); kwargs...)
 
 # helper routine to allocate rules
+"""
+    alloc_rule(f::AbstractFourierSeries, ::Type, syms)
+
+Compute the values of `f` on the PTR grid as well as the quadrature weights for
+the given `syms` to use across multiple compatible calls of the [`PTR`](@ref) algorithm.
+"""
 alloc_rule(f::AbstractFourierSeries{N}, ::Type{T}, ::Nothing, npt::Int) where {N,T} =
     ptr_rule!(FourierPTR(f)(T, Val(N)), npt, Val(N))
 alloc_rule(f::AbstractFourierSeries{N}, ::Type{T}, syms, npt::Int) where {N,T}=
     symptr_rule!(FourierSymPTR(f)(T, Val(N)), npt, Val(N), syms)
 
 """
-    alloc_autobuffer(f::AbstractFourierSeries, ::Type{T}, syms)
+    alloc_autobuffer(f::AbstractFourierSeries, ::Type, syms)
 
 Initialize an empty buffer of PTR rules with pre-evaluated Fourier series
-evaluated on a domain of type `T` with symmetries `syms`
+evaluated on a domain of type `T` with symmetries `syms` to use across multiple
+compatible calls of the [`AutoPTR`](@ref) algorithm.
 """
 alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, ::Nothing) where {N,T} =
     alloc_autobuffer(T, Val(N), FourierPTR(f))
 alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, syms) where {N,T} =
     alloc_autobuffer(T, Val(N), FourierSymPTR(f))
+
+"""
+    alloc_segbufs(coefficient_type, range_type, norm_type, ndim)
+
+Allocate a segment buffer for multiple compatible calls to [`IAI`](@ref).
+Typically `coefficient_type` would be `eltype(bz)`, `range_type` would be the
+return type of the integrand, and `norm_type` would be `Base.promote_op(norm,
+range_type)`. `ndim` should be the number of dimensions of integration.
+"""
+function alloc_segbufs end
