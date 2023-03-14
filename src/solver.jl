@@ -55,11 +55,11 @@ IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...) =
 # parallelization
 
 """
-    batchparam(xs, nthreads)
+    batchparam(ps, nthreads)
 
-If the cost of a calculation smoothly varies with the parameters `xs`, then
+If the cost of a calculation smoothly varies with the parameters `ps`, then
 batch `xs` into `nthreads` groups where the `i`th element of group `j` is
-`xs[j+(i-1)*nthreads]`
+`ps[j+(i-1)*nthreads]`
 """
 function batchparam(xs, nthreads)
     batches = [Tuple{Int,eltype(xs)}[] for _ in 1:min(nthreads, length(xs))]
