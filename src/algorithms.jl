@@ -151,13 +151,15 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         __solvebp_call(prob, alg.iai, sensealg, bz, bz, p;
                                 reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa TAI
-        l = bz.lims isa CubicLimits ? bz.lims : lattice_bz_limits(bz.B)
+        l, nsym = bz.lims isa CubicLimits ? (bz.lims, nsyms(bz)) : (lattice_bz_limits(bz.B), 1)
         a = l.a
         b = l.b
         j = abs(det(bz.B))
+        atol = abstol_/nsym/j # reduce absolute tolerance by symmetry factor
         sol = __solvebp_call(prob, alg.rule, sensealg, a, b, p;
-                                abstol=abstol_, reltol=reltol_, maxiters=maxiters)
-        SciMLBase.build_solution(sol.prob, sol.alg, sol.u*j, sol.resid*j, retcode = sol.retcode, chi = sol.chi)
+                                abstol=atol, reltol=reltol_, maxiters=maxiters)
+        val, err = bz.lims isa CubicLimits ? symmetrize(f, bz, j*sol.u, j*sol.resid) : (j*sol.u, j*sol.resid)
+        SciMLBase.build_solution(sol.prob, sol.alg, val, err, retcode = sol.retcode, chi = sol.chi)
     end
 end
 
