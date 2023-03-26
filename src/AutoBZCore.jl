@@ -16,13 +16,13 @@ For example, computing the local Green's function can be done as follows:
     using FourierSeriesEvaluators
     using AutoBZCore
 
-    gloc_integrand(h_k, η, ω) = inv(complex(ω,η)*I-h_k)     # define integrand evaluator
+    gloc_integrand(h_k; η, ω) = inv(complex(ω,η)*I-h_k)     # define integrand evaluator
     h = FourierSeries([0.5, 0.0, 0.5]; offset=-2)           # construct cos(k) 1D integer lattice Hamiltonian
     bz = FullBZ(2pi*I(1))                                   # construct BZ from lattice vectors A=2pi*I
-    integrand = FourierIntegrand(gloc_integrand, h, 0.1)    # construct integrand with Fourier series h and parameter η=0.1
+    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)    # construct integrand with Fourier series h and parameter η=0.1
     alg = IAI()                                             # choose integration algorithm (also AutoPTR() and PTR())
     gloc = IntegralSolver(integrand, bz, alg; abstol=1e-3)  # construct a solver for gloc to within specified tolerance
-    gloc(0.0)                                               # evaluate gloc at frequency ω=0.0
+    gloc(ω=0.0)                                               # evaluate gloc at frequency ω=0.0
 
 !!! note "Assumptions"
     `AutoBZCore` assumes that all calculations occur in the
@@ -50,16 +50,17 @@ export SymmetricBZ, FullBZ, nsyms
 export AbstractSymRep, SymRep, UnknownRep, TrivialRep, FaithfulRep, LatticeRep
 include("brillouin_zone.jl")
 
-export FourierIntegrand
-include("fourier_integration.jl")
-
 export AbstractAutoBZAlgorithm, IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
 include("algorithms.jl")
+
+export MixedParameters, IntegralSolver, batchsolve
+include("solver.jl")
 
 export Integrand
 include("integrand.jl")
 
-export IntegralSolver, batchsolve
-include("solver.jl")
+export FourierIntegrand
+include("fourier_integration.jl")
+
 
 end

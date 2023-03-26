@@ -58,41 +58,51 @@ end
     fbz = FullBZ(A, B)
     bz = SymmetricBZ(A, B, fbz.lims, (I,))
 
-    dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)
-    s = InplaceFourierSeries(integer_lattice(dims), period=1)
-    p = complex(1.0,1.0)*I
-    f = FourierIntegrand(dos_integrand, s)
-
-    ip_fbz = IntegralProblem(f, fbz, (p,))
-    ip_bz = IntegralProblem(f, bz, (p,))
+    dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)      # test integrand with positional arguments
+    p_dos = complex(1.0,1.0)*I
     
-    @testset "IntegralProblem interface" begin
-        g = FourierIntegrand(dos_integrand, s, p)
-        ip_fbz_g = IntegralProblem(g, fbz)
-        ip_bz_g = IntegralProblem(g, bz)
+    gloc_integrand(h_k; η, ω) = inv(complex(ω,η)*I-h_k) # test integrand with keyword arguments
+    p_gloc = MixedParameters((), (η=1.0, ω=0.0))
 
-        for (ip1, ip2) in ((ip_fbz, ip_fbz_g), (ip_bz, ip_bz_g))
-            intf = AutoBZCore.construct_integrand(ip1.f, isinplace(ip1), ip1.p)
-            intg = AutoBZCore.construct_integrand(ip2.f, isinplace(ip2), ip2.p)
-            @test intf == intg
+    s = InplaceFourierSeries(integer_lattice(dims), period=1)
+
+    for (integrand, p) in (
+        (dos_integrand, p_dos),
+        (gloc_integrand, p_gloc),
+    )
+
+        f = FourierIntegrand(integrand, s)
+
+        ip_fbz = IntegralProblem(f, fbz, p)
+        ip_bz = IntegralProblem(f, bz, p)
+
+        @testset "IntegralProblem interface" begin
+            g = FourierIntegrand(integrand, s, p)
+            ip_fbz_g = IntegralProblem(g, fbz)
+            ip_bz_g = IntegralProblem(g, bz)
+
+            for (ip1, ip2) in ((ip_fbz, ip_fbz_g), (ip_bz, ip_bz_g))
+                intf = AutoBZCore.construct_integrand(ip1.f, isinplace(ip1), ip1.p)
+                intg = AutoBZCore.construct_integrand(ip2.f, isinplace(ip2), ip2.p)
+                @test intf == intg
+            end
+        end
+
+        @testset "Algorithms" begin
+            @test solve(ip_fbz, IAI(); do_inf_transformation=Val(false)) ≈ solve(ip_bz, IAI(); do_inf_transformation=Val(false))
+            @test solve(ip_fbz, TAI(); do_inf_transformation=Val(false)) ≈ solve(ip_bz, TAI(); do_inf_transformation=Val(false))
+            @test solve(ip_fbz, PTR(); do_inf_transformation=Val(false)) ≈ solve(ip_bz, PTR(); do_inf_transformation=Val(false))
+            @test solve(ip_fbz, AutoPTR(); do_inf_transformation=Val(false)) ≈ solve(ip_bz, AutoPTR(); do_inf_transformation=Val(false))
+            @test solve(ip_fbz, PTR_IAI(); do_inf_transformation=Val(false)) ≈ solve(ip_bz, PTR_IAI(); do_inf_transformation=Val(false))
+            @test solve(ip_fbz, AutoPTR_IAI(); do_inf_transformation=Val(false)) ≈ solve(ip_bz, AutoPTR_IAI(); do_inf_transformation=Val(false))
+            # @test solve(ip_fbz, VEGAS()) ≈ solve(ip_bz, VEGAS()) # skip for now or
+            # set larger tolerance
+        end
+
+        @testset "IntegralSolver" begin
+            sol = IntegralSolver(f, fbz, IAI())
+            @test sol(p) == solve(ip_fbz, IAI(); do_inf_transformation=Val(false)).u
         end
     end
-
-    @testset "Algorithms" begin
-        @test solve(ip_fbz, IAI()) ≈ solve(ip_bz, IAI())
-        @test solve(ip_fbz, TAI()) ≈ solve(ip_bz, TAI())
-        @test solve(ip_fbz, PTR()) ≈ solve(ip_bz, PTR())
-        @test solve(ip_fbz, AutoPTR()) ≈ solve(ip_bz, AutoPTR())
-        @test solve(ip_fbz, PTR_IAI()) ≈ solve(ip_bz, PTR_IAI())
-        @test solve(ip_fbz, AutoPTR_IAI()) ≈ solve(ip_bz, AutoPTR_IAI())
-        # @test solve(ip_fbz, VEGAS()) ≈ solve(ip_bz, VEGAS()) # skip for now or
-        # set larger tolerance
-    end
-
-    @testset "IntegralSolver" begin
-        sol = IntegralSolver(f, fbz, IAI())
-        @test sol(p) == solve(ip_fbz, IAI()).u
-    end
-
 
 end

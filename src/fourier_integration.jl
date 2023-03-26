@@ -1,5 +1,5 @@
 """
-    FourierIntegrand(f, s::AbstractFourierSeries, p...)
+    FourierIntegrand(f, s::AbstractFourierSeries, args...; kwargs...)
 
 A type generically representing an integrand `f` whose entire dependence on the
 variables of integration is in a Fourier series `s`, and which may also accept
@@ -9,31 +9,27 @@ Therefore the caller is expected to know the type of `s(x)`
 and the layout of the parameters in the tuple `p` (hint: it should correspond to
 the arguments of the function). This type is optimized for the IAI and PTR routines.
 """
-struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:Tuple}
+struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:MixedParameters}
     f::F
     s::S
     p::P
 end
-FourierIntegrand(f, s, p...) = FourierIntegrand(f, s, p)
+FourierIntegrand(f, s, args...; kwargs...) = FourierIntegrand(f, s, MixedParameters(args, NamedTuple(kwargs)))
 
 # provide Integrals.jl interface while still using functor interface
-(f::FourierIntegrand)(x, p) = FourierIntegrand(f.f, f.s, (f.p..., p))(x)
-(f::FourierIntegrand)(x, p::Tuple) = FourierIntegrand(f.f, f.s, (f.p..., p...))(x)
-(f::FourierIntegrand)(x, ::NullParameters) = f(x)
+(f::FourierIntegrand)(x, p) = FourierIntegrand(f.f, f.s, merge(f.p, p))(x)
 
 # intercept integrand construction when solving integral problem
 # because the IAI routines dispatch on the integrand type
 construct_integrand(f::FourierIntegrand, iip, p) =
-    FourierIntegrand(f.f, f.s, (f.p..., p))
-construct_integrand(f::FourierIntegrand, iip, p::Tuple) =
-    FourierIntegrand(f.f, f.s, (f.p..., p...))
-construct_integrand(f::FourierIntegrand, iip, ::NullParameters) = f
+    FourierIntegrand(f.f, f.s, merge(f.p, p))
+
+evaluate_integrand(f::FourierIntegrand, s_x) = evaluate_integrand(f.f, s_x, f.p)
 
 # IAI customizations that copy behavior of AbstractIteratedIntegrand
-
 iterated_integrand(_::FourierIntegrand, y, ::Val{d}) where d = y
 iterated_integrand(f::FourierIntegrand, x, ::Val{1}) =
-    f.f(f.s(x), f.p...)
+    evaluate_integrand(f, f.s(x))
 
 iterated_pre_eval(f::FourierIntegrand, x, ::Val{d}) where d =
     FourierIntegrand(f.f, contract(f.s, x, Val(d)), f.p)
@@ -99,11 +95,11 @@ end
 
 function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
-    rule_ = (rule===nothing) ? ptr_rule!(FourierPTR(f.s)(T, Val(N)), npt, Val(N)) : rule
-    n = length(rule_); dvol = abs(det(B))/npt^N
-    nthreads == 1 && return sum(x -> f.f(x, f.p...), rule_)*dvol
+    rule_x = (rule===nothing) ? ptr_rule!(FourierPTR(f.s)(T, Val(N)), npt, Val(N)) : rule
+    n = length(rule_x); dvol = abs(det(B))/npt^N
+    nthreads == 1 && return sum(s_x -> evaluate_integrand(f, s_x), rule_x)*dvol
 
-    acc = f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
+    acc = evaluate_integrand(f, rule_x[n]) # unroll first term in sum to get right types
     n == 1 && return acc*dvol
     runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
     d, r = divrem(n-1, runthreads)
@@ -113,7 +109,7 @@ function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=n
         jmax = (i <= r ? d+1 : d)
         offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
         @inbounds for j in 1:jmax
-            partial_sums[i] += f.f(rule_[offset + j], f.p...)
+            partial_sums[i] += evaluate_integrand(f, rule_x[offset + j])
         end
     end
     for part in partial_sums
@@ -169,11 +165,11 @@ end
 # with symmetries
 function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
-    rule_ = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
-    n = length(rule_); dvol = abs(det(B))/length(syms)/npt^N
-    nthreads == 1 && return mapreduce((w, x) -> w*f.f(x, f.p...), +, rule_.w, rule_.x)*dvol
+    rule_x = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
+    n = length(rule_x); dvol = abs(det(B))/length(syms)/npt^N
+    nthreads == 1 && return mapreduce((w, s_x) -> w*evaluate_integrand(f, s_x), +, rule_x.w, rule_x.x)*dvol
 
-    acc = rule_.w[n]*f.f(rule_.x[n], f.p...) # unroll first term in sum to get right types
+    acc = rule_x.w[n]*evaluate_integrand(f, rule_x[n]) # unroll first term in sum to get right types
     n == 1 && return acc*dvol
     runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
     d, r = divrem(n-1, runthreads)
@@ -183,7 +179,7 @@ function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 
         jmax = (i <= r ? d+1 : d)
         offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
         @inbounds for j in 1:jmax
-            partial_sums[i] += rule_.w[offset + j]*f.f(rule_.x[offset + j], f.p...)
+            partial_sums[i] += rule_x.w[offset + j]*evaluate_integrand(f, rule_x[offset + j])
         end
     end
     for part in partial_sums
