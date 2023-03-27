@@ -9,12 +9,13 @@ Therefore the caller is expected to know the type of `s(x)`
 and the layout of the parameters in the tuple `p` (hint: it should correspond to
 the arguments of the function). This type is optimized for the IAI and PTR routines.
 """
-struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:MixedParameters}
+struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:MixedParameters} <: AbstractAutoBZIntegrand
     f::F
     s::S
     p::P
 end
-FourierIntegrand(f, s, args...; kwargs...) = FourierIntegrand(f, s, MixedParameters(args, NamedTuple(kwargs)))
+FourierIntegrand(f, s, args...; kwargs...) =
+    FourierIntegrand(f, s, MixedParameters(args...; kwargs...))
 
 # provide Integrals.jl interface while still using functor interface
 (f::FourierIntegrand)(x, p) = FourierIntegrand(f.f, f.s, merge(f.p, p))(x)

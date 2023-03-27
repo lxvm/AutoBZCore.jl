@@ -8,11 +8,12 @@ p...; kwargs...)`. However when invoked with two arguments, as in an `IntegralPr
 e.g. `int(x, p2)`, it evaluates the union of parameters `f(x, p..., p2...; kwargs...)`.
 This allows for convenient parametrization of the integrand.
 """
-struct Integrand{F,P<:MixedParameters}
+struct Integrand{F,P<:MixedParameters} <: AbstractAutoBZIntegrand
     f::F
     p::P
 end
-Integrand(f, args...; kwargs...) = Integrand(f, MixedParameters(args, NamedTuple(kwargs)))
+Integrand(f, args...; kwargs...) =
+    Integrand(f, MixedParameters(args...; kwargs...))
 
 # provide Integrals.jl interface while still using functor interface
 (f::Integrand)(x, p) = Integrand(f.f, merge(f.p, p))(x)

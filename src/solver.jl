@@ -1,27 +1,4 @@
 """
-    MixedParameters(args::Tuple, kwargs::NamedTuple)
-
-A struct to store full and partial sets of parameters used to evaluate
-integrands.
-"""
-struct MixedParameters{A<:Tuple,K<:NamedTuple}
-    args::A
-    kwargs::K
-end
-MixedParameters(p, kw) = MixedParameters((p,), kw)
-MixedParameters(::NullParameters, kw) = MixedParameters((), kw)
-
-evaluate_integrand(f, x, p::MixedParameters) = f(x, p.args...; p.kwargs...)
-
-Base.getindex(p::MixedParameters, i::Int) = getindex(p.args, i)
-
-Base.merge(p::MixedParameters, ::NullParameters) = p
-Base.merge(p::MixedParameters, q) = MixedParameters((p.args..., q), p.kwargs)
-Base.merge(p::MixedParameters, q::Tuple) = MixedParameters((p.args..., q...), p.kwargs)
-Base.merge(p::MixedParameters, q::MixedParameters) =
-    MixedParameters((p.args..., q.args...), merge(p.kwargs, q.kwargs))
-
-"""
     IntegralSolver(f, lb, ub, alg; abstol=0, reltol=sqrt(eps()), maxiters=typemax(Int))
     IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...)
 
@@ -69,10 +46,9 @@ do_solve(s::IntegralSolver, p) = solve(construct_problem(s, p), s.alg,
     abstol = s.abstol, reltol = s.reltol, maxiters = s.maxiters,
     do_inf_transformation=s.do_inf_transformation, sensealg=s.sensealg)
 
-(s::IntegralSolver)(p::MixedParameters) =
+# provide plain SciML interface
+(s::IntegralSolver)(p=NullParameters()) =
     do_solve(s, p).u
-(s::IntegralSolver)(p=NullParameters(); kwargs...) =
-    s(MixedParameters(p, NamedTuple(kwargs)))
 
 # imitate general interface
 IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...) =
@@ -121,5 +97,5 @@ Evaluate the [`IntegralSolver`](@ref) `f` at each of the parameters `ps` in
 parallel. Returns a vector containing the evaluated integrals `I`. This is
 a form of multithreaded broadcasting.
 """
-batchsolve(f, ps, T=Base.promote_op(f, eltype(ps)); nthreads=Threads.nthreads(), callback=(x...)->nothing) =
+batchsolve(f::IntegralSolver, ps, T=Base.promote_op(f, eltype(ps)); nthreads=Threads.nthreads(), callback=(x...)->nothing) =
     batchsolve!(Vector{T}(undef, length(ps)), f, ps, nthreads, callback)

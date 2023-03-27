@@ -53,8 +53,11 @@ include("brillouin_zone.jl")
 export AbstractAutoBZAlgorithm, IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
 include("algorithms.jl")
 
-export MixedParameters, IntegralSolver, batchsolve
+export IntegralSolver, batchsolve
 include("solver.jl")
+
+export MixedParameters, AbstractAutoBZIntegrand
+include("parameter_interface.jl")
 
 export Integrand
 include("integrand.jl")

@@ -59,16 +59,16 @@ end
     bz = SymmetricBZ(A, B, fbz.lims, (I,))
 
     dos_integrand(H, M) = imag(tr(inv(M-H)))/(-pi)      # test integrand with positional arguments
-    p_dos = complex(1.0,1.0)*I
+    p_dos = MixedParameters(complex(1.0,1.0)*I)
     
     gloc_integrand(h_k; η, ω) = inv(complex(ω,η)*I-h_k) # test integrand with keyword arguments
-    p_gloc = MixedParameters((), (η=1.0, ω=0.0))
+    p_gloc = MixedParameters(; η=1.0, ω=0.0)
 
     s = InplaceFourierSeries(integer_lattice(dims), period=1)
 
-    for (integrand, p) in (
-        (dos_integrand, p_dos),
-        (gloc_integrand, p_gloc),
+    for (integrand, p, T, args, kwargs...) in (
+        (dos_integrand, p_dos, Float64, ([i*I for i in 1:3],), ),
+        (gloc_integrand, p_gloc, ComplexF64, (), :η => ones(3), :ω => 1:3)
     )
 
         f = FourierIntegrand(integrand, s)
@@ -101,7 +101,12 @@ end
 
         @testset "IntegralSolver" begin
             sol = IntegralSolver(f, fbz, IAI())
-            @test sol(p) == solve(ip_fbz, IAI(); do_inf_transformation=Val(false)).u
+            @test sol(p.args...; p.kwargs...) == solve(ip_fbz, IAI(); do_inf_transformation=Val(false)).u
+        end
+
+        @testset "batchsolve" begin
+            sol = IntegralSolver(f, fbz, IAI())
+            @test [sol(p.args...; p.kwargs...) for p in AutoBZCore.paramzip(args, NamedTuple(kwargs))] ≈ batchsolve(T, sol, args...; kwargs...)
         end
     end
 
