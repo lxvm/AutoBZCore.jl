@@ -93,7 +93,7 @@ end
     end
 end
 
-function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
+function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=NTHREADS_KSUM[])
     N = checksquare(B); T = float(eltype(B))
     rule_x = (rule===nothing) ? ptr_rule!(FourierPTR(f.s)(T, Val(N)), npt, Val(N)) : rule
     n = length(rule_x); dvol = abs(det(B))/npt^N
@@ -163,7 +163,7 @@ end
 
 # enables kpt parallelization by default for all BZ integrals
 # with symmetries
-function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
+function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=NTHREADS_KSUM[])
     N = checksquare(B); T = float(eltype(B))
     rule_ = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
     n = length(rule_); dvol = abs(det(B))/length(syms)/npt^N

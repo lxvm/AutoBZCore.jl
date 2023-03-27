@@ -59,6 +59,15 @@ include("solver.jl")
 export Integrand
 include("integrand.jl")
 
+"""
+    NTHREADS_KSUM = fill(Threads.nthreads())
+
+This represents the number of threads to parallelize over for k-sums in PTR. To
+change the number of threads to 1 to completely bypass multi-threading, write
+`AutoBZCore.NTHREADS_KSUM[] = 1`.
+"""
+const NTHREADS_KSUM = fill(Threads.nthreads())
+
 export FourierIntegrand
 include("fourier_integration.jl")
 
