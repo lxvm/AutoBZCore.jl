@@ -165,11 +165,11 @@ end
 # with symmetries
 function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
-    rule_x = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
-    n = length(rule_x); dvol = abs(det(B))/length(syms)/npt^N
-    nthreads == 1 && return mapreduce((w, s_x) -> w*evaluate_integrand(f, s_x), +, rule_x.w, rule_x.x)*dvol
+    rule_ = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
+    n = length(rule_); dvol = abs(det(B))/length(syms)/npt^N
+    nthreads == 1 && return mapreduce((w, s_x) -> w*evaluate_integrand(f, s_x), +, rule_.w, rule_.x)*dvol
 
-    acc = rule_x.w[n]*evaluate_integrand(f, rule_x[n]) # unroll first term in sum to get right types
+    acc = rule_.w[n]*evaluate_integrand(f, rule_.x[n]) # unroll first term in sum to get right types
     n == 1 && return acc*dvol
     runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
     d, r = divrem(n-1, runthreads)
@@ -179,7 +179,7 @@ function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 
         jmax = (i <= r ? d+1 : d)
         offset = min(i-1, r)*(d+1) + max(i-1-r, 0)*d
         @inbounds for j in 1:jmax
-            partial_sums[i] += rule_x.w[offset + j]*evaluate_integrand(f, rule_x[offset + j])
+            partial_sums[i] += rule_.w[offset + j]*evaluate_integrand(f, rule_.x[offset + j])
         end
     end
     for part in partial_sums
