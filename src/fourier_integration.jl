@@ -168,8 +168,8 @@ function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 
     N = checksquare(B); T = float(eltype(B))
     rule_ = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
     n = length(rule_); dvol = abs(det(B))/length(syms)/npt^N
-    nthreads == 1 && return mapreduce((w, s_x) -> w*evaluate_integrand(f, s_x), +, rule_.w, rule_.x)*dvol
-
+    nthreads == 1 && return sum(((w, s_x),) -> w*evaluate_integrand(f, s_x), zip(rule_.w, rule_.x))*dvol
+    
     acc = rule_.w[n]*evaluate_integrand(f, rule_.x[n]) # unroll first term in sum to get right types
     n == 1 && return acc*dvol
     runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
