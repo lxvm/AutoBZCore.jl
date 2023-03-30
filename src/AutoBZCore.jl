@@ -32,6 +32,13 @@ For example, computing the local Green's function can be done as follows:
 """
 module AutoBZCore
 
+!isdefined(Base, :get_extension) && using Requires
+@static if !isdefined(Base, :get_extension)
+    function __init__()
+        @require HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f" include("../ext/HDF5Ext.jl")
+    end
+end
+
 using LinearAlgebra: I, norm, det, checksquare
 
 using StaticArrays: SMatrix
