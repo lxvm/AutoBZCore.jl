@@ -56,7 +56,7 @@ include("algorithms.jl")
 export IntegralSolver, batchsolve
 include("solver.jl")
 
-export MixedParameters, AbstractAutoBZIntegrand
+export MixedParameters, AbstractAutoBZIntegrand, paramzip, paramproduct
 include("parameter_interface.jl")
 
 export Integrand
