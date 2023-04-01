@@ -19,8 +19,9 @@ struct IAI{F,I,S} <: AbstractAutoBZAlgorithm
     norm::F
     initdivs::I
     segbufs::S
+    t::Float64
 end
-IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing) = IAI(order, norm, initdivs, segbufs)
+IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, t=0.5) = IAI(order, norm, initdivs, segbufs, t)
 
 """
     PTR(; npt=50, rule=nothing)
