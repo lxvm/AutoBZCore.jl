@@ -10,7 +10,7 @@ canonical_reciprocal_basis(A::AbstractMatrix) = A' \ (2pi*one(A))
 
 # main data type
 """
-    SymmetricBZ(A, B, lims::AbstractLimits, syms; atol=sqrt(eps()))
+    SymmetricBZ(A, B, lims::AbstractIteratedLimits, syms; atol=sqrt(eps()))
 
 Data type representing a Brillouin zone reduced by a set of symmetries, `syms`
 with iterated integration limits `lims`, both of which are assumed to be in the
