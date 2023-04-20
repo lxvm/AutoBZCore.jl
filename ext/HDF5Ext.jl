@@ -82,7 +82,7 @@ function param_record(group, p::Tuple, i)
     end
 end
 function param_record((g, q), p::MixedParameters, i)
-    for (j,e) in getfield(p, :args)
+    for (j,e) in enumerate(getfield(p, :args))
         g[string(j)][i] = e
     end
     for (k,v) in pairs(getfield(p, :kwargs))
