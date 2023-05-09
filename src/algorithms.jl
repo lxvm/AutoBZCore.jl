@@ -22,6 +22,12 @@ struct IAI{F,I,S} <: AbstractAutoBZAlgorithm
 end
 IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing) = IAI(order, norm, initdivs, segbufs)
 
+struct AuxIAI{A} <: AbstractAutoBZAlgorithm
+    alg::A
+end
+AuxIAI(; kwargs...) = AuxIAI(IAI(; kwargs...))
+
+
 """
     PTR(; npt=50, rule=nothing)
 
@@ -126,6 +132,13 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
         val, err = nested_quadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
                                         norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
+        val, err = symmetrize(f, bz, j*val, j*err)
+        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
+    elseif alg isa AuxIAI
+        j = abs(det(bz.B))  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
+        atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
+        val, err = nested_auxquadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
+                                        norm = alg.alg.norm, order = alg.alg.order, initdivs = alg.alg.initdivs, segbufs = alg.alg.segbufs)
         val, err = symmetrize(f, bz, j*val, j*err)
         SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
     elseif alg isa PTR
