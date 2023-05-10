@@ -14,15 +14,15 @@ Also, the types [`Integrand`](@ref) and [`FourierIntegrand`](@ref) allow for
 providing a partial set of parameters so that the `IntegralSolver` can interface
 easily with other algorithms, such as root-finding and interpolation.
 """
-struct IntegralSolver{iip,F,B,A,S,D,K}
+struct IntegralSolver{iip,F,B,A,S,D,AT,RT,K}
     f::F
     lb::B
     ub::B
     alg::A
     sensealg::S
     do_inf_transformation::D
-    abstol::Float64
-    reltol::Float64
+    abstol::AT
+    reltol::RT
     maxiters::Int
     kwargs::K
     function IntegralSolver{iip}(f, lb, ub, alg;
@@ -32,7 +32,7 @@ struct IntegralSolver{iip,F,B,A,S,D,K}
                                 maxiters=typemax(Int), kwargs...) where iip
         @assert typeof(lb)==typeof(ub) "Type of lower and upper bound must match"
         new{iip, typeof(f), typeof(lb), typeof(alg), typeof(sensealg), typeof(do_inf_transformation),
-            typeof(kwargs)}(f, lb, ub, alg, sensealg, do_inf_transformation, abstol, reltol, maxiters, kwargs)
+            typeof(abstol), typeof(reltol), typeof(kwargs)}(f, lb, ub, alg, sensealg, do_inf_transformation, abstol, reltol, maxiters, kwargs)
     end
 end
 
