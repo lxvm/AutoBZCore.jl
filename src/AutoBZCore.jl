@@ -57,7 +57,7 @@ export SymmetricBZ, FullBZ, nsyms
 export AbstractSymRep, SymRep, UnknownRep, TrivialRep, FaithfulRep, LatticeRep
 include("brillouin_zone.jl")
 
-export AbstractAutoBZAlgorithm, IAI, AuxIAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
+export AbstractAutoBZAlgorithm, IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI, AuxIAI
 include("algorithms.jl")
 
 export IntegralSolver, batchsolve

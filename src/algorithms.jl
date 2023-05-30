@@ -22,11 +22,6 @@ struct IAI{F,I,S} <: AbstractAutoBZAlgorithm
 end
 IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing) = IAI(order, norm, initdivs, segbufs)
 
-struct AuxIAI{A} <: AbstractAutoBZAlgorithm
-    alg::A
-end
-AuxIAI(; kwargs...) = AuxIAI(IAI(; kwargs...))
-
 
 """
     PTR(; npt=50, rule=nothing)
@@ -134,13 +129,6 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
                                         norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
         val, err = symmetrize(f, bz, j*val, j*err)
         SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
-    elseif alg isa AuxIAI
-        j = abs(det(bz.B))  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
-        atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
-        val, err = nested_auxquadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
-                                        norm = alg.alg.norm, order = alg.alg.order, initdivs = alg.alg.initdivs, segbufs = alg.alg.segbufs)
-        val, err = symmetrize(f, bz, j*val, j*err)
-        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
     elseif alg isa PTR
         val = symptr(f, bz.B, bz.syms; npt = alg.npt, rule = alg.rule)
         val = symmetrize(f, bz, val)
@@ -175,3 +163,14 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         SciMLBase.build_solution(sol.prob, sol.alg, val, err, retcode = sol.retcode, chi = sol.chi)
     end
 end
+
+"""
+    AuxIAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, parallel=nothing)
+
+Iterated-adaptive integration using `nested_quadgk` from
+[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
+**This algorithm is the most efficient for localized integrands**.
+See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
+`nested_quadgk`.
+"""
+function AuxIAI end

@@ -111,9 +111,9 @@ const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
 Transform `x` by the symmetries of the parametrization used to reduce the
 domain, thus mapping the value of `x` on the parametrization to the full domain.
 """
-symmetrize(f, bz::SymmetricBZ, xs...) = map(x -> symmetrize(f, bz, x), xs)
-symmetrize(f, bz::SymmetricBZ, x) = symmetrize_(SymRep(f), bz, x)
-symmetrize(f, bz::SymmetricBZ, x::TrivialRepType) =
+symmetrize(f, bz, xs...) = map(x -> symmetrize(f, bz, x), xs)
+symmetrize(f, bz, x) = symmetrize_(SymRep(f), bz, x)
+symmetrize(f, bz, x::TrivialRepType) =
     symmetrize_(TrivialRep(), bz, x)
 
 """
