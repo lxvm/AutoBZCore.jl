@@ -16,7 +16,7 @@ Data type representing a Brillouin zone reduced by a set of symmetries, `syms`
 with iterated integration limits `lims`, both of which are assumed to be in the
 lattice basis (since the Fourier series is). `A` and `B` should be
 identically-sized square matrices containing the real and reciprocal basis
-vectors in their columns. 
+vectors in their columns.
 
 !!! note "Convention"
     This type assumes all integration limit data is in the reciprocal lattice
@@ -62,13 +62,6 @@ Abstract supertype of symmetry representation traits.
 abstract type AbstractSymRep end
 
 """
-    FaithfulRep
-
-Abstract supertype of traits for faithful symmetry representations.
-"""
-abstract type FaithfulRep <: AbstractSymRep end
-
-"""
     UnknownRep()
 
 Fallback symmetry representation for array types without a user-defined `SymRep`.
@@ -82,13 +75,6 @@ Symmetry representation of objects with trivial transformation under the group.
 """
 struct TrivialRep <: AbstractSymRep end
 
-"""
-    LatticeRep()
-
-Symmetry representation of objects that transform under the group action in the
-same way as the lattice.
-"""
-struct LatticeRep <: FaithfulRep end
 
 """
     SymRep(f)
@@ -123,20 +109,6 @@ Transform `x` under representation `rep` using the symmetries in `bz` to obtain
 the result of an integral on the FBZ from `x`, which was calculated on the IBZ.
 """
 symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
-function symmetrize_(::LatticeRep, bz::SymmetricBZ, x::AbstractVector)
-    r = zero(x)
-    for S in bz.syms
-        r += S * x
-    end
-    r
-end
-function symmetrize_(::LatticeRep, bz::SymmetricBZ, x::AbstractMatrix)
-    r = zero(x)
-    for S in bz.syms
-        r += S * x * S'
-    end
-    r
-end
 function symmetrize_(::UnknownRep, ::SymmetricBZ, x)
     @warn "Symmetric BZ detected but the integrand's symmetry representation is unknown. Define a trait for your integrand by extending SymRep"
     x
@@ -155,3 +127,6 @@ const FullBZType = SymmetricBZ{Nothing}
 nsyms(::FullBZType) = 1
 symmetrize(_, ::FullBZType, x) = x
 symmetrize(_, ::FullBZType, x::TrivialRepType) = x
+
+symmetrize(f, bz, x::AuxValue) = AuxValue(symmetrize(f, bz, x.val, x.aux)...)
+symmetrize(_, ::FullBZType, x::AuxValue) = x

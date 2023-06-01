@@ -24,6 +24,27 @@ IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing) = IAI(order, norm, 
 
 
 """
+    AuxIAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, parallel=nothing)
+
+Iterated-adaptive integration using `nested_quadgk` from
+[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
+**This algorithm is the most efficient for localized integrands**.
+See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
+`nested_quadgk`.
+"""
+struct AuxIAI{F,I,S,P} <: AbstractAutoBZAlgorithm
+    order::Int
+    norm::F
+    initdivs::I
+    segbufs::S
+    parallels::P
+end
+
+function AuxIAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, parallels=nothing)
+    AuxIAI(order, norm, initdivs, segbufs, parallels)
+end
+
+"""
     PTR(; npt=50, rule=nothing)
 
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
@@ -127,18 +148,27 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
         val, err = nested_quadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
                                         norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
-        val, err = symmetrize(f, bz, j*val, j*err)
-        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
+        val_ = symmetrize(f, bz, j*val)
+        err_ = symmetrize(f, bz, j*err)
+        SciMLBase.build_solution(prob, alg, val_, err_, retcode = ReturnCode.Success)
+    elseif alg isa AuxIAI
+        j = abs(det(bz.B))  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
+        atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
+        val, err = nested_auxquadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters, parallels=alg.parallels,
+                                        norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
+        val_ = symmetrize(f, bz, j*val)
+        err_ = symmetrize(f, bz, j*err)
+        SciMLBase.build_solution(prob, alg, val_, err_, retcode = ReturnCode.Success)
     elseif alg isa PTR
         val = symptr(f, bz.B, bz.syms; npt = alg.npt, rule = alg.rule)
-        val = symmetrize(f, bz, val)
-        err = nothing
-        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
+        val_ = symmetrize(f, bz, val)
+        SciMLBase.build_solution(prob, alg, val_, nothing, retcode = ReturnCode.Success)
     elseif alg isa AutoPTR
         val, err = autosymptr(f, bz.B, bz.syms;
                         atol = abstol_, rtol = reltol_, maxevals = maxiters, norm=alg.norm, buffer=alg.buffer)
-        val, err = symmetrize(f, bz, val, err)
-        SciMLBase.build_solution(prob, alg, val, err, retcode = ReturnCode.Success)
+        val_ = symmetrize(f, bz, val)
+        err_ = symmetrize(f, bz, err)
+        SciMLBase.build_solution(prob, alg, val_, err_, retcode = ReturnCode.Success)
     elseif alg isa PTR_IAI
         sol = __solvebp_call(prob, alg.ptr, sensealg, bz, bz, p;
                                 reltol = reltol_, abstol = abstol_, maxiters = maxiters)
@@ -159,18 +189,35 @@ function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
         atol = abstol_/nsym/j # reduce absolute tolerance by symmetry factor
         sol = __solvebp_call(prob, alg.rule, sensealg, a, b, p;
                                 abstol=atol, reltol=reltol_, maxiters=maxiters)
-        val, err = bz.lims isa CubicLimits ? symmetrize(f, bz, j*sol.u, j*sol.resid) : (j*sol.u, j*sol.resid)
-        SciMLBase.build_solution(sol.prob, sol.alg, val, err, retcode = sol.retcode, chi = sol.chi)
+        if bz.lims isa CubicLimits
+            SciMLBase.build_solution(sol.prob, sol.alg, symmetrize(f, bz, j*sol.u), symmetrize(f, bz, j*sol.resid), retcode = sol.retcode, chi = sol.chi)
+        else
+            SciMLBase.build_solution(sol.prob, sol.alg, j*sol.u, j*sol.resid, retcode = sol.retcode, chi = sol.chi)
+        end
     end
 end
 
-"""
-    AuxIAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, parallel=nothing)
+struct AuxQuadGK{F,S,P} <: SciMLBase.AbstractIntegralAlgorithm
+    order::Int
+    norm::F
+    segbuf::S
+    parallel::P
+end
+function AuxQuadGK(; order = 7, norm = norm, segbuf = nothing, parallel = Sequential())
+    AuxQuadGK(order, norm, segbuf, parallel)
+end
 
-Iterated-adaptive integration using `nested_quadgk` from
-[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
-**This algorithm is the most efficient for localized integrands**.
-See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
-`nested_quadgk`.
-"""
-function AuxIAI end
+function Integrals.__solvebp_call(prob::IntegralProblem, alg::AuxQuadGK, sensealg, lb, ub, p;
+                        reltol = 1e-8, abstol = 1e-8,
+                        maxiters = typemax(Int))
+    if isinplace(prob) || lb isa AbstractArray || ub isa AbstractArray
+        error("AuxQuadGK only accepts one-dimensional quadrature problems.")
+    end
+    @assert prob.batch == 0
+    @assert prob.nout == 1
+    f = construct_integrand(prob.f, isinplace(prob), prob.p)
+
+    val, err = auxquadgk(f, lb, ub, parallel = alg.parallel,
+                      rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=alg.segbuf)
+    SciMLBase.build_solution(prob, AuxQuadGK(), val, err, retcode = ReturnCode.Success)
+end

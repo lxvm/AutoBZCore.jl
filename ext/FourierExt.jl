@@ -1,15 +1,25 @@
+module FourierExt
+
+using LinearAlgebra: det, checksquare
+using FourierSeriesEvaluators
+using AutoBZCore
+import AutoBZCore: Integrand, construct_integrand, construct_autobz_integrand, evaluate_integrand
+import AutoSymPTR: autosymptr, symptr, symptr_rule!, symptr_rule, ptr, ptr_rule!, ptrindex, alloc_rule, alloc_autobuffer
+import IteratedIntegration: iterated_integrand, iterated_pre_eval, alloc_segbufs
+
+
 """
     FourierIntegrand(f, s::AbstractFourierSeries, args...; kwargs...)
 
 A type generically representing an integrand `f` whose entire dependence on the
 variables of integration is in a Fourier series `s`, and which may also accept
 some input parameters `p`. The caller must know that their function, `f`, will
-be evaluated at many points, `x`, in the following way: `f(s(x), p...)`.
+be evaluated at many points, `x`, in the following way: `f(x, s(x), p...)`.
 Therefore the caller is expected to know the type of `s(x)`
 and the layout of the parameters in the tuple `p` (hint: it should correspond to
 the arguments of the function). This type is optimized for the IAI and PTR routines.
 """
-struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:MixedParameters} <: AbstractAutoBZIntegrand
+struct FourierIntegrand{F,S<:AbstractFourierSeries,P<:MixedParameters} <: AbstractAutoBZIntegrand{F}
     f::F
     s::S
     p::P
@@ -17,13 +27,22 @@ end
 FourierIntegrand(f, s, args...; kwargs...) =
     FourierIntegrand(f, s, MixedParameters(args...; kwargs...))
 
+# hook into AutoBZCore
+"""
+    Integrand(f, s::AbstractFourierSeries, args...; kwargs...)
+
+Constructs a specialized `FourierIntegrand` allowing for fast Fourier series evaluation
+"""
+Integrand(f, s::AbstractFourierSeries, args...; kwargs...) =
+    FourierIntegrand(f, s, args...; kwargs...)
+
 # provide Integrals.jl interface while still using functor interface
 (f::FourierIntegrand)(x, p) = FourierIntegrand(f.f, f.s, merge(f.p, p))(x)
 
 # intercept integrand construction when solving integral problem
 # because the IAI routines dispatch on the integrand type
-construct_integrand(f::FourierIntegrand, iip, p) =
-    FourierIntegrand(f.f, f.s, merge(f.p, p))
+construct_integrand(f::FourierIntegrand, iip, p) = construct_autobz_integrand(f.f, f.s, merge(f.p, p))
+construct_autobz_integrand(f, s::AbstractFourierSeries, p) = FourierIntegrand(f, s, p)
 
 evaluate_integrand(f::FourierIntegrand, s_x) = evaluate_integrand(f.f, s_x, f.p)
 
@@ -94,7 +113,7 @@ end
     end
 end
 
-function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=NTHREADS_KSUM[])
+function ptr(f::FourierIntegrand, B::AbstractMatrix; npt=npt_update(f,0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
     rule_x = (rule===nothing) ? ptr_rule!(FourierPTR(f.s)(T, Val(N)), npt, Val(N)) : rule
     n = length(rule_x); dvol = abs(det(B))/npt^N
@@ -164,12 +183,12 @@ end
 
 # enables kpt parallelization by default for all BZ integrals
 # with symmetries
-function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=NTHREADS_KSUM[])
+function symptr(f::FourierIntegrand, B::AbstractMatrix, syms; npt=npt_update(f, 0), rule=nothing, min_per_thread=1, nthreads=Threads.nthreads())
     N = checksquare(B); T = float(eltype(B))
     rule_ = (rule===nothing) ? symptr_rule!(FourierSymPTR(f.s)(T, Val(N)), npt, Val(N), syms) : rule
     n = length(rule_); dvol = abs(det(B))/length(syms)/npt^N
     nthreads == 1 && return sum(((w, s_x),) -> w*evaluate_integrand(f, s_x), zip(rule_.w, rule_.x))*dvol
-    
+
     acc = rule_.w[n]*evaluate_integrand(f, rule_.x[n]) # unroll first term in sum to get right types
     n == 1 && return acc*dvol
     runthreads = min(nthreads, div(n-1, min_per_thread)) # choose the actual number of threads
@@ -204,7 +223,7 @@ autosymptr(f::FourierIntegrand, B::AbstractMatrix, syms; kwargs...) =
 
 # helper routine to allocate rules
 """
-    alloc_rule(f::AbstractFourierSeries, ::Type, syms)
+    alloc_rule(f::AbstractFourierSeries, ::Type, syms, npt)
 
 Compute the values of `f` on the PTR grid as well as the quadrature weights for
 the given `syms` to use across multiple compatible calls of the [`PTR`](@ref) algorithm.
@@ -226,12 +245,4 @@ alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, ::Nothing) where {N,T} 
 alloc_autobuffer(f::AbstractFourierSeries{N}, ::Type{T}, syms) where {N,T} =
     alloc_autobuffer(T, Val(N), FourierSymPTR(f))
 
-"""
-    alloc_segbufs(coefficient_type, range_type, norm_type, ndim)
-
-Allocate a segment buffer for multiple compatible calls to [`IAI`](@ref).
-Typically `coefficient_type` would be `eltype(bz)`, `range_type` would be the
-return type of the integrand, and `norm_type` would be `Base.promote_op(norm,
-range_type)`. `ndim` should be the number of dimensions of integration.
-"""
-function alloc_segbufs end
+end
