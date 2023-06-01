@@ -119,55 +119,72 @@ end
     end
 
 end
-#=
+
 @testset "FourierExt" begin
     @testset "FourierIntegrand" begin
+        for dims in 1:3
+            s = InplaceFourierSeries(integer_lattice(dims), period=1)
+            integrand = Integrand(identity, s)
+            # evaluation of integrand gives series
+            k = rand(dims)
+            @test s(k) == integrand(k)
 
-
-    for (integrand, p, T, args, kwargs...) in (
-        (dos_integrand, p_dos, Float64, ([i*I for i in 1:3],), ),
-        (gloc_integrand, p_gloc, ComplexF64, (), :η => ones(3), :ω => 1:3)
-    )
-
-        f = Integrand(integrand)
-
-        ip_fbz = IntegralProblem(f, fbz, p)
-        ip_bz = IntegralProblem(f, bz, p)
+            # AutoBZ interface user function: f(x, args...; kwargs...) where args & kwargs
+            # stored in MixedParameters
+            f(x, a; b) = a*x+b
+            # SciML interface for Integrand: f(x, p) (# and parameters can be preloaded and
+            # p is merged with MixedParameters)
+            @test f(s(k), 1.3, b=4.2) == Integrand(f, s, 1.3, b=4.2)(k) == Integrand(f, s)(k, MixedParameters(1.3, b=4.2))
+            # IntegralSolver will accept args & kwargs for an Integrand
+            u = IntegralSolver(Integrand(f, s, 1.3, b=4.2), zeros(dims), ones(dims), HCubatureJL())()
+            v = IntegralSolver(Integrand(f, s), zeros(dims), ones(dims), HCubatureJL())(1.3, b=4.2)
+            @test u == v
+        end
     end
-    dims = 3
-    A = I(dims)
-    B = AutoBZCore.canonical_reciprocal_basis(A)
-    fbz = FullBZ(A, B)
-    bz = SymmetricBZ(A, B, fbz.lims, (I,))
-
-    s = InplaceFourierSeries(integer_lattice(dims), period=1)
-
-    dos_integrand(k, H, M) = imag(tr(inv(M-H(k))))/(-pi)      # test integrand with positional arguments
-    p_dos = MixedParameters(s, complex(1.0,1.0)*I)
-
-    gloc_integrand(k, h; η, ω) = inv(complex(ω,η)*I-h(k)) # test integrand with keyword arguments
-    p_gloc = MixedParameters(s; η=1.0, ω=0.0)
-
-        dos_integrand(H::AbstractMatrix, M) = imag(tr(inv(M-H)))/(-pi)
-        s = InplaceFourierSeries(rand(SMatrix{3,3,ComplexF64}, 3,3,3))
-        p = -I
-        f = AutoBZCore.construct_integrand(Integrand(dos_integrand, s), false, tuple(p))
-        @test f == Integrand(dos_integrand, s, p)
-        @test AutoBZCore.iterated_integrand(f, (1.0, 1.0, 1.0), Val(1)) == f((1.0, 1.0, 1.0))
-        @test AutoBZCore.iterated_integrand(f, 809, Val(0)) == AutoBZCore.iterated_integrand(f, 809, Val(2)) == 809
+    @testset "algorithms" begin
+        for dims in 1:3
+            A = I(dims)
+            B = AutoBZCore.canonical_reciprocal_basis(A)
+            bz = FullBZ(A, B)
+            s = InplaceFourierSeries(integer_lattice(dims), period=1)
+            integrand = Integrand(identity, s)
+            for alg in (IAI(), AuxIAI(), PTR(), AutoPTR(), TAI())
+                solver = IntegralSolver(integrand, bz, alg, abstol=1e-6)
+                @test solver() ≈ zero(eltype(s)) atol=1e-6
+            end
+        end
     end
+
 end
 
 @testset "HDF5Ext" begin
-
-    @testset "begin" begin
-
+    fn = tempname()
+    h5open(fn, "w") do io
+        g1 = create_group(io, "Number")
+        @testset "Number" begin
+            solver = IntegralSolver((x, p) -> p, 0, 1, QuadGKJL(), do_inf_transformation=Val(false))
+            params = 1:1.0:10
+            values = batchsolve(g1, solver, params, verb=false)
+            @test g1["I"][:] ≈ values
+        end
+        g2 = create_group(io, "SArray")
+        @testset "SArray" begin
+            f(x,p) = ((s,c) = sincos(p*x) ; SHermitianCompact{2,Float64,3}([s, c, -s]))
+            solver = IntegralSolver(f, 0.0, 1pi, QuadGKJL(), do_inf_transformation=Val(false))
+            params = [0.8, 0.9, 1.0]
+            values = batchsolve(g2, solver, params, verb=false)
+            # Arrays of SArray are flattened to multidimensional arrays
+            @test g2["I"][:,:,:] ≈ reshape(collect(Iterators.flatten(values)), 2, 2, :)
+        end
+        g3 = create_group(io, "AuxValue")
+        @testset "AuxValue" begin
+            f(x,p) = ((re,im) = reim(inv(complex(cos(x), p))) ; AuxValue(re, im))
+            solver = IntegralSolver(f, 0.0, 2pi, QuadGKJL(), abstol=1e-3, do_inf_transformation=Val(false))
+            params = [2.0, 1.0, 0.5]
+            values = batchsolve(g3, solver, params, verb=false)
+            @test g3["I/val"][:] ≈ getproperty.(values, :val)
+            @test g3["I/aux"][:] ≈ getproperty.(values, :aux)
+        end
     end
-    @testset "SArray" begin
-
-    end
-    @testset "AuxValue" begin
-
-    end
+    rm(fn)
 end
-=#
