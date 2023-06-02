@@ -162,6 +162,12 @@ function evaluate_integrand(f, x, p::MixedParameters)
     return f(x, getfield(p, :args)...; getfield(p, :kwargs)...)
 end
 
+# turn off the inf transformation by default
+function IntegralSolver(prob::IntegralProblem{iip,P,<:AbstractAutoBZIntegrand}, alg::SciMLBase.AbstractIntegralAlgorithm; kwargs...) where {iip,P}
+    return IntegralSolver(Integrals.init(prob, alg; do_inf_transformation=Val(false), kwargs...))
+end
+
+
 function (s::IntegralSolver{<:AbstractAutoBZIntegrand})(args...; kwargs...)
     p = MixedParameters(args...; kwargs...)
     sol = do_solve(s, p)

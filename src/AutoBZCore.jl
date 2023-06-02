@@ -20,9 +20,10 @@ For example, computing the local Green's function can be done as follows:
     h = FourierSeries([0.5, 0.0, 0.5]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
     bz = FullBZ(2pi*I(1))                                   # construct BZ from lattice vectors A=2pi*I
     integrand = Integrand(gloc_integrand, h, η=0.1)         # construct integrand with Fourier series h and parameter η=0.1
+    prob = IntegralProblem(integrand, bz)                   # setup the integral problem
     alg = IAI()                                             # choose integration algorithm (also AutoPTR() and PTR())
-    gloc = IntegralSolver(integrand, bz, alg; abstol=1e-3)  # construct a solver for gloc to within specified tolerance
-    gloc(ω=0.0)                                               # evaluate gloc at frequency ω=0.0
+    gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
+    gloc(ω=0.0)                                             # evaluate gloc at frequency ω=0.0
 
 !!! note "Assumptions"
     `AutoBZCore` assumes that all calculations occur in the
