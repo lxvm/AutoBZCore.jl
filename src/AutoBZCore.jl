@@ -42,8 +42,8 @@ using Reexport
 
 using AutoSymPTR: alloc_rule, alloc_autobuffer
 using IteratedIntegration: alloc_segbufs
-import Integrals: IntegralProblem, __solvebp_call, SciMLBase.NullParameters, ReCallVJP, ZygoteVJP
-
+import Integrals: IntegralProblem, IntegralCache, __solvebp_call, SciMLBase.NullParameters, ReCallVJP, ZygoteVJP
+import AutoSymPTR: npt_update
 
 export SymmetricBZ, FullBZ, nsyms
 export AbstractSymRep, SymRep, UnknownRep, TrivialRep
