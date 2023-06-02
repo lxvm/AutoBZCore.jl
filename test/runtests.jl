@@ -91,7 +91,12 @@ end
             B = AutoBZCore.canonical_reciprocal_basis(A)
             bz = FullBZ(A, B)
             solver = IntegralSolver(IntegralProblem(f, bz), IAI(), do_inf_transformation=Val(false))
-            @test solver(p) == solve(IntegralProblem(f, bz, p), IAI(), do_inf_transformation=Val(false)).u
+            prob = IntegralProblem(f, bz, p)
+            @test solver(p) == solve(prob, IAI(), do_inf_transformation=Val(false)).u # use the plain remake
+            g = (x,p) -> sum(x)*p[1]+p.a
+            solver2 = IntegralSolver(g, bz, IAI()) # use the MixedParameters interface
+            prob2 = IntegralProblem(g, bz, MixedParameters(12.0, a=1.0))
+            @test solver2(12.0, a=1.0) == solve(prob2, IAI(), do_inf_transformation=Val(false)).u
         end
         @testset "Integrands" begin
             # AutoBZ interface user function: f(x, args...; kwargs...) where args & kwargs
@@ -100,12 +105,13 @@ end
             # SciML interface for Integrand: f(x, p) (# and parameters can be preloaded and
             # p is merged with MixedParameters)
             @test f(6.7, 1.3, b=4.2) == Integrand(f, 1.3, b=4.2)(6.7) == Integrand(f)(6.7, MixedParameters(1.3, b=4.2))
-            # IntegralSolver will accept args & kwargs for an Integrand
+            # An Integrand merges its parameters with the problem's
             prob = IntegralProblem(Integrand(f, 1.3, b=4.2), 0, 1)
             u = IntegralSolver(prob, QuadGKJL())()
             prob = IntegralProblem(Integrand(f), 0, 1)
-            v = IntegralSolver(prob, QuadGKJL())(1.3, b=4.2)
-            @test u == v
+            v = IntegralSolver(prob, QuadGKJL())(MixedParameters(1.3, b=4.2))
+            w = IntegralSolver(Integrand(f), 0, 1, QuadGKJL())(1.3, b=4.2)
+            @test u == v == w
         end
         @testset "batchsolve" begin
             # SciML interface: iterable of parameters
@@ -115,8 +121,7 @@ end
             @test [solver(p) for p in params] == batchsolve(solver, params)
             # AutoBZ interface: array of MixedParameters
             f(x, a; b) = a*x+b
-            prob = IntegralProblem(Integrand(f), 0, 1)
-            solver = IntegralSolver(prob, QuadGKJL(), do_inf_transformation=Val(false))
+            solver = IntegralSolver(Integrand(f), 0, 1, QuadGKJL())
             as = rand(3); bs = rand(3)
             @test [solver(a, b=b) for (a,b) in Iterators.zip(as, bs)] == batchsolve(solver, paramzip(as, b=bs))
             @test [solver(a, b=b) for (a,b) in Iterators.product(as, bs)] == batchsolve(solver, paramproduct(as, b=bs))
@@ -144,8 +149,9 @@ end
             prob = IntegralProblem(Integrand(f, s, 1.3, b=4.2), zeros(dims), ones(dims))
             u = IntegralSolver(prob, HCubatureJL())()
             prob = IntegralProblem(Integrand(f, s), zeros(dims), ones(dims))
-            v = IntegralSolver(prob, HCubatureJL())(1.3, b=4.2)
-            @test u == v
+            v = IntegralSolver(prob, HCubatureJL())(MixedParameters(1.3, b=4.2))
+            w = IntegralSolver(Integrand(f, s), zeros(dims), ones(dims), HCubatureJL())(1.3, b=4.2)
+            @test u == v == w
         end
     end
     @testset "algorithms" begin

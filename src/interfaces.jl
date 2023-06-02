@@ -55,28 +55,48 @@ paramproduct(args...; kwargs...) = paramproduct_(args, NamedTuple(kwargs))
 
 
 """
-    IntegralSolver(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm; abstol, reltol, maxiters, do_inf_transformation)
-
-Constructs a functor that solves the given `IntegralProblem` with the given
-`alg` to within the given tolerances. Calling this functor, `fun` with the
-syntax `fun(p)` returns the estimated integral `I` after updating `prob` with
-the new parameters. Under the hood, this uses the [Integrals.jl
-interface](https://docs.sciml.ai/Integrals/stable/) for defining an
-`IntegralProblem`, so `f` must be a 2-argument function `f(x,p)`, or if
-in-place, a 3-argument function `f(y,x,p)`.
-
-Also, for an `IntegralProblem` with `f` of type [`Integrand`](@ref) type allows
-for providing `MixedParameters` via a `fun(args...; kwargs...)` interface so
-that the `IntegralSolver` can interface easily with other algorithms, such as
-root-finding and interpolation. 
+    IntegralSolver{P}(cache::IntegralCache)
 """
-struct IntegralSolver{F,P,iip,T<:IntegralCache{<:IntegralProblem{iip,P,F}}} <: Function
+struct IntegralSolver{P,T} <: Function
     cache::T
+    IntegralSolver{P}(cache::T) where {P,T<:IntegralCache} = new{P,T}(cache)
 end
 
+"""
+    IntegralSolver(prob::IntegralProblem, alg::AbstractIntegralAlgorithm; abstol, reltol, maxiters, do_inf_transformation)
+
+Return a functor, `fun`, such that `fun(p)` is equivalent to `solve(remake(prob,
+p=p), alg; kwargs...)`. See the SciML `init` and `IntegralProblem` interfaces
+at [Integrals.jl interface](https://docs.sciml.ai/Integrals/stable/) for
+more details.
+"""
 function IntegralSolver(prob::IntegralProblem, alg::SciMLBase.AbstractIntegralAlgorithm; kwargs...)
-    return IntegralSolver(Integrals.init(prob, alg; kwargs...))
+    cache = Integrals.init(prob, alg; kwargs...)
+    return IntegralSolver{NullParameters}(cache)
 end
+
+"""
+    IntegralSolver(f, lb, ub, alg::AbstractIntegralAlgorithm; abstol, reltol, maxiters)
+
+Returns a functor, `fun`, that accepts `MixedParameters` for input via the
+following interface `fun(args...; kwargs...) -> solve(IntegralProblem(f, lb, ub,
+MixedParameters(args..., kwargs...)), alg)`. By default,
+`do_inf_transformation=Val(false)` in order to help with type stability
+"""
+function IntegralSolver(f, lb, ub, alg::SciMLBase.AbstractIntegralAlgorithm; kwargs...)
+    prob = IntegralProblem(f, lb, ub)
+    # turn off the inf transformation by default for type stability
+    cache = Integrals.init(prob, alg; do_inf_transformation=Val(false), kwargs...)
+    return IntegralSolver{MixedParameters}(cache)
+end
+
+"""
+    IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; abstol, reltol, maxiters)
+"""
+function IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...)
+    return IntegralSolver(f, bz, bz, alg; kwargs...)
+end
+
 
 # layer to intercept the problem parameters and transform them
 remake_problem(_, prob::IntegralProblem, p) = remake(prob, p=p)
@@ -94,11 +114,16 @@ function do_solve(s, p)
     return solve!(c)
 end
 
-function (s::IntegralSolver)(p=NullParameters())
+function (s::IntegralSolver{NullParameters})(p=NullParameters())
     sol = do_solve(s, p)
     return sol.u
 end
 
+function (s::IntegralSolver{MixedParameters})(args...; kwargs...)
+    p = MixedParameters(args...; kwargs...)
+    sol = do_solve(s, p)
+    return sol.u
+end
 
 # parallelization
 
@@ -155,25 +180,12 @@ end
 abstract type AbstractAutoBZIntegrand{F} end
 
 function remake_problem(f::AbstractAutoBZIntegrand, prob::IntegralProblem, p)
-    new = remake(prob, p=merge(prob.p, p))
+    new = remake(prob, p=p)
     return remake_problem(f, new)
 end
 function evaluate_integrand(f, x, p::MixedParameters)
     return f(x, getfield(p, :args)...; getfield(p, :kwargs)...)
 end
-
-# turn off the inf transformation by default
-function IntegralSolver(prob::IntegralProblem{iip,P,<:AbstractAutoBZIntegrand}, alg::SciMLBase.AbstractIntegralAlgorithm; kwargs...) where {iip,P}
-    return IntegralSolver(Integrals.init(prob, alg; do_inf_transformation=Val(false), kwargs...))
-end
-
-
-function (s::IntegralSolver{<:AbstractAutoBZIntegrand})(args...; kwargs...)
-    p = MixedParameters(args...; kwargs...)
-    sol = do_solve(s, p)
-    return sol.u
-end
-
 
 """
     Integrand(f, args...; kwargs...)
@@ -210,9 +222,10 @@ function remake_problem(f::Integrand, prob::IntegralProblem)
 end
 
 """
-    construct_autobz_problem(f, prob)
+    remake_autobz_problem(f, prob)
 
 By dispatching on the type of the user's integrand, `f`, users can `remake` the
-`IntegralProblem`. All the parameters 
+`IntegralProblem`. All the parameters of the problem are stored in `prob.p` even
+if they begun in `f.p`
 """
 remake_autobz_problem(_, prob) = prob
