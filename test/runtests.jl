@@ -111,7 +111,8 @@ end
             prob = IntegralProblem(Integrand(f), 0, 1)
             v = IntegralSolver(prob, QuadGKJL())(MixedParameters(1.3, b=4.2))
             w = IntegralSolver(Integrand(f), 0, 1, QuadGKJL())(1.3, b=4.2)
-            @test u == v == w
+            x = IntegralSolver(Integrand(f, b=4.2), 0, 1, QuadGKJL())(1.3)
+            @test u == v == w == x
         end
         @testset "batchsolve" begin
             # SciML interface: iterable of parameters
@@ -151,7 +152,8 @@ end
             prob = IntegralProblem(Integrand(f, s), zeros(dims), ones(dims))
             v = IntegralSolver(prob, HCubatureJL())(MixedParameters(1.3, b=4.2))
             w = IntegralSolver(Integrand(f, s), zeros(dims), ones(dims), HCubatureJL())(1.3, b=4.2)
-            @test u == v == w
+            x = IntegralSolver(Integrand(f, s, b=4.2), zeros(dims), ones(dims), HCubatureJL())(1.3)
+            @test u == v == w == x
         end
     end
     @testset "algorithms" begin

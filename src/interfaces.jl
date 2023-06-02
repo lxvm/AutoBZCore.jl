@@ -196,7 +196,7 @@ p...; kwargs...)`. However when invoked with two arguments, as in an `IntegralPr
 e.g. `int(x, p2)`, it evaluates the union of parameters `f(x, p..., p2...; kwargs...)`.
 This allows for convenient parametrization of the integrand.
 """
-struct Integrand{F,P<:MixedParameters} <: AbstractAutoBZIntegrand{F}
+struct Integrand{F,P} <: AbstractAutoBZIntegrand{F}
     f::F
     p::P
     Integrand{F}(f::F, p::P) where {F,P<:MixedParameters} = new{F,P}(f, p)

@@ -36,6 +36,10 @@ function Integrand(f, s::AbstractFourierSeries, args...; kwargs...)
     p = MixedParameters(args...; kwargs...)
     return FourierIntegrand(f, s, p)
 end
+function Integrand{F}(f::F, s::AbstractFourierSeries, p::MixedParameters) where F
+    return FourierIntegrand(f, s, p)
+end
+
 
 function (f::FourierIntegrand)(x, p=NullParameters())
     return evaluate_integrand(f.f, f.s(x), merge(f.p, p))
