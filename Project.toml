@@ -14,18 +14,21 @@ Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
+[weakdeps]
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+
+[extensions]
+HDF5Ext = "HDF5"
+
 [compat]
 AutoSymPTR = "0.1"
 FourierSeriesEvaluators = "0.1"
 Integrals = "3.1.1"
-IteratedIntegration = "0.1.5"
+IteratedIntegration = "0.1.5, 0.2"
 Reexport = "1"
 Requires = "1"
 StaticArrays = "1"
 julia = "1.6"
-
-[extensions]
-HDF5Ext = "HDF5"
 
 [extras]
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
@@ -33,6 +36,3 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
-
-[weakdeps]
-HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
