@@ -3,7 +3,7 @@ module HDF5Ext
 using Printf: @sprintf
 using LinearAlgebra: norm
 
-using AutoBZCore: IntegralSolver, MixedParameters, solver_type, AuxValue
+using AutoBZCore: IntegralSolver, MixedParameters, solver_type, AuxValue, IntegralSolution
 using HDF5: h5open, write_dataset, read_dataset, Group, H5DataStore, create_dataset, create_group
 import AutoBZCore: batchsolve
 
@@ -55,7 +55,8 @@ function autobz_create_dataset(parent, path, ::Type{AuxValue{T}}, dims) where T
 end
 
 set_value(parent, ax, i, sol) = parent[ax...,i] = sol
-function set_value((gval, gaux)::Tuple, (axval, axaux), i, sol)
+set_value(parent, ax, i, sol::IntegralSolution) = parent[ax...,i] = sol.u
+function set_value((gval, gaux)::Tuple, (axval, axaux), i, sol::IntegralSolution)
     set_value(gval, axval, i, sol.u.val)
     set_value(gaux, axaux, i, sol.u.aux)
     return nothing
@@ -104,7 +105,8 @@ end
 
 Batchsolver
 """
-function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=solver_type(typeof(f), eltype(ps)); verb=true, nthreads=Threads.nthreads())
+function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); verb=true, nthreads=Threads.nthreads())
+    isconcretetype(T) || throw(ArgumentError("Result type of integrand is abstract or could not be inferred. Please provide the concrete return type to save to HDF5"))
     dims = size(ps)
 
     gI, ax = autobz_create_dataset(h5, "I", T, dims)

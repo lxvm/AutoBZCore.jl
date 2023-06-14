@@ -15,9 +15,6 @@ MixedParameters(args...; kwargs...) = MixedParameters(args, NamedTuple(kwargs))
 Base.getindex(p::MixedParameters, i::Int) = getindex(getfield(p, :args), i)
 Base.getproperty(p::MixedParameters, name::Symbol) = getproperty(getfield(p, :kwargs), name)
 
-# we only merge non-MixedParameters in the right argument
-Base.merge(p::MixedParameters, ::NullParameters) = p
-Base.merge(::NullParameters, p::MixedParameters) = p
 Base.merge(p::MixedParameters, q) =
     MixedParameters((getfield(p, :args)..., q), getfield(p, :kwargs))
 Base.merge(q, p::MixedParameters) =
@@ -52,27 +49,31 @@ function paramproduct_(args::Tuple, kwargs::NamedTuple)
 end
 paramproduct(args...; kwargs...) = paramproduct_(args, NamedTuple(kwargs))
 
-
-
 """
-    IntegralSolver{P}(cache::IntegralCache)
+    IntegralSolver(cache::IntegralCache)
+
+This struct is a functor that solves an integral problem as a function of the problem
+parameters for a given algorithms and tolerances.
 """
-struct IntegralSolver{P,T} <: Function
-    cache::T
-    IntegralSolver{P}(cache::T) where {P,T<:IntegralCache} = new{P,T}(cache)
+struct IntegralSolver{F,D,A,T,K} <: Function
+    f::F
+    dom::D
+    alg::A
+    cacheval::T
+    kwargs::K
 end
 
-"""
-    IntegralSolver(prob::IntegralProblem, alg::AbstractIntegralAlgorithm; abstol, reltol, maxiters, do_inf_transformation)
+# some algorithms can already allocate a rule based on `dom`, but we leave extending this
+# method as an optimization to the caller
+init_solver_cacheval(f, dom, alg) = nothing
 
-Return a functor, `fun`, such that `fun(p)` is equivalent to `solve(remake(prob,
-p=p), alg; kwargs...)`. See the SciML `init` and `IntegralProblem` interfaces
-at [Integrals.jl interface](https://docs.sciml.ai/Integrals/stable/) for
-more details.
 """
-function IntegralSolver(prob::IntegralProblem, alg::SciMLBase.AbstractIntegralAlgorithm; kwargs...)
-    cache = Integrals.init(prob, alg; kwargs...)
-    return IntegralSolver{NullParameters}(cache)
+    IntegralSolver(f, dom, alg; abstol, reltol, maxiters)
+"""
+function IntegralSolver(f, dom, alg::IntegralAlgorithm; kwargs...)
+    checkkwargs(NamedTuple(kwargs))
+    cacheval = init_solver_cacheval(f, dom, alg)
+    return IntegralSolver(f, dom, alg, cacheval, NamedTuple(kwargs))
 end
 
 """
@@ -80,47 +81,33 @@ end
 
 Returns a functor, `fun`, that accepts `MixedParameters` for input via the
 following interface `fun(args...; kwargs...) -> solve(IntegralProblem(f, lb, ub,
-MixedParameters(args..., kwargs...)), alg)`. By default,
-`do_inf_transformation=Val(false)` in order to help with type stability
+MixedParameters(args..., kwargs...)), alg)`.
 """
-function IntegralSolver(f, lb, ub, alg::SciMLBase.AbstractIntegralAlgorithm; kwargs...)
-    prob = IntegralProblem(f, lb, ub)
-    # turn off the inf transformation by default for type stability
-    cache = Integrals.init(prob, alg; do_inf_transformation=Val(false), kwargs...)
-    return IntegralSolver{MixedParameters}(cache)
+function IntegralSolver(f, a::T, b::T, alg::IntegralAlgorithm; kwargs...) where {T}
+    dom = T <: Real ? PuncturedInterval((a, b)) : HyperCube(a, b)
+    return IntegralSolver(f, dom, alg; kwargs...)
 end
 
-"""
-    IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; abstol, reltol, maxiters)
-"""
-function IntegralSolver(f, bz::SymmetricBZ, alg::AbstractAutoBZAlgorithm; kwargs...)
-    return IntegralSolver(f, bz, bz, alg; kwargs...)
+function IntegralSolver(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
+    return IntegralSolver(prob.f, prob.dom, alg; kwargs...)
 end
 
 
-# layer to intercept the problem parameters and transform them
-remake_problem(_, prob::IntegralProblem, p) = remake(prob, p=p)
+# layer to intercept the problem parameters & algorithm and transform them
+remake_cache(args...) = IntegralCache(args...)
+remake_cache(c, p) = remake_cache(c.f, c.dom, p, c.alg, c.cacheval, c.kwargs)
 
-remake_problem(prob::IntegralProblem, p) = remake_problem(prob.f, prob, p)
-
-
-function remake_cache(c, p)
-    prob = remake_problem(c.prob, p)
-    return IntegralCache(prob, c.alg, c.sensealg, c.kwargs, c.cacheval, c.isfresh)
+function do_solve(s::IntegralSolver, p)
+    c = if s.cacheval===nothing
+        prob = IntegralProblem(s.f, s.dom, p)
+        make_cache(prob, s.alg; s.kwargs...)
+    else
+        remake_cache(s, p)
+    end
+    return do_solve(c)
 end
 
-function do_solve(s, p)
-    c = remake_cache(s.cache, p)
-    return solve!(c)
-end
-
-function (s::IntegralSolver{NullParameters})(p=NullParameters())
-    sol = do_solve(s, p)
-    return sol.u
-end
-
-function (s::IntegralSolver{MixedParameters})(args...; kwargs...)
-    p = MixedParameters(args...; kwargs...)
+function (s::IntegralSolver)(p)
     sol = do_solve(s, p)
     return sol.u
 end
@@ -161,7 +148,7 @@ function batchsolve!(out, f, ps, nthreads, callback)
     return out
 end
 
-solver_type(F, P) = Base.promote_op((f,p) -> do_solve(f,p).u, F, P)
+solver_type(::F, ::P) where {F,P} = Base.promote_op((f, p) -> do_solve(f, p).u, F, P)
 
 """
     batchsolve(f::IntegralSolver, ps::AbstractArray, [T]; nthreads=Threads.nthreads())
@@ -171,20 +158,11 @@ parallel. Returns an array similar to `ps` containing the evaluated integrals `I
 a form of multithreaded broadcasting. Providing the return type `f(eltype(ps))::T` is
 optional, but will help in case inference of that type fails.
 """
-function batchsolve(f::IntegralSolver, ps::AbstractArray, T=solver_type(typeof(f), eltype(ps)); nthreads=Threads.nthreads(), callback=(x...)->nothing)
-    return batchsolve!(similar(ps, T), f, ps, nthreads, callback)
-end
-
-
-# provide our own parameter interface for our integrands
-abstract type AbstractAutoBZIntegrand{F} end
-
-function remake_problem(f::AbstractAutoBZIntegrand, prob::IntegralProblem, p)
-    new = remake(prob, p=p)
-    return remake_problem(f, new)
-end
-function evaluate_integrand(f, x, p::MixedParameters)
-    return f(x, getfield(p, :args)...; getfield(p, :kwargs)...)
+function batchsolve(f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); nthreads=Threads.nthreads(), callback=(x...)->nothing)
+    prob = IntegralProblem(f.f, f.dom, ps[begin])
+    cache = make_cache(prob, f.alg; f.kwargs...)
+    solver = IntegralSolver(f.f, f.dom, f.alg, cache.cacheval, f.kwargs)
+    return batchsolve!(similar(ps, T), solver, ps, nthreads, callback)
 end
 
 """
@@ -196,10 +174,12 @@ p...; kwargs...)`. However when invoked with two arguments, as in an `IntegralPr
 e.g. `int(x, p2)`, it evaluates the union of parameters `f(x, p..., p2...; kwargs...)`.
 This allows for convenient parametrization of the integrand.
 """
-struct Integrand{F,P} <: AbstractAutoBZIntegrand{F}
+struct Integrand{F,P}
     f::F
     p::P
-    Integrand{F}(f::F, p::P) where {F,P<:MixedParameters} = new{F,P}(f, p)
+    function Integrand{F}(f::F, p::P) where {F,P<:MixedParameters}
+        return new{F,P}(f, p)
+    end
 end
 
 function Integrand(f, args...; kwargs...)
@@ -208,24 +188,20 @@ function Integrand(f, args...; kwargs...)
 end
 
 # provide Integrals.jl interface
-function (f::Integrand)(x, p=NullParameters())
-    return evaluate_integrand(f.f, x, merge(f.p, p))
+function (f::Integrand)(x, q=())
+    p = merge(f.p, q)
+    return f.f(x, getfield(p, :args)...; getfield(p, :kwargs)...)
 end
 
-function construct_integrand(f::Integrand, iip, p)
-    return Integrand(f.f, merge(f.p, p))
+# move all parameters from f.p to p for convenience
+remake_integrand_cache(args...) = IntegralCache(args...)
+function remake_cache(f::Integrand, dom, p, alg, cacheval, kwargs)
+    new = Integrand(f.f)
+    return remake_integrand_cache(new, dom, merge(f.p, p), alg, cacheval, kwargs)
 end
 
-function remake_problem(f::Integrand, prob::IntegralProblem)
-    new = remake(prob, f=Integrand(f.f), p=merge(f.p, prob.p))
-    return remake_autobz_problem(f.f, new)
+function (s::IntegralSolver{<:Integrand})(args...; kwargs...)
+    p = MixedParameters(args...; kwargs...)
+    sol = do_solve(s, p)
+    return sol.u
 end
-
-"""
-    remake_autobz_problem(f, prob)
-
-By dispatching on the type of the user's integrand, `f`, users can `remake` the
-`IntegralProblem`. All the parameters of the problem are stored in `prob.p` even
-if they begun in `f.p`
-"""
-remake_autobz_problem(_, prob) = prob

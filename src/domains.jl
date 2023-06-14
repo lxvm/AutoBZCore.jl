@@ -1,3 +1,23 @@
+struct PuncturedInterval{d,T}
+    s::NTuple{d,T}
+end
+Base.eltype(::Type{PuncturedInterval{d,T}}) where {d,T} = T
+segments(p::PuncturedInterval) = p.s
+endpoints(p::PuncturedInterval) = (p.s[begin], p.s[end])
+
+struct HyperCube{d,T}
+    a::SVector{d,T}
+    b::SVector{d,T}
+end
+function HyperCube(a::NTuple{d,T}, b::NTuple{d,S}) where {d,T,S}
+    F = promote_type(T,S)
+    return HyperCube{d,F}(SVector{d,F}(a), SVector{d,F}(b))
+end
+HyperCube(a, b) = HyperCube(promote(a...), promote(b...))
+Base.eltype(::Type{HyperCube{d,T}}) where {d,T} = T
+
+endpoints(c::HyperCube) = (c.a, c.b)
+
 # utilities
 function lattice_bz_limits(B::AbstractMatrix)
     d = checksquare(B)
@@ -34,8 +54,9 @@ struct SymmetricBZ{S,L,d,T,d2}
     B::SMatrix{d,d,T,d2}
     lims::L
     syms::S
-    SymmetricBZ(A::M, B::M, lims::L, syms::S) where {d,T,d2,M<:SMatrix{d,d,T,d2},L,S} =
-        new{S,L,d,T,d2}(A, B, lims, syms)
+    function SymmetricBZ(A::M, B::M, lims::L, syms::S) where {d,T,d2,M<:SMatrix{d,d,T,d2},L,S}
+        return new{S,L,d,T,d2}(A, B, lims, syms)
+    end
 end
 
 # eventually limits could be computed from B and symmetries

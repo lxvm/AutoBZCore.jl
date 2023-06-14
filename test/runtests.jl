@@ -5,7 +5,6 @@ using StaticArrays
 using OffsetArrays
 
 using HDF5
-using FourierSeriesEvaluators
 using AutoBZCore
 
 
@@ -15,6 +14,11 @@ function integer_lattice(n)
         C[CartesianIndex(ntuple(k -> k == i ? j : 0, n))] = 1/2n
     end
     C
+end
+function make_inversion_ibz(A, B, dims)
+    lims = CubicLimits(zeros(dims),ones(dims)/2)
+    syms = [Diagonal(SVector{dims}(v)) for v in Iterators.product([(1,-1) for i in 1:dims]...)]
+    return SymmetricBZ(A,B,lims,syms)
 end
 
 @testset "AutoBZCore" begin
@@ -50,15 +54,15 @@ end
         dims = 3
         A = I(dims)
         B = AutoBZCore.canonical_reciprocal_basis(A)
-        bz = FullBZ(A, B)
         vol = (2π)^dims
-        ip = IntegralProblem((x,p) -> 1.0, bz)  # unit measure
-        T = SciMLBase.IntegralSolution{Float64,0}
-        for alg in (IAI(), TAI(), PTR(), AutoPTR(), PTR_IAI(), AutoPTR_IAI(), AuxIAI())
-            # we need to specify do_inf_transformation=Val(true/false) for any type stability
-            @test @inferred(T, solve(ip, alg; do_inf_transformation=Val(false))).u ≈ vol
+        for bz in (FullBZ(A, B), make_inversion_ibz(A,B,dims))
+            ip = IntegralProblem((x,p) -> 1.0, bz)  # unit measure
+            T = AutoBZCore.IntegralSolution{Float64}
+            for alg in (IAI(), TAI(), PTR(), AutoPTR(), PTR_IAI(), AutoPTR_IAI())
+                @test @inferred(T, solve(ip, alg)).u ≈ vol
+            end
+            @test @inferred(T, solve(IntegralProblem((x, p) -> exp(-x^2), -Inf, Inf), QuadGKJL())).u ≈ sqrt(pi)
         end
-        @test @inferred(T, solve(IntegralProblem((x, p) -> exp(-x^2), -Inf, Inf), AuxQuadGK())).u ≈ sqrt(pi)
     end
 
     @testset "interfaces" begin
@@ -85,18 +89,18 @@ end
             prob = IntegralProblem(f, a, b, 33) # ordinary integrands get parameters replaced
             solver = IntegralSolver(prob, QuadGKJL())
             @test solver(p) == solve(IntegralProblem(f, a, b, p), QuadGKJL()).u
-            # AutoBZ interface: (bz, alg) and do_inf_transformation=Val(false)
+            # AutoBZ interface: (bz, alg)
             dims = 3
             A = I(dims)
             B = AutoBZCore.canonical_reciprocal_basis(A)
             bz = FullBZ(A, B)
-            solver = IntegralSolver(IntegralProblem(f, bz), IAI(), do_inf_transformation=Val(false))
             prob = IntegralProblem(f, bz, p)
-            @test solver(p) == solve(prob, IAI(), do_inf_transformation=Val(false)).u # use the plain remake
-            g = (x,p) -> sum(x)*p[1]+p.a
-            solver2 = IntegralSolver(g, bz, IAI()) # use the MixedParameters interface
-            prob2 = IntegralProblem(g, bz, MixedParameters(12.0, a=1.0))
-            @test solver2(12.0, a=1.0) == solve(prob2, IAI(), do_inf_transformation=Val(false)).u
+            solver = IntegralSolver(IntegralProblem(f, bz), IAI())
+            @test solver(p) == solve(prob, IAI()).u # use the plain interface
+            # g = (x,p) -> sum(x)*p[1]+p.a
+            # solver2 = IntegralSolver(Integrand(g), bz, IAI()) # use the MixedParameters interface
+            # prob2 = IntegralProblem(g, bz, MixedParameters(12.0, a=1.0))
+            # @test solver2(12.0, a=1.0) == solve(prob2, IAI()).u
         end
         @testset "Integrands" begin
             # AutoBZ interface user function: f(x, args...; kwargs...) where args & kwargs
@@ -108,16 +112,14 @@ end
             # An Integrand merges its parameters with the problem's
             prob = IntegralProblem(Integrand(f, 1.3, b=4.2), 0, 1)
             u = IntegralSolver(prob, QuadGKJL())()
-            prob = IntegralProblem(Integrand(f), 0, 1)
-            v = IntegralSolver(prob, QuadGKJL())(MixedParameters(1.3, b=4.2))
-            w = IntegralSolver(Integrand(f), 0, 1, QuadGKJL())(1.3, b=4.2)
-            x = IntegralSolver(Integrand(f, b=4.2), 0, 1, QuadGKJL())(1.3)
-            @test u == v == w == x
+            v = IntegralSolver(Integrand(f), 0, 1, QuadGKJL())(1.3, b=4.2)
+            w = IntegralSolver(Integrand(f, b=4.2), 0, 1, QuadGKJL())(1.3)
+            @test u == v == w
         end
         @testset "batchsolve" begin
             # SciML interface: iterable of parameters
             prob = IntegralProblem((x, p) -> p, 0, 1)
-            solver = IntegralSolver(prob, QuadGKJL(), do_inf_transformation=Val(false))
+            solver = IntegralSolver(prob, QuadGKJL())
             params = range(1, 2, length=3)
             @test [solver(p) for p in params] == batchsolve(solver, params)
             # AutoBZ interface: array of MixedParameters
@@ -131,42 +133,38 @@ end
 
 end
 
+
 @testset "FourierExt" begin
     @testset "FourierIntegrand" begin
         for dims in 1:3
             s = InplaceFourierSeries(integer_lattice(dims), period=1)
-            integrand = Integrand(identity, s)
-            # evaluation of integrand gives series
-            k = rand(dims)
-            @test s(k) == integrand(k)
-
             # AutoBZ interface user function: f(x, args...; kwargs...) where args & kwargs
             # stored in MixedParameters
-            f(x, a; b) = a*x+b
-            # SciML interface for Integrand: f(x, p) (# and parameters can be preloaded and
-            # p is merged with MixedParameters)
-            @test f(s(k), 1.3, b=4.2) == Integrand(f, s, 1.3, b=4.2)(k) == Integrand(f, s)(k, MixedParameters(1.3, b=4.2))
-            # IntegralSolver will accept args & kwargs for an Integrand
-            prob = IntegralProblem(Integrand(f, s, 1.3, b=4.2), zeros(dims), ones(dims))
+            # a FourierIntegrand should expect a FourierValue in the first argument
+            # a FourierIntegrand is just a wrapper around an integrand
+            f(x::FourierValue, a; b) = a*x.s*x.x .+ b
+            # IntegralSolver will accept args & kwargs for a FourierIntegrand
+            prob = IntegralProblem(FourierIntegrand(f, s, 1.3, b=4.2), zeros(dims), ones(dims))
             u = IntegralSolver(prob, HCubatureJL())()
-            prob = IntegralProblem(Integrand(f, s), zeros(dims), ones(dims))
-            v = IntegralSolver(prob, HCubatureJL())(MixedParameters(1.3, b=4.2))
-            w = IntegralSolver(Integrand(f, s), zeros(dims), ones(dims), HCubatureJL())(1.3, b=4.2)
-            x = IntegralSolver(Integrand(f, s, b=4.2), zeros(dims), ones(dims), HCubatureJL())(1.3)
-            @test u == v == w == x
+            v = IntegralSolver(FourierIntegrand(f, s), zeros(dims), ones(dims), HCubatureJL())(1.3, b=4.2)
+            w = IntegralSolver(FourierIntegrand(f, s, b=4.2), zeros(dims), ones(dims), HCubatureJL())(1.3)
+            @test u == v == w
         end
     end
     @testset "algorithms" begin
+        f(x::FourierValue, a; b) = a*x.s+b
         for dims in 1:3
+            vol = (2pi)^dims
             A = I(dims)
             B = AutoBZCore.canonical_reciprocal_basis(A)
-            bz = FullBZ(A, B)
             s = InplaceFourierSeries(integer_lattice(dims), period=1)
-            integrand = Integrand(identity, s)
-            prob = IntegralProblem(integrand, bz)
-            for alg in (IAI(), AuxIAI(), PTR(), AutoPTR(), TAI())
-                solver = IntegralSolver(prob, alg, reltol=0, abstol=1e-6, do_inf_transformation=Val(false))
-                @test solver() ≈ zero(eltype(s)) atol=1e-6
+            for bz in (FullBZ(A, B), make_inversion_ibz(A,B,dims))
+                integrand = FourierIntegrand(f, s, 1.3, b=1.0)
+                prob = IntegralProblem(integrand, bz)
+                for alg in (IAI(), PTR(), AutoPTR(), TAI())
+                    solver = IntegralSolver(prob, alg, reltol=0, abstol=1e-6)
+                    @test solver() ≈ vol*one(eltype(s)) atol=1e-6
+                end
             end
         end
     end
@@ -179,7 +177,7 @@ end
         g1 = create_group(io, "Number")
         @testset "Number" begin
             prob   = IntegralProblem((x, p) -> p, 0, 1)
-            solver = IntegralSolver(prob, QuadGKJL(), do_inf_transformation=Val(false))
+            solver = IntegralSolver(prob, QuadGKJL())
             params = 1:1.0:10
             values = batchsolve(g1, solver, params, verb=false)
             @test g1["I"][:] ≈ values
@@ -188,7 +186,7 @@ end
         @testset "SArray" begin
             f(x,p) = ((s,c) = sincos(p*x) ; SHermitianCompact{2,Float64,3}([s, c, -s]))
             prob   = IntegralProblem(f, 0.0, 1pi)
-            solver = IntegralSolver(prob, QuadGKJL(), do_inf_transformation=Val(false))
+            solver = IntegralSolver(prob, QuadGKJL())
             params = [0.8, 0.9, 1.0]
             values = batchsolve(g2, solver, params, verb=false)
             # Arrays of SArray are flattened to multidimensional arrays
@@ -198,7 +196,7 @@ end
         @testset "AuxValue" begin
             f(x,p) = ((re,im) = reim(inv(complex(cos(x), p))) ; AuxValue(re, im))
             prob   = IntegralProblem(f, 0.0, 2pi)
-            solver = IntegralSolver(prob, QuadGKJL(), abstol=1e-3, do_inf_transformation=Val(false))
+            solver = IntegralSolver(prob, QuadGKJL(), abstol=1e-3)
             params = [2.0, 1.0, 0.5]
             values = batchsolve(g3, solver, params, verb=false)
             @test g3["I/val"][:] ≈ getproperty.(values, :val)

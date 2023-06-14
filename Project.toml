@@ -5,7 +5,8 @@ version = "0.2.0"
 
 [deps]
 AutoSymPTR = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
-Integrals = "de52edbc-65ea-441a-8357-d3a637375a31"
+FourierSeriesEvaluators = "2a892dea-6eef-4bb5-9d1c-de966c9f6db5"
+HCubature = "19dc6840-f33b-545b-b366-655c7e3ffd49"
 IteratedIntegration = "3ecdc4d6-ee34-4049-885a-a4e3631db98b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
@@ -13,30 +14,25 @@ Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
-AuxQuad = "b59dd6d0-509b-4777-bfd1-cd8479d7b9e5"
-FourierSeriesEvaluators = "2a892dea-6eef-4bb5-9d1c-de966c9f6db5"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 
 [extensions]
-FourierExt = "FourierSeriesEvaluators"
 HDF5Ext = "HDF5"
 
 [compat]
-AutoSymPTR = "0.1"
+AutoSymPTR = "0.2"
 FourierSeriesEvaluators = "0.1"
+HCubature = "1.4"
 HDF5 = "0.16.15"
-Integrals = "3.8"
 IteratedIntegration = "0.2"
 Reexport = "1"
 StaticArrays = "1"
 julia = "1.9"
 
 [extras]
-AuxQuad = "b59dd6d0-509b-4777-bfd1-cd8479d7b9e5"
-FourierSeriesEvaluators = "2a892dea-6eef-4bb5-9d1c-de966c9f6db5"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "FourierSeriesEvaluators", "HDF5", "StaticArrays", "OffsetArrays"]
+test = ["Test", "HDF5", "StaticArrays", "OffsetArrays"]

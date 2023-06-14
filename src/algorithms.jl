@@ -1,9 +1,163 @@
+# we recreate a lot of the SciML Integrals.jl functionality, but only for our algorithms
+# the features we omit are: inplace integrands, infinite limit transformations, nout and
+# batch keywords. Otherwise, there is a correspondence between.
+# solve -> do_solve
+# init -> make_cache
+
 """
-    AbstractAutoBZAlgorithm
+    IntegralAlgorithm
+
+Abstract supertype for integration algorithms.
+"""
+abstract type IntegralAlgorithm end
+
+
+struct IntegralProblem{F,D,P}
+    f::F
+    dom::D
+    p::P
+    IntegralProblem{F,D,P}(f::F, dom::D, p::P) where {F,D,P} = new{F,D,P}(f, dom, p)
+end
+IntegralProblem(f::F, dom::D, p::P=()) where {F,D,P} = IntegralProblem{F,D,P}(f, dom, p)
+function IntegralProblem(f::F, a::T, b::T, p::P=()) where {F,T,P}
+    dom = T <: Real ? PuncturedInterval((a, b)) : HyperCube(a, b)
+    return IntegralProblem{F,typeof(dom),P}(f, dom, p)
+end
+
+struct IntegralCache{F,D,P,A,C,K}
+    f::F
+    dom::D
+    p::P
+    alg::A
+    cacheval::C
+    kwargs::K
+end
+
+function make_cache(f, dom, p, alg; kwargs...)
+    cacheval = init_cacheval(f, dom, p, alg)
+    return IntegralCache(f, dom, p, alg, cacheval, NamedTuple(kwargs))
+end
+
+function checkkwargs(kwargs)
+    for key in keys(kwargs)
+        key in (:abstol, :reltol, :maxiters) || throw(ArgumentError("keyword $key unrecognized"))
+    end
+    return nothing
+end
+
+function make_cache(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
+    checkkwargs(NamedTuple(kwargs))
+    f = prob.f; dom = prob.dom; p = prob.p
+    return make_cache(f, dom, p, alg; kwargs...)
+end
+
+function solve(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
+    cache = make_cache(prob, alg; kwargs...)
+    return do_solve(cache)
+end
+
+function do_solve(c::IntegralCache)
+    return do_solve(c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
+end
+
+# Methods an algorithm must define
+# - init_cacheval
+# - do_solve
+
+# this method can be extended to different integrands so that it doesn't have to be
+# evaluated to get the type, which is also useful in case parameters are incomplete
+integrand_return_type(f, x, p) = typeof(f(x, p))
+
+struct IntegralSolution{T,E}
+    u::T
+    resid::E
+    retcode::Bool
+end
+
+
+# Here we replicate the algorithms provided by SciML
+
+"""
+    QuadGKJL(; order = 7, norm = norm, parallel = Sequential())
+
+Generalization of the QuadGKJL provided by Integrals.jl that allows for `AuxValue`d
+integrands for auxiliary integration and multi-threaded evaluation with a `parallel`
+argument. See `auxquadgk` from IteratedIntegration.jl for more detail.
+"""
+struct QuadGKJL{F,P} <: IntegralAlgorithm
+    order::Int
+    norm::F
+    parallel::P
+end
+function QuadGKJL(; order = 7, norm = norm, parallel = Sequential())
+    return QuadGKJL(order, norm, parallel)
+end
+
+rule_type(::GaussKronrod{T}) where {T} = T
+init_rule(f, dom, p, alg::QuadGKJL) = GaussKronrod(eltype(dom), alg.order)
+function init_segbuf(f, dom, p, rule)
+    TX = float(eltype(dom))
+    TF = integrand_return_type(f, zero(rule_type(rule)), p)
+    TI = typeof(zero(TF)* float(real(one(TX))))
+    TE = typeof(norm(zero(TI)))
+    return TF, IteratedIntegration.alloc_segbuf(TX, TI, TE)
+end
+init_parallel(p::Sequential, _, _, _) = p
+function init_parallel(p::Parallel, T, S, order)
+    p isa Parallel{T,S} && return p
+    return Parallel(Vector{T}(undef, 2*order+1), Vector{S}(undef, 1), Vector{S}(undef, 2))
+end
+function init_cacheval(f, dom, p, alg::QuadGKJL)
+    rule = init_rule(f, dom, p, alg)
+    TF, segbuf = init_segbuf(f, dom, p, rule)
+    parallel = init_parallel(alg.parallel, TF, eltype(segbuf), alg.order)
+    return (rule=rule, segbuf=segbuf, parallel=parallel)
+end
+
+function do_solve(f, dom, p, alg::QuadGKJL, cacheval;
+                    reltol = nothing, abstol = nothing, maxiters = typemax(Int))
+    g = x -> f(x, p)
+
+    segs = segments(dom)
+    val, err = auxquadgk(g, segs..., parallel = cacheval.parallel, rule = cacheval.rule, maxevals = maxiters,
+                      rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval.segbuf)
+    return IntegralSolution(val, err, true)
+end
+
+"""
+    HCubatureJL(; norm=norm, initdiv=1)
+
+A copy of `HCubatureJL` from Integrals.jl.
+"""
+struct HCubatureJL{N} <: IntegralAlgorithm
+    norm::N
+    initdiv::Int
+end
+HCubatureJL(; norm=norm, initdiv=1) = HCubatureJL(norm, initdiv)
+
+init_cacheval(f, dom, p, ::HCubatureJL) = Some(nothing)
+
+function do_solve(f, dom, p, alg::HCubatureJL, cacheval;
+                    reltol = nothing, abstol = nothing, maxiters = typemax(Int))
+
+    abstol_ = (abstol===nothing) ? zero(eltype(dom)) : abstol
+    reltol_ = (reltol===nothing) ? (iszero(abstol_) ? sqrt(eps(typeof(abstol_))) : zero(abstol_)) : reltol
+
+    g = x -> f(x, p)
+    a, b = endpoints(dom)
+    routine = a isa Number ? hquadrature : hcubature
+    val, err = routine(g, a, b; norm = alg.norm, initdiv = alg.initdiv, atol=abstol_, rtol=reltol_, maxevals=maxiters)
+    return IntegralSolution(val, err, true)
+end
+
+# Now we provide the BZ integration algorithms
+
+"""
+    AutoBZAlgorithm
 
 Abstract supertype for Brillouin zone integration algorithms.
 """
-abstract type AbstractAutoBZAlgorithm <: SciMLBase.AbstractIntegralAlgorithm end
+abstract type AutoBZAlgorithm <: IntegralAlgorithm end
 
 """
     IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing)
@@ -14,34 +168,38 @@ Iterated-adaptive integration using `nested_quadgk` from
 See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
 `nested_quadgk`.
 """
-struct IAI{F,I,S} <: AbstractAutoBZAlgorithm
+struct IAI{F,I,P} <: AutoBZAlgorithm
     order::Int
     norm::F
     initdivs::I
-    segbufs::S
-end
-IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing) = IAI(order, norm, initdivs, segbufs)
-
-
-"""
-    AuxIAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, parallel=nothing)
-
-Iterated-adaptive integration using `nested_quadgk` from
-[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
-**This algorithm is the most efficient for localized integrands**.
-See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
-`nested_quadgk`.
-"""
-struct AuxIAI{F,I,S,P} <: AbstractAutoBZAlgorithm
-    order::Int
-    norm::F
-    initdivs::I
-    segbufs::S
     parallels::P
 end
+function IAI(; order=7, norm=norm, initdivs=nothing, parallels=nothing)
+    return IAI(order, norm, initdivs, parallels)
+end
 
-function AuxIAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, parallels=nothing)
-    AuxIAI(order, norm, initdivs, segbufs, parallels)
+function init_rule(f, bz::SymmetricBZ , p, alg::IAI)
+    return NestedGaussKronrod(eltype(bz.lims), alg.order, Val(ndims(bz.lims)))
+end
+
+rule_type(r::NestedGaussKronrod) = IteratedIntegration.rule_type(r)
+function init_segbufs(f, dom, p, rule)
+    TX = float(eltype(dom))
+    TF = integrand_return_type(f, zero(rule_type(rule)), p)
+    TI = typeof(zero(TF) * float(real(one(TX))))
+    TE = typeof(norm(zero(TI)))
+    return TF, alloc_segbufs(TX, TI, TE, ndims(dom))
+end
+init_parallels(::Nothing, args...) = nothing
+init_parallels(::Tuple{}, args...) = ()
+function init_parallels(p::Tuple, args...)
+    return (init_parallel(first(p), args...), init_parallels(Base.tail(p), args...)...)
+end
+function init_cacheval(f, bz::SymmetricBZ, p, alg::IAI)
+    rule = init_rule(f, bz, p, alg)
+    TF, segbufs = init_segbufs(f, bz.lims, p, rule)
+    parallels = init_parallels(alg.parallels, TF, eltype(eltype(segbufs)), alg.order)
+    return (rule=rule, segbufs=segbufs, parallels=parallels)
 end
 
 """
@@ -53,14 +211,32 @@ using the routine `ptr` from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.
 See [`alloc_rule`](@ref) for how to pre-evaluate a PTR rule for use across calls
 with compatible integrands.
 """
-struct PTR{R} <: AbstractAutoBZAlgorithm
+struct PTR <: AutoBZAlgorithm
     npt::Int
-    rule::R
 end
-PTR(; npt=50, rule=nothing) = PTR(npt, rule)
+PTR(; npt=50) = PTR(npt)
+function init_rule(f, bz::FullBZType , p, alg::PTR)
+    dom = Basis(bz.B)
+    return AutoSymPTR.PTR(eltype(dom), Val(ndims(dom)), alg.npt)
+end
+function init_rule(f, bz::SymmetricBZ , p, alg::PTR)
+    dom = Basis(bz.B)
+    return AutoSymPTR.MonkhorstPack(eltype(dom), Val(ndims(dom)), alg.npt, bz.syms)
+end
+
+rule_type(::AutoSymPTR.PTR{N,T}) where {N,T} = SVector{N,T}
+function init_buffer(f, dom, p, rule)
+    T = integrand_return_type(f, zero(rule_type(rule)), p)
+    return T[]
+end
+function init_cacheval(f, bz::SymmetricBZ , p, alg::PTR)
+    rule = init_rule(f, bz, p, alg)
+    buf = init_buffer(f, Basis(bz.B), p, rule)
+    return (rule=rule, buffer=buf)
+end
 
 """
-    AutoPTR(; norm=norm, buffer=nothing)
+    AutoPTR(; norm=norm, a=1.0)
 
 Periodic trapezoidal rule with automatic convergence to tolerances passed to the
 solver with respect to `norm` using the routine `autosymptr` from
@@ -69,11 +245,39 @@ solver with respect to `norm` using the routine `autosymptr` from
 See [`alloc_autobuffer`](@ref) for how to pre-evaluate a buffer for `autosymptr`
 for use across calls with compatible integrands.
 """
-struct AutoPTR{F,B} <: AbstractAutoBZAlgorithm
+struct AutoPTR{F} <: AutoBZAlgorithm
     norm::F
-    buffer::B
+    a::Float64
+    nmin::Int
+    nmax::Int
+    n₀::Float64
+    Δn::Float64
+    keepmost::Int
 end
-AutoPTR(; norm=norm, buffer=nothing) = AutoPTR(norm, buffer)
+function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2)
+    return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost)
+end
+function init_rule(f, bz::SymmetricBZ, p, alg::AutoPTR)
+    return AutoSymPTR.MonkhorstPackRule(bz.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
+end
+rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
+function init_cacheval(f, bz::SymmetricBZ, p, alg::AutoPTR)
+    rule = init_rule(f, bz, p, alg)
+    dom = Basis(bz.B)
+    cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
+    buffer = init_buffer(f, dom, p, cache[1])
+    return (rule=rule, cache=cache, buffer=buffer)
+end
+function reduce_ptr_cache!(cache::Vector, nrule::Integer)
+    @assert nrule > 1
+    # keep at most the `nrule` most refined rules
+    (nelem = min(length(cache), nrule)) == length(cache) && return cache
+    reverse!(cache)
+    reverse!(cache, firstindex(cache), firstindex(cache)+nelem-1)
+    resize!(cache, nelem)
+    return cache
+end
+
 
 """
     PTR_IAI(; ptr=PTR(), iai=IAI())
@@ -85,15 +289,21 @@ algorithm and may not have the expected scaling with localization length unless
 an `abstol` is used since computational effort may be wasted via a `reltol` with
 the naive `nested_quadgk`.
 """
-struct PTR_IAI{P,I} <: AbstractAutoBZAlgorithm
+struct PTR_IAI{P,I} <: AutoBZAlgorithm
     ptr::P
     iai::I
 end
 PTR_IAI(; ptr=PTR(), iai=IAI()) = PTR_IAI(ptr, iai)
 
+
+function init_cacheval(f, bz::SymmetricBZ, p, alg::PTR_IAI)
+    ptr_cacheval = init_cacheval(f, bz, p, alg.ptr)
+    iai_cacheval = init_cacheval(f, bz, p, alg.iai)
+    return (ptr=ptr_cacheval, iai=iai_cacheval)
+end
+
 """
     AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI())
-
 
 Multi-algorithm that returns an `IAI` calculation with an `abstol` determined
 from an `AutoPTR` estimate, `I`, computed to `reltol` precision, and the `rtol`
@@ -103,121 +313,82 @@ algorithm and may not have the expected scaling with localization length unless
 an `abstol` is used since computational effort may be wasted via a `reltol` with
 the naive `nested_quadgk`.
 """
-struct AutoPTR_IAI{P,I} <: AbstractAutoBZAlgorithm
+struct AutoPTR_IAI{P,I} <: AutoBZAlgorithm
     reltol::Float64
     ptr::P
     iai::I
 end
 AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI()) = AutoPTR_IAI(reltol, ptr, iai)
 
+function init_cacheval(f, bz::SymmetricBZ, p, alg::AutoPTR_IAI)
+    ptr_cacheval = init_cacheval(f, bz, p, alg.ptr)
+    iai_cacheval = init_cacheval(f, bz, p, alg.iai)
+    return (ptr=ptr_cacheval, iai=iai_cacheval)
+end
+
+
+
 """
-    TAI(; rule=HCubatureJL())
+    TAI(; norm=norm, initdivs=1)
 
 Tree-adaptive integration using `hcubature` from
 [HCubature.jl](https://github.com/JuliaMath/HCubature.jl). This routine is
 limited to integration over hypercube domains and may not use all symmetries.
 """
-struct TAI{T<:HCubatureJL} <: AbstractAutoBZAlgorithm
-    rule::T
+struct TAI{N} <: AutoBZAlgorithm
+    norm::N
+    initdiv::Int
 end
-TAI(; rule=HCubatureJL()) = TAI(rule)
+TAI(; norm=norm, initdiv=1) = TAI(norm, initdiv)
 
-# Imitate original interface
-IntegralProblem(f, bz::SymmetricBZ, args...; kwargs...) =
-    IntegralProblem{isinplace(f, 3)}(f, bz, bz, args...; kwargs...)
+init_cacheval(f, bz::SymmetricBZ, p, alg::TAI) = Some(nothing)
 
-# layer to intercept integrand construction
-function construct_integrand(f, iip, p)
-    if iip
-        (y, x) -> (f(y, x, p); y)
-    else
-        x -> f(x, p)
-    end
-end
 
-function __solvebp_call(prob::IntegralProblem, alg::AbstractAutoBZAlgorithm,
-                                sensealg, bz::SymmetricBZ, ::SymmetricBZ, p;
-                                reltol = nothing, abstol = nothing, maxiters = typemax(Int))
+function do_solve(f, bz::SymmetricBZ, p, alg::AutoBZAlgorithm, cacheval;
+                    reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
     abstol_ = (abstol===nothing) ? zero(eltype(bz)) : abstol
-    reltol_ = (abstol===nothing) ? (iszero(abstol_) ? sqrt(eps(typeof(abstol_))) : zero(abstol_)) : reltol
-    f = construct_integrand(prob.f, isinplace(prob), prob.p)
+    reltol_ = (reltol===nothing) ? (iszero(abstol_) ? sqrt(eps(typeof(abstol_))) : zero(abstol_)) : reltol
+
+    g = x -> f(x, p)
 
     if alg isa IAI
         j = abs(det(bz.B))  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
         atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
-        val, err = nested_quadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters,
-                                        norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
+        val, err = nested_quad(g, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters, rule = cacheval.rule, parallels=cacheval.parallels,
+                                        norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = cacheval.segbufs)
         val_ = symmetrize(f, bz, j*val)
         err_ = symmetrize(f, bz, j*err)
-        SciMLBase.build_solution(prob, alg, val_, err_, retcode = ReturnCode.Success)
-    elseif alg isa AuxIAI
-        j = abs(det(bz.B))  # include jacobian determinant for map from fractional reciprocal lattice coordinates to Cartesian reciprocal lattice
-        atol = abstol_/nsyms(bz)/j # reduce absolute tolerance by symmetry factor
-        val, err = nested_auxquadgk(f, bz.lims; atol=atol, rtol=reltol_, maxevals = maxiters, parallels=alg.parallels,
-                                        norm = alg.norm, order = alg.order, initdivs = alg.initdivs, segbufs = alg.segbufs)
-        val_ = symmetrize(f, bz, j*val)
-        err_ = symmetrize(f, bz, j*err)
-        SciMLBase.build_solution(prob, alg, val_, err_, retcode = ReturnCode.Success)
+        IntegralSolution(val_, err_, true)
     elseif alg isa PTR
-        val = symptr(f, bz.B, bz.syms; npt = alg.npt, rule = alg.rule)
+        val = cacheval.rule(g, Basis(bz.B), cacheval.buffer)
         val_ = symmetrize(f, bz, val)
-        SciMLBase.build_solution(prob, alg, val_, nothing, retcode = ReturnCode.Success)
+        IntegralSolution(val_, nothing, true)
     elseif alg isa AutoPTR
-        val, err = autosymptr(f, bz.B, bz.syms;
-                        atol = abstol_, rtol = reltol_, maxevals = maxiters, norm=alg.norm, buffer=alg.buffer)
+        val, err = autosymptr(g, Basis(bz.B); syms = bz.syms, rule = cacheval.rule, cache = cacheval.cache,
+                        abstol = abstol_, reltol = reltol_, maxevals = maxiters, norm=alg.norm, buffer=cacheval.buffer)
+        reduce_ptr_cache!(cacheval.cache, alg.keepmost)
         val_ = symmetrize(f, bz, val)
         err_ = symmetrize(f, bz, err)
-        SciMLBase.build_solution(prob, alg, val_, err_, retcode = ReturnCode.Success)
+        IntegralSolution(val_, err_, true)
     elseif alg isa PTR_IAI
-        sol = __solvebp_call(prob, alg.ptr, sensealg, bz, bz, p;
-                                reltol = reltol_, abstol = abstol_, maxiters = maxiters)
-        atol = max(abstol_, reltol_*alg.iai.norm(sol))
-        __solvebp_call(prob, alg.iai, sensealg, bz, bz, p;
-                                reltol = zero(atol), abstol = atol, maxiters = maxiters)
+        sol = do_solve(f, bz, p, alg.ptr, cacheval.ptr; reltol = reltol_, abstol = abstol, maxiters = maxiters)
+        atol = max(abstol_, reltol_*alg.iai.norm(sol.u))
+        do_solve(f, bz, p, alg.ptr, cacheval.ptr; reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa AutoPTR_IAI
-        sol = __solvebp_call(prob, alg.ptr, sensealg, bz, bz, p;
-                                reltol = alg.reltol, abstol = abstol_, maxiters = maxiters)
-        atol = max(abstol_, reltol_*alg.iai.norm(sol))
-        __solvebp_call(prob, alg.iai, sensealg, bz, bz, p;
-                                reltol = zero(atol), abstol = atol, maxiters = maxiters)
+        sol = do_solve(f, bz, p, alg.ptr, cacheval.ptr; reltol = reltol_, abstol = abstol, maxiters = maxiters)
+        atol = max(abstol_, reltol_*alg.iai.norm(sol.u))
+        do_solve(f, bz, p, alg.ptr, cacheval.ptr; reltol = zero(atol), abstol = atol, maxiters = maxiters)
     elseif alg isa TAI
+        # Fallback to FBZ if the domain is not a cube
         l, nsym = bz.lims isa CubicLimits ? (bz.lims, nsyms(bz)) : (lattice_bz_limits(bz.B), 1)
-        a = l.a
-        b = l.b
         j = abs(det(bz.B))
         atol = abstol_/nsym/j # reduce absolute tolerance by symmetry factor
-        sol = __solvebp_call(prob, alg.rule, sensealg, a, b, p;
-                                abstol=atol, reltol=reltol_, maxiters=maxiters)
+        val, err = hcubature(g, l.a, l.b; norm=alg.norm, initdiv=alg.initdiv, atol=atol, rtol=reltol_, maxevals=maxiters)
         if bz.lims isa CubicLimits
-            SciMLBase.build_solution(sol.prob, sol.alg, symmetrize(f, bz, j*sol.u), symmetrize(f, bz, j*sol.resid), retcode = sol.retcode, chi = sol.chi)
+            IntegralSolution(symmetrize(f, bz, j*val), symmetrize(f, bz, j*err), true)
         else
-            SciMLBase.build_solution(sol.prob, sol.alg, j*sol.u, j*sol.resid, retcode = sol.retcode, chi = sol.chi)
+            IntegralSolution(j*val, j*err, true)
         end
     end
-end
-
-struct AuxQuadGK{F,S,P} <: SciMLBase.AbstractIntegralAlgorithm
-    order::Int
-    norm::F
-    segbuf::S
-    parallel::P
-end
-function AuxQuadGK(; order = 7, norm = norm, segbuf = nothing, parallel = Sequential())
-    AuxQuadGK(order, norm, segbuf, parallel)
-end
-
-function Integrals.__solvebp_call(prob::IntegralProblem, alg::AuxQuadGK, sensealg, lb, ub, p;
-                        reltol = 1e-8, abstol = 1e-8,
-                        maxiters = typemax(Int))
-    if isinplace(prob) || lb isa AbstractArray || ub isa AbstractArray
-        error("AuxQuadGK only accepts one-dimensional quadrature problems.")
-    end
-    @assert prob.batch == 0
-    @assert prob.nout == 1
-    f = construct_integrand(prob.f, isinplace(prob), prob.p)
-
-    val, err = auxquadgk(f, lb, ub, parallel = alg.parallel,
-                      rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=alg.segbuf)
-    SciMLBase.build_solution(prob, AuxQuadGK(), val, err, retcode = ReturnCode.Success)
 end
