@@ -94,7 +94,7 @@ function QuadGKJL(; order = 7, norm = norm, parallel = Sequential())
 end
 
 rule_type(::GaussKronrod{T}) where {T} = T
-init_rule(f, dom, p, alg::QuadGKJL) = GaussKronrod(eltype(dom), alg.order)
+init_rule(dom, alg::QuadGKJL) = GaussKronrod(eltype(dom), alg.order)
 function init_segbuf(f, dom, p, rule)
     TX = float(eltype(dom))
     TF = integrand_return_type(f, zero(rule_type(rule)), p)
@@ -108,7 +108,7 @@ function init_parallel(p::Parallel, T, S, order)
     return Parallel(Vector{T}(undef, 2*order+1), Vector{S}(undef, 1), Vector{S}(undef, 2))
 end
 function init_cacheval(f, dom, p, alg::QuadGKJL)
-    rule = init_rule(f, dom, p, alg)
+    rule = init_rule(dom, alg)
     TF, segbuf = init_segbuf(f, dom, p, rule)
     parallel = init_parallel(alg.parallel, TF, eltype(segbuf), alg.order)
     return (rule=rule, segbuf=segbuf, parallel=parallel)
@@ -178,7 +178,7 @@ function IAI(; order=7, norm=norm, initdivs=nothing, parallels=nothing)
     return IAI(order, norm, initdivs, parallels)
 end
 
-function init_rule(f, bz::SymmetricBZ , p, alg::IAI)
+function init_rule(bz::SymmetricBZ, alg::IAI)
     return NestedGaussKronrod(eltype(bz.lims), alg.order, Val(ndims(bz.lims)))
 end
 
@@ -196,7 +196,7 @@ function init_parallels(p::Tuple, args...)
     return (init_parallel(first(p), args...), init_parallels(Base.tail(p), args...)...)
 end
 function init_cacheval(f, bz::SymmetricBZ, p, alg::IAI)
-    rule = init_rule(f, bz, p, alg)
+    rule = init_rule(bz, alg)
     TF, segbufs = init_segbufs(f, bz.lims, p, rule)
     parallels = init_parallels(alg.parallels, TF, eltype(eltype(segbufs)), alg.order)
     return (rule=rule, segbufs=segbufs, parallels=parallels)
@@ -215,11 +215,11 @@ struct PTR <: AutoBZAlgorithm
     npt::Int
 end
 PTR(; npt=50) = PTR(npt)
-function init_rule(f, bz::FullBZType , p, alg::PTR)
+function init_rule(bz::FullBZType, alg::PTR)
     dom = Basis(bz.B)
     return AutoSymPTR.PTR(eltype(dom), Val(ndims(dom)), alg.npt)
 end
-function init_rule(f, bz::SymmetricBZ , p, alg::PTR)
+function init_rule(bz::SymmetricBZ, alg::PTR)
     dom = Basis(bz.B)
     return AutoSymPTR.MonkhorstPack(eltype(dom), Val(ndims(dom)), alg.npt, bz.syms)
 end
@@ -230,7 +230,7 @@ function init_buffer(f, dom, p, rule)
     return T[]
 end
 function init_cacheval(f, bz::SymmetricBZ , p, alg::PTR)
-    rule = init_rule(f, bz, p, alg)
+    rule = init_rule(bz, alg)
     buf = init_buffer(f, Basis(bz.B), p, rule)
     return (rule=rule, buffer=buf)
 end
@@ -257,12 +257,12 @@ end
 function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2)
     return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost)
 end
-function init_rule(f, bz::SymmetricBZ, p, alg::AutoPTR)
+function init_rule(bz::SymmetricBZ, alg::AutoPTR)
     return AutoSymPTR.MonkhorstPackRule(bz.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
 end
 rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
 function init_cacheval(f, bz::SymmetricBZ, p, alg::AutoPTR)
-    rule = init_rule(f, bz, p, alg)
+    rule = init_rule(bz, alg)
     dom = Basis(bz.B)
     cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
     buffer = init_buffer(f, dom, p, cache[1])

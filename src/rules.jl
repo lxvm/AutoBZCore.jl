@@ -2,6 +2,19 @@
 # various algorithms. It could be a package extension, but we keep it in the main library
 # because it provides the infrastructure of the main application of library
 
+# In multiple dimensions, these specialized rules can provide a benefit over batch
+# integrands since the multidimensional structure of the quadrature rule can be lost when
+# batching many points together and passing them to an integrand to solve simultaneously. In
+# some cases we can also cache the rule with series evaluations and apply it to different
+# integrands, which again could only be achieved with a batched and vector-valued integrand.
+# The ethos of this package is to let the user provide the kernel for the integrand and to
+# have the library take care of the details of fast evaluation and such. Automating batched
+# and vector-valued integrands is another worthwhile approach, but it is not well
+# established in existing Julia libraries or Integrals.jl, so in the meantime I strive to
+# provide these efficient rules for Wannier interpolation. In the long term, the batched and
+# vector-valued approach will allow distributed computing and other benefits that are beyond
+# the scope of what this package aims to provide.
+
 # I would like to just make the user pass in some `FourierRule` to indicate that their
 # integrand accepts `FourierValue`s, however in previous versions we used the
 # `FourierIntegrand` concept, which we now convert to a Fourier 'rule' if there is a benefit
@@ -9,8 +22,8 @@
 # Also, rules don't exist in the SciML interface we are copying, so we have to dispatch on
 # the integrand
 
-struct FourierIntegrand{F<:Integrand,S<:AbstractFourierSeries}
-    f::F
+struct FourierIntegrand{F,P,S<:AbstractFourierSeries}
+    f::Integrand{F,P}
     s::S
 end
 
@@ -19,24 +32,10 @@ function FourierIntegrand(f::F, s::AbstractFourierSeries, args...; kwargs...) wh
     return FourierIntegrand(Integrand{F}(f, p), s)
 end
 
-# TODO we want to pass the Fourier series from integrand to rule at `make_cache` time, so we
-# need to first intercept the problem to move the series to the parameters, possibly?
-
-function make_cache(f::FourierIntegrand, dom, p, alg; kwargs...)
-    # algorithms need to return the integrand and cache, since they can decide whether to
-    # move/keep the Fourier series into the cacheval/integrand
-    g, cacheval = init_fourier_cacheval(f.s, f.f, dom, p, alg)
-    return IntegralCache(g, dom, p, alg, cacheval, NamedTuple(kwargs))
-end
-
-function init_fourier_solver_cacheval(s::AbstractFourierSeries, f, dom, alg)
-    return FourierIntegrand(f, s), nothing
-end
-
-function IntegralSolver(f::FourierIntegrand, dom, alg::IntegralAlgorithm; kwargs...)
-    checkkwargs(NamedTuple(kwargs))
-    g, cacheval = init_fourier_solver_cacheval(f.s, f.f, dom, alg)
-    return IntegralSolver(g, dom, alg, cacheval, NamedTuple(kwargs))
+function Base.getproperty(f::FourierIntegrand, name::Symbol)
+    name === :f && return getfield(f, :f).f
+    name === :p && return getfield(f, :f).p
+    return getfield(f, name)
 end
 
 function (s::IntegralSolver{<:FourierIntegrand})(args...; kwargs...)
@@ -45,12 +44,9 @@ function (s::IntegralSolver{<:FourierIntegrand})(args...; kwargs...)
     return sol.u
 end
 
-# forward this method to the one for Integrand so that cache remakes only need to specialize
-# the remake_integrand_cache method
 function remake_cache(f::FourierIntegrand, dom, p, alg, cacheval, kwargs)
-    new = remake_cache(f.f, dom, p, alg, cacheval, kwargs)
-    g = FourierIntegrand(new.f, f.s)
-    return IntegralCache(g, new.dom, new.p, new.alg, new.cacheval, new.kwargs)
+    new = FourierIntegrand(f.f, f.s)
+    return remake_integrand_cache(new, dom, merge(f.p, p), alg, cacheval, kwargs)
 end
 
 # FourierIntegrands should expect a FourierValue as input
@@ -63,22 +59,13 @@ end
 Base.zero(::Type{FourierValue{X,S}}) where {X,S} = FourierValue(zero(X), zero(S))
 Base.:*(B::AbstractMatrix, f::FourierValue) = FourierValue(B*f.x, f.s)
 
+(f::FourierIntegrand)(x::FourierValue, p=()) = getfield(f, :f)(x, p)
 # fallback evaluator of FourierIntegrand for algorithms without specialized rules
-(f::FourierIntegrand)(x, p=()) = f.f(FourierValue(x, f.s(x)), p)
+(f::FourierIntegrand)(x, p=()) = f(FourierValue(x, f.s(x)), p)
 
 # HCubature rule (no specialization for FourierIntegrand)
 
-function init_fourier_cacheval(s::AbstractFourierSeries, f, dom, p, alg::HCubatureJL)
-    g = FourierIntegrand(f, s)
-    return g, init_cacheval(g, dom, p, alg)
-end
-
 # QuadGK rule (no specialization for FourierIntegrand)
-
-function init_fourier_cacheval(s::AbstractFourierSeries, f, dom, p, alg::QuadGKJL)
-    g = FourierIntegrand(f, s)
-    return g, init_cacheval(g, dom, p, alg)
-end
 
 #=
 # TODO: we can pre-evaluate the twiddle factors for the GK points as an optimization, but
@@ -97,15 +84,15 @@ function (r::FourierGaussKronrod)(f::F, s, nrm=norm, buffer=nothing) where {F}
     end
 end
 
-function init_fourier_rule(s::AbstractFourierSeries, f, dom, p, alg::QuadGKJL)
+function init_fourier_rule(s::AbstractFourierSeries, dom, alg::QuadGKJL)
     gk = GaussKronrod(eltype(dom), alg.order)
     return FourierGaussKronrod(s, gk)
 end
-function init_fourier_cacheval(s::AbstractFourierSeries, f, dom, p, alg::QuadGKJL)
-    rule = init_fourier_rule(s, f, dom, p, alg)
+function init_cacheval(f::FourierIntegrand, dom, p, alg::QuadGKJL)
+    rule = init_fourier_rule(f.s, dom, alg)
     TF, segbuf = init_segbuf(f, dom, p, rule)
     parallel = init_parallel(alg.parallel, TF, eltype(segbuf), alg.order)
-    return f, (rule=rule, segbuf=segbuf, parallel=parallel)
+    return (rule=rule, segbuf=segbuf, parallel=parallel)
 end
 =#
 
@@ -150,15 +137,15 @@ function rule_type(r::NestedFourierGaussKronrod)
     S = fourier_type(r.s, eltype(X))
     return FourierValue{X,S}
 end
-function init_fourier_rule(s::AbstractFourierSeries, f, bz::SymmetricBZ , p, alg::IAI)
+function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::IAI)
     gk = NestedGaussKronrod(eltype(bz.lims), alg.order, Val(ndims(bz.lims)))
     return NestedFourierGaussKronrod(gk, s)
 end
-function init_fourier_cacheval(s::AbstractFourierSeries, f, bz::SymmetricBZ, p, alg::IAI)
-    rule = init_fourier_rule(s, f, bz, p, alg)
+function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ, p, alg::IAI)
+    rule = init_fourier_rule(f.s, bz, alg)
     TF, segbufs = init_segbufs(f, bz.lims, p, rule)
     parallels = init_parallels(alg.parallels, TF, eltype(eltype(segbufs)), alg.order)
-    return f, (rule=rule, segbufs=segbufs, parallels=parallels)
+    return (rule=rule, segbufs=segbufs, parallels=parallels)
 end
 
 # PTR rules
@@ -192,14 +179,14 @@ function FourierPTR(s::AbstractFourierSeries, ::Type{T}, v::Val{d}, npt) where {
 end
 
 rule_type(::FourierPTR{N,T,S}) where {N,T,S} = FourierValue{SVector{N,T},S}
-function init_fourier_rule(s::AbstractFourierSeries, f, bz::FullBZType , p, alg::PTR)
+function init_fourier_rule(s::AbstractFourierSeries, bz::FullBZType , alg::PTR)
     dom = Basis(bz.B)
     return FourierPTR(s, eltype(dom), Val(ndims(dom)), alg.npt)
 end
-function init_fourier_cacheval(s::AbstractFourierSeries, f, bz::SymmetricBZ , p, alg::PTR)
-    rule = init_fourier_rule(s, f, bz, p, alg)
+function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ , p, alg::PTR)
+    rule = init_fourier_rule(f.s, bz, alg)
     buf = init_buffer(f, Basis(bz.B), p, rule)
-    return f, (rule=rule, buffer=buf)
+    return (rule=rule, buffer=buf)
 end
 
 # Array interface
@@ -273,7 +260,7 @@ function FourierMonkhorstPack(s::AbstractFourierSeries, ::Type{T}, v::Val{d}, np
     return FourierMonkhorstPack(npt, length(syms), wxs)
 end
 
-function init_fourier_rule(s::AbstractFourierSeries, f, bz::SymmetricBZ , p, alg::PTR)
+function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::PTR)
     dom = Basis(bz.B)
     return FourierMonkhorstPack(s, eltype(dom), Val(ndims(dom)), alg.npt, bz.syms)
 end
@@ -306,15 +293,15 @@ function FourierMonkhorstPackRule(s, syms, a, nmin, nmax, n₀, Δn)
 end
 AutoSymPTR.nsyms(r::FourierMonkhorstPackRule) = AutoSymPTR.nsyms(r.m)
 
-function init_fourier_rule(s::AbstractFourierSeries, f, bz::SymmetricBZ, p, alg::AutoPTR)
+function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::AutoPTR)
     return FourierMonkhorstPackRule(s, bz.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
 end
-function init_fourier_cacheval(s::AbstractFourierSeries, f, bz::SymmetricBZ, p, alg::AutoPTR)
-    rule = init_fourier_rule(s, f, bz, p, alg)
+function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ, p, alg::AutoPTR)
+    rule = init_fourier_rule(f.s, bz, alg)
     dom = Basis(bz.B)
     cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
     buffer = init_buffer(f, dom, p, cache[1])
-    return f, (rule=rule, cache=cache, buffer=buffer)
+    return (rule=rule, cache=cache, buffer=buffer)
 end
 
 function (r::FourierMonkhorstPackRule)(::Type{T}, v::Val{d}) where {T,d}
@@ -334,8 +321,3 @@ function AutoSymPTR.nextrule(p::FourierMonkhorstPack{d,T}, r::FourierMonkhorstPa
 end
 
 # TAI rule (no optimization for FourierIntegrand)
-
-function init_fourier_cacheval(s::AbstractFourierSeries, f, dom, p, alg::TAI)
-    g = FourierIntegrand(f, s)
-    return g, init_cacheval(g, dom, p, alg)
-end
