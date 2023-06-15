@@ -165,8 +165,6 @@ abstract type AutoBZAlgorithm <: IntegralAlgorithm end
 Iterated-adaptive integration using `nested_quadgk` from
 [IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
 **This algorithm is the most efficient for localized integrands**.
-See [`alloc_segbufs`](@ref) for how to pre-allocate segment buffers for
-`nested_quadgk`.
 """
 struct IAI{F,I,P} <: AutoBZAlgorithm
     order::Int
@@ -188,7 +186,7 @@ function init_segbufs(f, dom, p, rule)
     TF = integrand_return_type(f, zero(rule_type(rule)), p)
     TI = typeof(zero(TF) * float(real(one(TX))))
     TE = typeof(norm(zero(TI)))
-    return TF, alloc_segbufs(TX, TI, TE, ndims(dom))
+    return TF, alloc_segbufs(ndims(dom), TX, TI, TE)
 end
 init_parallels(::Nothing, args...) = nothing
 init_parallels(::Tuple{}, args...) = ()
