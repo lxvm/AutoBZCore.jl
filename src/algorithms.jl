@@ -160,9 +160,9 @@ Abstract supertype for Brillouin zone integration algorithms.
 abstract type AutoBZAlgorithm <: IntegralAlgorithm end
 
 """
-    IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing)
+    IAI(; order=7, norm=norm, initdivs=nothing, segbufs=nothing, parallels=nothing)
 
-Iterated-adaptive integration using `nested_quadgk` from
+Iterated-adaptive integration using `nested_quad` from
 [IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
 **This algorithm is the most efficient for localized integrands**.
 """
@@ -201,18 +201,17 @@ function init_cacheval(f, bz::SymmetricBZ, p, alg::IAI)
 end
 
 """
-    PTR(; npt=50, rule=nothing)
+    PTR(; npt=50, parallel=nothing)
 
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
 using the routine `ptr` from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
 **The caller should check that the integral is converged w.r.t. `npt`**.
-See [`alloc_rule`](@ref) for how to pre-evaluate a PTR rule for use across calls
-with compatible integrands.
 """
-struct PTR <: AutoBZAlgorithm
+struct PTR{P} <: AutoBZAlgorithm
     npt::Int
+    parallel::P
 end
-PTR(; npt=50) = PTR(npt)
+PTR(; npt=50, parallel=nothing) = PTR(npt, parallel)
 function init_rule(bz::FullBZType, alg::PTR)
     dom = Basis(bz.B)
     return AutoSymPTR.PTR(eltype(dom), Val(ndims(dom)), alg.npt)
@@ -223,27 +222,26 @@ function init_rule(bz::SymmetricBZ, alg::PTR)
 end
 
 rule_type(::AutoSymPTR.PTR{N,T}) where {N,T} = SVector{N,T}
-function init_buffer(f, dom, p, rule)
+function init_buffer(f, p, rule, parallel)
+    parallel === nothing && return nothing
     T = integrand_return_type(f, zero(rule_type(rule)), p)
     return T[]
 end
 function init_cacheval(f, bz::SymmetricBZ , p, alg::PTR)
     rule = init_rule(bz, alg)
-    buf = init_buffer(f, Basis(bz.B), p, rule)
+    buf = init_buffer(f, p, rule, alg.parallel)
     return (rule=rule, buffer=buf)
 end
 
 """
-    AutoPTR(; norm=norm, a=1.0)
+    AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2, parallel=nothing)
 
 Periodic trapezoidal rule with automatic convergence to tolerances passed to the
 solver with respect to `norm` using the routine `autosymptr` from
 [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
 **This algorithm is the most efficient for smooth integrands**.
-See [`alloc_autobuffer`](@ref) for how to pre-evaluate a buffer for `autosymptr`
-for use across calls with compatible integrands.
 """
-struct AutoPTR{F} <: AutoBZAlgorithm
+struct AutoPTR{F,P} <: AutoBZAlgorithm
     norm::F
     a::Float64
     nmin::Int
@@ -251,9 +249,10 @@ struct AutoPTR{F} <: AutoBZAlgorithm
     n₀::Float64
     Δn::Float64
     keepmost::Int
+    parallel::P
 end
-function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2)
-    return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost)
+function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2, parallel=nothing)
+    return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost, parallel)
 end
 function init_rule(bz::SymmetricBZ, alg::AutoPTR)
     return AutoSymPTR.MonkhorstPackRule(bz.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
@@ -261,9 +260,8 @@ end
 rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
 function init_cacheval(f, bz::SymmetricBZ, p, alg::AutoPTR)
     rule = init_rule(bz, alg)
-    dom = Basis(bz.B)
-    cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
-    buffer = init_buffer(f, dom, p, cache[1])
+    cache = AutoSymPTR.alloc_cache(eltype(bz), Val(ndims(bz)), rule)
+    buffer = init_buffer(f, p, cache[1], alg.parallel)
     return (rule=rule, cache=cache, buffer=buffer)
 end
 function reduce_ptr_cache!(cache::Vector, nrule::Integer)

@@ -185,7 +185,7 @@ function init_fourier_rule(s::AbstractFourierSeries, bz::FullBZType , alg::PTR)
 end
 function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ , p, alg::PTR)
     rule = init_fourier_rule(f.s, bz, alg)
-    buf = init_buffer(f, Basis(bz.B), p, rule)
+    buf = init_buffer(f, p, rule, alg.parallel)
     return (rule=rule, buffer=buf)
 end
 
@@ -298,9 +298,8 @@ function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::AutoP
 end
 function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ, p, alg::AutoPTR)
     rule = init_fourier_rule(f.s, bz, alg)
-    dom = Basis(bz.B)
-    cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
-    buffer = init_buffer(f, dom, p, cache[1])
+    cache = AutoSymPTR.alloc_cache(eltype(bz), Val(ndims(bz)), rule)
+    buffer = init_buffer(f, p, cache[1], alg.parallel)
     return (rule=rule, cache=cache, buffer=buffer)
 end
 
