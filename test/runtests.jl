@@ -202,6 +202,24 @@ end
             @test g3["I/val"][:] ≈ getproperty.(values, :val)
             @test g3["I/aux"][:] ≈ getproperty.(values, :aux)
         end
+        g4 = create_group(io, "0d")
+        g5 = create_group(io, "3d")
+        @testset "parameter dimensions" begin
+            prob   = IntegralProblem((x, p) -> p[1] + p[2] + p[3], 0, 1)
+            solver = IntegralSolver(prob, QuadGKJL())
+            # 0-d parameters
+            params = paramzip(0, 1, 2)
+            values = batchsolve(g4, solver, params, verb=false)
+            @test g4["I"][] ≈ values[] ≈ 3
+            @test g4["args/1"][] ≈ 0
+            @test g4["args/2"][] ≈ 1
+            @test g4["args/3"][] ≈ 2
+            # 3-d parameters
+            params = paramproduct(1:2, 1:2, 1:2)
+            values = batchsolve(g5, solver, params, verb=false)
+            @test g5["I"][1,1,1] ≈ values[1] ≈ 3
+            @test g5["I"][2,2,2] ≈ values[8] ≈ 6
+        end
     end
     rm(fn)
 end

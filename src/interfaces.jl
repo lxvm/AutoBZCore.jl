@@ -119,30 +119,35 @@ end
 
 If the cost of a calculation smoothly varies with the parameters `ps`, then
 batch `ps` into `nthreads` groups where the `i`th element of group `j` is
-`ps[j+(i-1)*nthreads]`
+`ps[j+(i-1)*nthreads]` along the longest axis of `ps`. We assume that multidimensional
+arrays of parameters have smoothest cost along their longest axis
 """
-function batchparam(xs, nthreads)
-    batches = [Tuple{Int,eltype(xs)}[] for _ in 1:min(nthreads, length(xs))]
-    for (i, x) in pairs(IndexStyle(xs), xs)
-        push!(batches[mod(i-1, nthreads)+1], (i, x))
+function batchparam(xs::AbstractArray{T,N}, nthreads) where {T,N}
+    (s = size(xs)) === () && return (((CartesianIndex(()), only(xs)),),)
+    @assert nthreads >= 1
+    len, dim = findmax(s)
+    batches = [Tuple{CartesianIndex{N},T}[] for _ in 1:min(nthreads, len)]
+    for i in CartesianIndices(xs)
+        push!(batches[mod(i[dim]-1, nthreads)+1], (i, xs[i]))
     end
     return batches
 end
 
-function batcheval(i, p, f, callback)
+function batcheval(i, n, p, f, callback)
     t = time()
     sol = do_solve(f, p)
     t = time() - t
-    callback(f, i, p, sol, t)
+    callback(f, i, n, p, sol, t)
     return sol.u
 end
 
 
 function batchsolve!(out, f, ps, nthreads, callback)
+    n = Threads.Atomic{Int}(0)
     Threads.@threads for batch in batchparam(ps, nthreads)
         f_ = Threads.threadid() == 1 ? f : deepcopy(f) # avoid data races for in place integrators
         for (i, p) in batch
-            out[i] = batcheval(i, p, f_, callback)
+            out[i] = batcheval(i, Threads.atomic_add!(n, 1) + 1, p, f_, callback)
         end
     end
     return out
@@ -159,9 +164,13 @@ a form of multithreaded broadcasting. Providing the return type `f(eltype(ps))::
 optional, but will help in case inference of that type fails.
 """
 function batchsolve(f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); nthreads=Threads.nthreads(), callback=(x...)->nothing)
-    prob = IntegralProblem(f.f, f.dom, ps[begin])
-    cache = make_cache(prob, f.alg; f.kwargs...)
-    solver = IntegralSolver(f.f, f.dom, f.alg, cache.cacheval, f.kwargs)
+    solver = if f.cacheval === nothing
+        prob = IntegralProblem(f.f, f.dom, ps[begin])
+        cache = make_cache(prob, f.alg; f.kwargs...)
+        IntegralSolver(f.f, f.dom, f.alg, cache.cacheval, f.kwargs)
+    else
+        f
+    end
     return batchsolve!(similar(ps, T), solver, ps, nthreads, callback)
 end
 

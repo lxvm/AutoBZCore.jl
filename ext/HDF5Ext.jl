@@ -4,7 +4,7 @@ using Printf: @sprintf
 using LinearAlgebra: norm
 
 using AutoBZCore: IntegralSolver, MixedParameters, solver_type, AuxValue, IntegralSolution
-using HDF5: h5open, write_dataset, read_dataset, Group, H5DataStore, create_dataset, create_group
+using HDF5: h5open, write_dataset, read_dataset, Group, H5DataStore, create_dataset, create_group, delete_object, name
 import AutoBZCore: batchsolve
 
 
@@ -54,13 +54,24 @@ function autobz_create_dataset(parent, path, ::Type{AuxValue{T}}, dims) where T
     return (gval, gaux), (axval, axaux)
 end
 
-set_value(parent, ax, i, sol) = parent[ax...,i] = sol
-set_value(parent, ax, i, sol::IntegralSolution) = parent[ax...,i] = sol.u
-function set_value((gval, gaux)::Tuple, (axval, axaux), i, sol::IntegralSolution)
-    set_value(gval, axval, i, sol.u.val)
-    set_value(gaux, axaux, i, sol.u.aux)
+set_value(g, i::CartesianIndex, val) = g[i.I...] = val
+set_value(parent, ax::Tuple, i::CartesianIndex, sol) = parent[ax...,i.I...] = sol
+function set_value((gval, gaux)::Tuple, (axval, axaux)::Tuple, i::CartesianIndex, sol::AuxValue)
+    set_value(gval, axval, i, sol.val)
+    set_value(gaux, axaux, i, sol.aux)
     return nothing
 end
+# special cases for 0-d arrays with scalar fields, for which rewrite is not supported
+function set_value(g, ::CartesianIndex{0}, val)
+    p = parent(g)
+    s = basename(name(g))
+    delete_object(p, s)
+    write_dataset(p, s, val)
+    return nothing
+end
+set_value(parent, ::Tuple{}, i::CartesianIndex{0}, sol) = set_value(parent, i, sol)
+
+
 
 param_group(parent, T, dims) = create_dataset(parent, "p", T, dims)
 function param_group(parent, ::Type{T}, dims) where {T<:Tuple}
@@ -82,20 +93,21 @@ function param_group(parent, ::Type{MixedParameters{T,NamedTuple{K,V}}}, dims) w
     return (g,q)
 end
 function param_record(group, p, i)
-    group[i] = p
+    set_value(group, i, p)
+    return nothing
 end
 function param_record(group, p::Tuple, i)
     for (j,e) in enumerate(p)
-        group[string(j)][i] = e
+        set_value(group[string(j)], i, e)
     end
     return nothing
 end
 function param_record((g, q), p::MixedParameters, i)
     for (j,e) in enumerate(getfield(p, :args))
-        g[string(j)][i] = e
+        set_value(g[string(j)], i, e)
     end
     for (k,v) in pairs(getfield(p, :kwargs))
-        q[string(k)][i] = v
+        set_value(q[string(k)], i, v)
     end
     return nothing
 end
@@ -107,20 +119,20 @@ Batchsolver
 """
 function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); verb=true, nthreads=Threads.nthreads())
     isconcretetype(T) || throw(ArgumentError("Result type of integrand is abstract or could not be inferred. Please provide the concrete return type to save to HDF5"))
+    len = length(ps)
     dims = size(ps)
-
     gI, ax = autobz_create_dataset(h5, "I", T, dims)
     gE = create_dataset(h5, "E", Float64, dims)
     gt = create_dataset(h5, "t", Float64, dims)
     gr = create_dataset(h5, "retcode", Int32, dims)
     gp = param_group(h5, eltype(ps), dims)
 
-    function h5callback(f, i, p, sol, t)
-        verb && @info @sprintf "parameter %i finished in %e (s)" i t
-        set_value(gI, ax, i, sol) # gI[ax...,i] = sol
-        gE[i] = isnothing(sol.resid) ? NaN : convert(Float64, T<:AuxValue ? sol.resid.val : sol.resid)
-        gt[i] = t
-        gr[i] = Integer(sol.retcode)
+    function h5callback(_, i, n, p, sol, t)
+        verb && @info @sprintf "%5i / %i done in %e (s)" n len t
+        set_value(gI, ax, i, sol.u)
+        set_value(gE, i, isnothing(sol.resid) ? NaN : convert(Float64, T<:AuxValue ? sol.resid.val : sol.resid))
+        set_value(gt, i, t)
+        set_value(gr, i, Integer(sol.retcode))
         param_record(gp, p, i)
     end
 
