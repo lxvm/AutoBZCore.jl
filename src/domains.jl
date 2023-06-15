@@ -1,3 +1,23 @@
+struct PuncturedInterval{d,T}
+    s::NTuple{d,T}
+end
+Base.eltype(::Type{PuncturedInterval{d,T}}) where {d,T} = T
+segments(p::PuncturedInterval) = p.s
+endpoints(p::PuncturedInterval) = (p.s[begin], p.s[end])
+
+struct HyperCube{d,T}
+    a::SVector{d,T}
+    b::SVector{d,T}
+end
+function HyperCube(a::NTuple{d,T}, b::NTuple{d,S}) where {d,T,S}
+    F = promote_type(T,S)
+    return HyperCube{d,F}(SVector{d,F}(a), SVector{d,F}(b))
+end
+HyperCube(a, b) = HyperCube(promote(a...), promote(b...))
+Base.eltype(::Type{HyperCube{d,T}}) where {d,T} = T
+
+endpoints(c::HyperCube) = (c.a, c.b)
+
 # utilities
 function lattice_bz_limits(B::AbstractMatrix)
     d = checksquare(B)
@@ -16,7 +36,7 @@ Data type representing a Brillouin zone reduced by a set of symmetries, `syms`
 with iterated integration limits `lims`, both of which are assumed to be in the
 lattice basis (since the Fourier series is). `A` and `B` should be
 identically-sized square matrices containing the real and reciprocal basis
-vectors in their columns. 
+vectors in their columns.
 
 !!! note "Convention"
     This type assumes all integration limit data is in the reciprocal lattice
@@ -34,8 +54,9 @@ struct SymmetricBZ{S,L,d,T,d2}
     B::SMatrix{d,d,T,d2}
     lims::L
     syms::S
-    SymmetricBZ(A::M, B::M, lims::L, syms::S) where {d,T,d2,M<:SMatrix{d,d,T,d2},L,S} =
-        new{S,L,d,T,d2}(A, B, lims, syms)
+    function SymmetricBZ(A::M, B::M, lims::L, syms::S) where {d,T,d2,M<:SMatrix{d,d,T,d2},L,S}
+        return new{S,L,d,T,d2}(A, B, lims, syms)
+    end
 end
 
 # eventually limits could be computed from B and symmetries
@@ -62,13 +83,6 @@ Abstract supertype of symmetry representation traits.
 abstract type AbstractSymRep end
 
 """
-    FaithfulRep
-
-Abstract supertype of traits for faithful symmetry representations.
-"""
-abstract type FaithfulRep <: AbstractSymRep end
-
-"""
     UnknownRep()
 
 Fallback symmetry representation for array types without a user-defined `SymRep`.
@@ -82,13 +96,6 @@ Symmetry representation of objects with trivial transformation under the group.
 """
 struct TrivialRep <: AbstractSymRep end
 
-"""
-    LatticeRep()
-
-Symmetry representation of objects that transform under the group action in the
-same way as the lattice.
-"""
-struct LatticeRep <: FaithfulRep end
 
 """
     SymRep(f)
@@ -111,9 +118,9 @@ const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
 Transform `x` by the symmetries of the parametrization used to reduce the
 domain, thus mapping the value of `x` on the parametrization to the full domain.
 """
-symmetrize(f, bz::SymmetricBZ, xs...) = map(x -> symmetrize(f, bz, x), xs)
-symmetrize(f, bz::SymmetricBZ, x) = symmetrize_(SymRep(f), bz, x)
-symmetrize(f, bz::SymmetricBZ, x::TrivialRepType) =
+symmetrize(f, bz, xs...) = map(x -> symmetrize(f, bz, x), xs)
+symmetrize(f, bz, x) = symmetrize_(SymRep(f), bz, x)
+symmetrize(f, bz, x::TrivialRepType) =
     symmetrize_(TrivialRep(), bz, x)
 
 """
@@ -123,20 +130,6 @@ Transform `x` under representation `rep` using the symmetries in `bz` to obtain
 the result of an integral on the FBZ from `x`, which was calculated on the IBZ.
 """
 symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
-function symmetrize_(::LatticeRep, bz::SymmetricBZ, x::AbstractVector)
-    r = zero(x)
-    for S in bz.syms
-        r += S * x
-    end
-    r
-end
-function symmetrize_(::LatticeRep, bz::SymmetricBZ, x::AbstractMatrix)
-    r = zero(x)
-    for S in bz.syms
-        r += S * x * S'
-    end
-    r
-end
 function symmetrize_(::UnknownRep, ::SymmetricBZ, x)
     @warn "Symmetric BZ detected but the integrand's symmetry representation is unknown. Define a trait for your integrand by extending SymRep"
     x
@@ -155,3 +148,6 @@ const FullBZType = SymmetricBZ{Nothing}
 nsyms(::FullBZType) = 1
 symmetrize(_, ::FullBZType, x) = x
 symmetrize(_, ::FullBZType, x::TrivialRepType) = x
+
+symmetrize(f, bz, x::AuxValue) = AuxValue(symmetrize(f, bz, x.val, x.aux)...)
+symmetrize(_, ::FullBZType, x::AuxValue) = x

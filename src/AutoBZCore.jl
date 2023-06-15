@@ -16,70 +16,60 @@ For example, computing the local Green's function can be done as follows:
     using FourierSeriesEvaluators
     using AutoBZCore
 
-    gloc_integrand(h_k; η, ω) = inv(complex(ω,η)*I-h_k)     # define integrand evaluator
-    h = FourierSeries([0.5, 0.0, 0.5]; offset=-2)           # construct cos(k) 1D integer lattice Hamiltonian
-    bz = FullBZ(2pi*I(1))                                   # construct BZ from lattice vectors A=2pi*I
-    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)    # construct integrand with Fourier series h and parameter η=0.1
+    gloc_integrand(k, h; η, ω) = inv(complex(ω,η)*I-h(k))   # define integrand evaluator
+    h = FourierSeries([0.5, 0.0, 0.5]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
+    integrand = Integrand(gloc_integrand, h, η=0.1)         # construct integrand with Fourier series h and parameter η=0.1
+    prob = IntegralProblem(integrand, 0, 1)                 # setup the integral problem
+    alg = QuadGKJL()                                        # choose integration algorithm (also AutoPTR() and PTR())
+    gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
+    gloc(ω=0.0)                                             # evaluate gloc at frequency ω=0.0
+
+
+    gloc_integrand(h_k::FourierValue; η, ω) = inv(complex(ω,η)*I-h_k.s)     # define integrand evaluator
+    h = FourierSeries([0.0; 0.5; 0.0;; 0.5; 0.0; 0.5;; 0.0; 0.5; 0.0]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
+    bz = FullBZ(2pi*I(2))                                   # construct BZ from lattice vectors A=2pi*I
+    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)   # construct integrand with Fourier series h and parameter η=0.1
+    prob = IntegralProblem(integrand, bz)                   # setup the integral problem
     alg = IAI()                                             # choose integration algorithm (also AutoPTR() and PTR())
-    gloc = IntegralSolver(integrand, bz, alg; abstol=1e-3)  # construct a solver for gloc to within specified tolerance
-    gloc(ω=0.0)                                               # evaluate gloc at frequency ω=0.0
+    gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
+    gloc(ω=0.0)                                             # evaluate gloc at frequency ω=0.0
 
 !!! note "Assumptions"
     `AutoBZCore` assumes that all calculations occur in the
     reciprocal lattice basis, since that is the basis in which Wannier
     interpolants are most efficiently described. See [`SymmetricBZ`](@ref) for
-    details.
+    details. We also assume that the integrands are cheap to evaluate, which is why we
+    provide adaptive methods in the first place, so that return types can be determined at
+    runtime (and mechanisms are in place for compile time as well)
 """
 module AutoBZCore
 
-!isdefined(Base, :get_extension) && using Requires
-@static if !isdefined(Base, :get_extension)
-    function __init__()
-        @require HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f" include("../ext/HDF5Ext.jl")
-    end
-end
-
 using LinearAlgebra: I, norm, det, checksquare
 
-using StaticArrays: SMatrix
+using StaticArrays: SVector, SMatrix, pushfirst
 using Reexport
-@reexport using Integrals
-@reexport using FourierSeriesEvaluators
 @reexport using AutoSymPTR
+@reexport using FourierSeriesEvaluators
 @reexport using IteratedIntegration
 
-import Integrals: IntegralProblem, __solvebp_call, SciMLBase.NullParameters, ReCallVJP, ZygoteVJP
-import AutoSymPTR: autosymptr, symptr, symptr_rule!, symptr_rule, ptr, ptr_rule!, ptrindex, alloc_autobuffer
-import IteratedIntegration: iterated_integrand, iterated_pre_eval, alloc_segbufs
-
+using IteratedIntegration: alloc_segbufs, nextrule, nextdim, RuleQuad.GaussKronrod, NestedGaussKronrod
+using HCubature: hcubature
 
 export SymmetricBZ, FullBZ, nsyms
-export AbstractSymRep, SymRep, UnknownRep, TrivialRep, FaithfulRep, LatticeRep
-include("brillouin_zone.jl")
+export AbstractSymRep, SymRep, UnknownRep, TrivialRep
+include("domains.jl")
 
-export AbstractAutoBZAlgorithm, IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI
+export IntegralProblem, solve
+export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI, QuadGKJL, HCubatureJL
 include("algorithms.jl")
 
+export MixedParameters, paramzip, paramproduct
 export IntegralSolver, batchsolve
-include("solver.jl")
-
-export MixedParameters, AbstractAutoBZIntegrand, paramzip, paramproduct
-include("parameter_interface.jl")
-
 export Integrand
-include("integrand.jl")
+include("interfaces.jl")
 
-"""
-    NTHREADS_KSUM = fill(Threads.nthreads())
-
-This represents the number of threads to parallelize over for k-sums in PTR. To
-change the number of threads to 1 to completely bypass multi-threading, write
-`AutoBZCore.NTHREADS_KSUM[] = 1`.
-"""
-const NTHREADS_KSUM = fill(Threads.nthreads())
-
-export FourierIntegrand
-include("fourier_integration.jl")
+export FourierIntegrand, FourierValue
+include("rules.jl")
 
 
 end
