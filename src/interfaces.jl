@@ -133,21 +133,15 @@ function batchparam(xs::AbstractArray{T,N}, nthreads) where {T,N}
     return batches
 end
 
-function batcheval(i, n, p, f, callback)
-    t = time()
-    sol = do_solve(f, p)
-    t = time() - t
-    callback(f, i, n, p, sol, t)
-    return sol.u
-end
-
-
 function batchsolve!(out, f, ps, nthreads, callback)
     n = Threads.Atomic{Int}(0)
     Threads.@threads for batch in batchparam(ps, nthreads)
         f_ = Threads.threadid() == 1 ? f : deepcopy(f) # avoid data races for in place integrators
         for (i, p) in batch
-            out[i] = batcheval(i, Threads.atomic_add!(n, 1) + 1, p, f_, callback)
+            t = time()
+            sol = do_solve(f_, p)
+            callback(f, i, Threads.atomic_add!(n, 1) + 1, p, sol, time() - t)
+            out[i] = sol.u
         end
     end
     return out
