@@ -117,7 +117,7 @@ end
 
 Batchsolver
 """
-function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); verb=true, nthreads=Threads.nthreads())
+function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); flush=true, verb=true, nthreads=Threads.nthreads())
     isconcretetype(T) || throw(ArgumentError("Result type of integrand is abstract or could not be inferred. Please provide the concrete return type to save to HDF5"))
     len = length(ps)
     dims = size(ps)
@@ -126,6 +126,7 @@ function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=sol
     gt = create_dataset(h5, "t", Float64, dims)
     gr = create_dataset(h5, "retcode", Int32, dims)
     gp = param_group(h5, eltype(ps), dims)
+    flush && Base.flush(h5)
 
     function h5callback(_, i, n, p, sol, t)
         verb && @info @sprintf "%5i / %i done in %e (s)" n len t
@@ -134,6 +135,7 @@ function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=sol
         set_value(gt, i, t)
         set_value(gr, i, Integer(sol.retcode))
         param_record(gp, p, i)
+        flush && Base.flush(h5)
     end
 
     verb && @info "Started parameter sweep"
