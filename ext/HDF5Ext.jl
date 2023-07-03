@@ -112,6 +112,8 @@ function param_record((g, q), p::MixedParameters, i)
     return nothing
 end
 
+const liblock = ReentrantLock()
+
 """
     batchsolve(h5::H5DataStore, f::IntegralSolver, ps, [T]; verb=true, nthreads=Threads.nthreads())
 
@@ -129,13 +131,18 @@ function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=sol
     flush && Base.flush(h5)
 
     function h5callback(_, i, n, p, sol, t)
-        verb && @info @sprintf "%5i / %i done in %e (s)" n len t
-        set_value(gI, ax, i, sol.u)
-        set_value(gE, i, isnothing(sol.resid) ? NaN : convert(Float64, T<:AuxValue ? sol.resid.val : sol.resid))
-        set_value(gt, i, t)
-        set_value(gr, i, Integer(sol.retcode))
-        param_record(gp, p, i)
-        flush && Base.flush(h5)
+        lock(liblock)
+        try
+            verb && @info @sprintf "%5i / %i done in %e (s)" n len t
+            set_value(gI, ax, i, sol.u)
+            set_value(gE, i, isnothing(sol.resid) ? NaN : convert(Float64, T<:AuxValue ? sol.resid.val : sol.resid))
+            set_value(gt, i, t)
+            set_value(gr, i, Integer(sol.retcode))
+            param_record(gp, p, i)
+            flush && Base.flush(h5)
+        finally
+            unlock(liblock)
+        end
     end
 
     verb && @info "Started parameter sweep"
