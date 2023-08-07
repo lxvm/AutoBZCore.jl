@@ -23,7 +23,7 @@ HDF5Ext = "HDF5"
 
 [compat]
 AutoSymPTR = "0.4"
-FourierSeriesEvaluators = "0.2"
+FourierSeriesEvaluators = "0.3"
 FunctionWrappers = "1"
 HCubature = "1.4"
 HDF5 = "0.16.15"
