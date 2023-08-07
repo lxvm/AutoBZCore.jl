@@ -18,7 +18,7 @@ For example, computing the local Green's function can be done as follows:
 
     gloc_integrand(k, h; η, ω) = inv(complex(ω,η)*I-h(k))   # define integrand evaluator
     h = FourierSeries([0.5, 0.0, 0.5]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
-    integrand = Integrand(gloc_integrand, h, η=0.1)         # construct integrand with Fourier series h and parameter η=0.1
+    integrand = ParameterIntegrand(gloc_integrand, h, η=0.1)         # construct integrand with Fourier series h and parameter η=0.1
     prob = IntegralProblem(integrand, 0, 1)                 # setup the integral problem
     alg = QuadGKJL()                                        # choose integration algorithm (also AutoPTR() and PTR())
     gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
@@ -80,7 +80,7 @@ include("brillouin.jl")
 
 export MixedParameters, paramzip, paramproduct
 export IntegralSolver, batchsolve
-export Integrand
+export ParameterIntegrand
 include("interfaces.jl")
 
 export FourierIntegrand, FourierValue

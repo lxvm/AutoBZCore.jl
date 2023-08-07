@@ -22,14 +22,17 @@
 # Also, rules don't exist in the SciML interface we are copying, so we have to dispatch on
 # the integrand
 
+# needs to contain enough information to decide when/how to do threading/batching and how
+# much workspace to pre-allocate, and it should also allow thread-unsafe integrands?
+
 struct FourierIntegrand{F,P,S<:AbstractFourierSeries}
-    f::Integrand{F,P}
+    f::ParameterIntegrand{F,P}
     s::S
 end
 
 function FourierIntegrand(f::F, s::AbstractFourierSeries, args...; kwargs...) where {F}
     p = MixedParameters(args...; kwargs...)
-    return FourierIntegrand(Integrand{F}(f, p), s)
+    return FourierIntegrand(ParameterIntegrand{F}(f, p), s)
 end
 
 function Base.getproperty(f::FourierIntegrand, name::Symbol)

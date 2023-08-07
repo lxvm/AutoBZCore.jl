@@ -169,41 +169,41 @@ function batchsolve(f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[be
 end
 
 """
-    Integrand(f, args...; kwargs...)
+    ParameterIntegrand(f, args...; kwargs...)
 
 Represent an integrand with a partial collection of parameters `p`. When the
-`Integrand` is invoked with one argument, e.g. `int(x)`, it evaluates `f(x,
+`ParameterIntegrand` is invoked with one argument, e.g. `int(x)`, it evaluates `f(x,
 p...; kwargs...)`. However when invoked with two arguments, as in an `IntegralProblem`,
 e.g. `int(x, p2)`, it evaluates the union of parameters `f(x, p..., p2...; kwargs...)`.
 This allows for convenient parametrization of the integrand.
 """
-struct Integrand{F,P}
+struct ParameterIntegrand{F,P}
     f::F
     p::P
-    function Integrand{F}(f::F, p::P) where {F,P<:MixedParameters}
+    function ParameterIntegrand{F}(f::F, p::P) where {F,P<:MixedParameters}
         return new{F,P}(f, p)
     end
 end
 
-function Integrand(f, args...; kwargs...)
+function ParameterIntegrand(f, args...; kwargs...)
     p = MixedParameters(args...; kwargs...)
-    return Integrand{typeof(f)}(f, p)
+    return ParameterIntegrand{typeof(f)}(f, p)
 end
 
 # provide Integrals.jl interface
-function (f::Integrand)(x, q=())
+function (f::ParameterIntegrand)(x, q=())
     p = merge(f.p, q)
     return f.f(x, getfield(p, :args)...; getfield(p, :kwargs)...)
 end
 
 # move all parameters from f.p to p for convenience
 remake_integrand_cache(args...) = IntegralCache(args...)
-function remake_cache(f::Integrand, dom, p, alg, cacheval, kwargs)
-    new = Integrand(f.f)
+function remake_cache(f::ParameterIntegrand, dom, p, alg, cacheval, kwargs)
+    new = ParameterIntegrand(f.f)
     return remake_integrand_cache(new, dom, merge(f.p, p), alg, cacheval, kwargs)
 end
 
-function (s::IntegralSolver{<:Integrand})(args...; kwargs...)
+function (s::IntegralSolver{<:ParameterIntegrand})(args...; kwargs...)
     p = MixedParameters(args...; kwargs...)
     sol = do_solve(s, p)
     return sol.u
