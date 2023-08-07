@@ -47,21 +47,36 @@ module AutoBZCore
 using LinearAlgebra: I, norm, det, checksquare
 
 using StaticArrays: SVector, SMatrix, pushfirst
+using FunctionWrappers: FunctionWrapper
 using Reexport
 @reexport using AutoSymPTR
 @reexport using FourierSeriesEvaluators
 @reexport using IteratedIntegration
+@reexport using QuadGK
+@reexport using HCubature
 
-using IteratedIntegration: alloc_segbufs, nextrule, nextdim, RuleQuad.GaussKronrod, NestedGaussKronrod
+using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature
+
+export PuncturedInterval, HyperCube
+include("domains.jl")
+
+export InplaceIntegrand
+include("inplace.jl")
+
+export BatchIntegrand
+include("batch.jl")
+
+export IntegralAlgorithm, QuadGKJL, HCubatureJL, QuadratureFunction
+export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
+export MonkhorstPack, AutoSymPTRJL
+export NestedQuad, AbsoluteEstimate
+include("algorithms.jl")
 
 export SymmetricBZ, FullBZ, nsyms
 export AbstractSymRep, SymRep, UnknownRep, TrivialRep
-include("domains.jl")
-
-export IntegralProblem, solve
-export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI, QuadGKJL, HCubatureJL
-include("algorithms.jl")
+export AutoBZAlgorithm, IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
+include("brillouin.jl")
 
 export MixedParameters, paramzip, paramproduct
 export IntegralSolver, batchsolve

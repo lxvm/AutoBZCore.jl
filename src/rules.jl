@@ -67,86 +67,8 @@ Base.:*(B::AbstractMatrix, f::FourierValue) = FourierValue(B*f.x, f.s)
 
 # QuadGK rule (no specialization for FourierIntegrand)
 
-#=
-# TODO: we can pre-evaluate the twiddle factors for the GK points as an optimization, but
-# until we do so, there is no benefit to a dedicated FourierGaussKronrod rule since we could
-# obtain the same improvement with a batched integrand, which isn't implemented either
-# Here is a template to start from in case further optimization is desired
-
-struct FourierGaussKronrod{S<:AbstractFourierSeries,T}
-    s::S
-    r::GaussKronrod{T}
-end
-
-function (r::FourierGaussKronrod)(f::F, s, nrm=norm, buffer=nothing) where {F}
-    return r.r(s, nrm, buffer) do x
-        return f(FourierValue(x, r.s(x)))
-    end
-end
-
-function init_fourier_rule(s::AbstractFourierSeries, dom, alg::QuadGKJL)
-    gk = GaussKronrod(eltype(dom), alg.order)
-    return FourierGaussKronrod(s, gk)
-end
-function init_cacheval(f::FourierIntegrand, dom, p, alg::QuadGKJL)
-    rule = init_fourier_rule(f.s, dom, alg)
-    TF, segbuf = init_segbuf(f, dom, p, rule)
-    parallel = init_parallel(alg.parallel, TF, eltype(segbuf), alg.order)
-    return (rule=rule, segbuf=segbuf, parallel=parallel)
-end
-=#
-
 # IAI rules
 
-struct NestedFourierGaussKronrod{dim,d,X,T,S}
-    r::NestedGaussKronrod{dim,d,X,T}
-    s::S
-    function NestedFourierGaussKronrod(r::NestedGaussKronrod{dim,d,X,T}, s::S) where {dim,d,X,T,S<:AbstractFourierSeries}
-        @assert dim == ndims(s)
-        return new{dim,d,X,T,S}(r, s)
-    end
-end
-
-# base case
-function IteratedIntegration.countevals(g::NestedFourierGaussKronrod)
-    return IteratedIntegration.countevals(g.r)
-end
-function IteratedIntegration.rule_type(g::NestedFourierGaussKronrod)
-    X = IteratedIntegration.rule_type(g.r)
-    S = FourierSeriesEvaluators.fourier_type(g.s, X)
-    return FourierValue{X,S}
-end
-function (g::NestedFourierGaussKronrod{1})(f::F, s, nrm=norm, buffer=nothing) where {F}
-    return g.r(x -> f(FourierValue(x, g.s(x[1]))), s, nrm, buffer)
-end
-
-# multidimensional
-IteratedIntegration.nextdim(::NestedFourierGaussKronrod{dim}) where dim = dim
-function IteratedIntegration.nextrule(r::NestedFourierGaussKronrod, x, v::Val{dim}) where {dim}
-    nr = nextrule(r.r, x, v)
-    ns = contract(r.s, x, v)
-    return NestedFourierGaussKronrod(nr, ns)
-end
-
-function (g::NestedFourierGaussKronrod)(f::F, s, nrm=norm, buffer=nothing) where {F}
-    return g.r(f, s, nrm, buffer)
-end
-
-function rule_type(r::NestedFourierGaussKronrod)
-    X = rule_type(r.r)
-    S = fourier_type(r.s, eltype(X))
-    return FourierValue{X,S}
-end
-function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::IAI)
-    gk = NestedGaussKronrod(eltype(bz.lims), alg.order, Val(ndims(bz.lims)))
-    return NestedFourierGaussKronrod(gk, s)
-end
-function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ, p, alg::IAI)
-    rule = init_fourier_rule(f.s, bz, alg)
-    TF, segbufs = init_segbufs(f, bz.lims, p, rule)
-    parallels = init_parallels(alg.parallels, TF, eltype(eltype(segbufs)), alg.order)
-    return (rule=rule, segbufs=segbufs, parallels=parallels)
-end
 
 # PTR rules
 
@@ -179,13 +101,12 @@ function FourierPTR(s::AbstractFourierSeries, ::Type{T}, v::Val{d}, npt) where {
 end
 
 rule_type(::FourierPTR{N,T,S}) where {N,T,S} = FourierValue{SVector{N,T},S}
-function init_fourier_rule(s::AbstractFourierSeries, bz::FullBZType , alg::PTR)
-    dom = Basis(bz.B)
+function init_fourier_rule(s::AbstractFourierSeries, dom::Basis, alg::MonkhorstPack)
     return FourierPTR(s, eltype(dom), Val(ndims(dom)), alg.npt)
 end
-function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ , p, alg::PTR)
-    rule = init_fourier_rule(f.s, bz, alg)
-    buf = init_buffer(f, p, rule, alg.parallel)
+function init_cacheval(f::FourierIntegrand, dom::Basis , p, alg::MonkhorstPack)
+    rule = init_fourier_rule(f.s, dom, alg)
+    buf = init_buffer(f, alg.nthreads)
     return (rule=rule, buffer=buf)
 end
 
@@ -217,10 +138,8 @@ function Base.iterate(p::FourierPTR, state)
     return (w, FourierValue(x, s)), (state1, state2)
 end
 
-AutoSymPTR.countevals(r::FourierPTR) = AutoSymPTR.countevals(r.p)
-
 function (rule::FourierPTR)(f, B::Basis, buffer=nothing)
-    return AutoSymPTR.quadsum(rule, f, B, buffer) * (abs(det(B.B)) / AutoSymPTR.countevals(rule))
+    return AutoSymPTR.quadsum(rule, f, B, buffer) * (abs(det(B.B)) / length(rule))
 end
 
 # SymPTR rules
@@ -274,7 +193,6 @@ Base.length(r::FourierMonkhorstPack) = length(r.wxs)
 Base.iterate(rule::FourierMonkhorstPack, args...) = iterate(rule.wxs, args...)
 
 rule_type(::FourierMonkhorstPack{d,T,S}) where {d,T,S} = FourierValue{SVector{d,T},S}
-AutoSymPTR.countevals(rule::FourierMonkhorstPack) = length(rule)
 
 function (rule::FourierMonkhorstPack{d})(f, B::Basis, buffer=nothing) where d
     return AutoSymPTR.quadsum(rule, f, B, buffer) * ((abs(det(B.B)) / (rule.npt^d * rule.nsyms)))
@@ -293,13 +211,13 @@ function FourierMonkhorstPackRule(s, syms, a, nmin, nmax, n₀, Δn)
 end
 AutoSymPTR.nsyms(r::FourierMonkhorstPackRule) = AutoSymPTR.nsyms(r.m)
 
-function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::AutoPTR)
-    return FourierMonkhorstPackRule(s, bz.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
+function init_fourier_rule(s::AbstractFourierSeries, dom::Basis, alg::AutoSymPTRJL)
+    return FourierMonkhorstPackRule(s, alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
 end
-function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ, p, alg::AutoPTR)
-    rule = init_fourier_rule(f.s, bz, alg)
-    cache = AutoSymPTR.alloc_cache(eltype(bz), Val(ndims(bz)), rule)
-    buffer = init_buffer(f, p, cache[1], alg.parallel)
+function init_cacheval(f::FourierIntegrand, dom::Basis, p, alg::AutoSymPTRJL)
+    rule = init_fourier_rule(f.s, dom, alg)
+    cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
+    buffer = init_buffer(f, alg.nthreads)
     return (rule=rule, cache=cache, buffer=buffer)
 end
 
