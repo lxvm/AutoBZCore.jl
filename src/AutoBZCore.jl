@@ -44,10 +44,11 @@ For example, computing the local Green's function can be done as follows:
 """
 module AutoBZCore
 
-using LinearAlgebra: I, norm, det, checksquare
+using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal
 
-using StaticArrays: SVector, SMatrix, pushfirst
+using StaticArrays: SVector, SMatrix, pushfirst, sacollect
 using FunctionWrappers: FunctionWrapper
+using ChunkSplitters: chunks
 using Reexport
 @reexport using AutoSymPTR
 @reexport using FourierSeriesEvaluators
@@ -55,8 +56,10 @@ using Reexport
 @reexport using QuadGK
 @reexport using HCubature
 
+using FourierSeriesEvaluators: allocate, contract!, evaluate, period
 using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature
+
 
 export PuncturedInterval, HyperCube
 include("domains.jl")
@@ -67,24 +70,27 @@ include("inplace.jl")
 export BatchIntegrand
 include("batch.jl")
 
-export IntegralAlgorithm, QuadGKJL, HCubatureJL, QuadratureFunction
+# export IntegralProblem, solve, init, solve! # we don't export the SciML interface
+export IntegralSolver, batchsolve
+include("interfaces.jl")
+
+export QuadGKJL, HCubatureJL, QuadratureFunction
 export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
 export MonkhorstPack, AutoSymPTRJL
 export NestedQuad, AbsoluteEstimate
 include("algorithms.jl")
 
-export SymmetricBZ, FullBZ, nsyms
+export SymmetricBZ, nsyms
+export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, SymRep, UnknownRep, TrivialRep
-export AutoBZAlgorithm, IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
+export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
 include("brillouin.jl")
 
-export MixedParameters, paramzip, paramproduct
-export IntegralSolver, batchsolve
-export ParameterIntegrand
-include("interfaces.jl")
+export ParameterIntegrand, paramzip, paramproduct
+include("parameters.jl")
 
 export FourierIntegrand, FourierValue
-include("rules.jl")
+include("fourier.jl")
 
 
 end

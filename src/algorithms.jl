@@ -1,82 +1,7 @@
-# we recreate a lot of the SciML Integrals.jl functionality, but only for our algorithms
-# the features we omit are: inplace integrands, infinite limit transformations, nout and
-# batch keywords. Otherwise, there is a correspondence between.
-# solve -> do_solve
-# init -> make_cache
-
-"""
-    IntegralAlgorithm
-
-Abstract supertype for integration algorithms.
-"""
-abstract type IntegralAlgorithm end
-
-
-struct IntegralProblem{F,D,P}
-    f::F
-    dom::D
-    p::P
-    function IntegralProblem{F,D,P}(f::F, dom::D, p::P) where {F,D,P}
-        return new{F,D,P}(f, dom, p)
-    end
-end
-function IntegralProblem(f::F, dom::D, p::P=()) where {F,D,P}
-    return IntegralProblem{F,D,P}(f, dom, p)
-end
-function IntegralProblem(f::F, a::T, b::T, p::P=()) where {F,T,P}
-    dom = T <: Real ? PuncturedInterval((a, b)) : HyperCube(a, b)
-    return IntegralProblem{F,typeof(dom),P}(f, dom, p)
-end
-
-struct IntegralCache{F,D,P,A,C,K}
-    f::F
-    dom::D
-    p::P
-    alg::A
-    cacheval::C
-    kwargs::K
-end
-
-function make_cache(f, dom, p, alg; kwargs...)
-    cacheval = init_cacheval(f, dom, p, alg)
-    return IntegralCache(f, dom, p, alg, cacheval, NamedTuple(kwargs))
-end
-
-function checkkwargs(kwargs)
-    for key in keys(kwargs)
-        key in (:abstol, :reltol, :maxiters) || throw(ArgumentError("keyword $key unrecognized"))
-    end
-    return nothing
-end
-
-function make_cache(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
-    checkkwargs(NamedTuple(kwargs))
-    f = prob.f; dom = prob.dom; p = prob.p
-    return make_cache(f, dom, p, alg; kwargs...)
-end
-
-function solve(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
-    cache = make_cache(prob, alg; kwargs...)
-    return do_solve(cache)
-end
-
-function do_solve(c::IntegralCache)
-    return do_solve(c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
-end
-
 # Methods an algorithm must define
 # - init_cacheval
 # - do_solve
 
-# this method can be extended to different integrands so that it doesn't have to be
-# evaluated to get the type, which is also useful in case parameters are incomplete
-integrand_return_type(f, x, p) = typeof(f(x, p))
-
-struct IntegralSolution{T,E}
-    u::T
-    resid::E
-    retcode::Bool
-end
 
 # Here we replicate the algorithms provided by SciML
 
@@ -388,6 +313,8 @@ struct MonkhorstPack{S} <: IntegralAlgorithm
 end
 MonkhorstPack(; npt=50, syms=nothing, nthreads=Threads.nthreads()) = MonkhorstPack(npt, syms, nthreads)
 function init_rule(dom::Basis, alg::MonkhorstPack)
+    # rule = AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
+    # return rule(eltype(dom), Val(ndims(dom)))
     if alg.syms === nothing
         return AutoSymPTR.PTR(eltype(dom), Val(ndims(dom)), alg.npt)
     else
@@ -396,7 +323,9 @@ function init_rule(dom::Basis, alg::MonkhorstPack)
 end
 
 rule_type(::AutoSymPTR.PTR{N,T}) where {N,T} = SVector{N,T}
-function init_cacheval(f, dom::Basis , p, alg::MonkhorstPack)
+rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
+
+function init_cacheval(f, dom::Basis, p, alg::MonkhorstPack)
     rule = init_rule(dom, alg)
     buf = init_buffer(f, alg.nthreads)
     return (rule=rule, buffer=buf)
@@ -444,7 +373,6 @@ end
 function init_rule(dom::Basis, alg::AutoSymPTRJL)
     return AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
 end
-rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
 function init_cacheval(f, dom::Basis, p, alg::AutoSymPTRJL)
     rule = init_rule(dom, alg)
     cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
