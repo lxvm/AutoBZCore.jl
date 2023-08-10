@@ -5,8 +5,10 @@ using StaticArrays
 using OffsetArrays
 
 using HDF5
+using SymmetryReduceBZ
+
 using AutoBZCore
-using AutoBZCore: IntegralProblem, solve
+using AutoBZCore: IntegralProblem, solve, MixedParameters
 using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
 
 
@@ -361,5 +363,9 @@ end
         end
     end
     rm(fn)
+end
+
+@testset "SymmetryReduceBZExt" begin
+    include("test_ibz.jl")
 end
 =#
