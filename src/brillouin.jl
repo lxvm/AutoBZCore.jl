@@ -287,7 +287,7 @@ function do_solve(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm, cacheval; _kws.
     kws = NamedTuple(_kws)
     kws_ = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / (j * nsyms(bz_)),)) : kws
 
-    @show sol = do_solve(f, dom, p, alg, cacheval; kws_...)
+    sol = do_solve(f, dom, p, alg, cacheval; kws_...)
     val = j*symmetrize(f, bz_, sol.u)
     err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
     return IntegralSolution(val, err, sol.retcode)
