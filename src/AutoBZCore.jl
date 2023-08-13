@@ -27,8 +27,8 @@ For example, computing the local Green's function can be done as follows:
 
     gloc_integrand(h_k::FourierValue; η, ω) = inv(complex(ω,η)*I-h_k.s)     # define integrand evaluator
     h = FourierSeries([0.0; 0.5; 0.0;; 0.5; 0.0; 0.5;; 0.0; 0.5; 0.0]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
-    bz = FullBZ(2pi*I(2))                                   # construct BZ from lattice vectors A=2pi*I
-    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)   # construct integrand with Fourier series h and parameter η=0.1
+    bz = load_bz(FBZ(2), 2pi*I(2))                          # construct BZ from lattice vectors A=2pi*I
+    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)  # construct integrand with Fourier series h and parameter η=0.1
     prob = IntegralProblem(integrand, bz)                   # setup the integral problem
     alg = IAI()                                             # choose integration algorithm (also AutoPTR() and PTR())
     gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
@@ -56,7 +56,7 @@ using Reexport
 @reexport using QuadGK
 @reexport using HCubature
 
-using FourierSeriesEvaluators: allocate, contract!, evaluate, period
+using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
 using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature
 

@@ -15,54 +15,9 @@
 # vector-valued approach will allow distributed computing and other benefits that are beyond
 # the scope of what this package aims to provide.
 
-# I would like to just make the user pass in some `FourierRule` to indicate that their
-# integrand accepts `FourierValue`s, however in previous versions we used the
-# `FourierIntegrand` concept, which we now convert to a Fourier 'rule' if there is a benefit
-# to doing so. (i.e. multidimensional evaluation of Fourier series on hierarchical grids.)
-# Also, rules don't exist in the SciML interface we are copying, so we have to dispatch on
-# the integrand
+# We use the pattern of allowing the user to pass a container with the integrand, Fourier
+# series and workspace, and use dispatch to enable the optimizations
 
-# needs to contain enough information to decide when/how to do threading/batching and how
-# much workspace to pre-allocate, and it should also allow thread-unsafe integrands?
-function workspace_allocate(s, x)
-    dim = Val((d = ndims(s)))
-    d === 1 && return ()
-    cache = allocate(s, x[d], dim)
-    d === 2 && return (cache,)
-    return (workspace_allocate(contract!(cache, s, x, x[d], dim), x[1:d-1])..., cache)
-end
-
-struct FourierWorkspace{S,C}
-    series::S
-    cache::C
-end
-
-# Only the top-level workspace has an AbstractFourierSeries in the series field
-# In the lower level workspaces the series field has a cache that can be contract!-ed into a series
-function workspace_allocate(s::AbstractFourierSeries{1}, x=0.0, len::NTuple{1}=(1,))
-    return FourierWorkspace(s, ntuple(_->nothing, Val(len[1])))
-end
-function workspace_allocate(s::AbstractFourierSeries{N}, x=0.0, len::NTuple{N}=ntuple(_->1,Val(N))) where{N}
-    dim = Val(ndims(s))
-    ws = ntuple(Val(len[N])) do n
-        cache = allocate(s, x, dim)
-        t = contract!(cache, s, x, dim)
-        return FourierWorkspace(cache, workspace_allocate(t, x, Base.front(len)).cache)
-    end
-    return FourierWorkspace(s, ws)
-end
-
-function workspace_contract!(ws, x, dim, i=1)
-    s = contract!(ws.cache[i].series, ws.series, x, dim)
-    return FourierWorkspace(s, ws.cache[i].cache)
-end
-
-# evaluate a Fourier series using the workspace storage
-workspace_evaluate(ws, x::NTuple{1}) = evaluate(ws.series, x)
-function workspace_evaluate(ws, x::NTuple{N}) where {N}
-    workspace_evaluate(workspace_contract!(ws, x[N], Val(N)), x[1:N-1])
-end
-workspace_evaluate(ws, x) = workspace_evaluate(ws, promote(x...))
 
 struct FourierIntegrand{F,P,S,C}
     f::ParameterIntegrand{F,P}
@@ -73,24 +28,18 @@ function FourierIntegrand(f, w::FourierWorkspace, args...; kws...)
     return FourierIntegrand(ParameterIntegrand(f, args...; kws...), w)
 end
 function FourierIntegrand(f, s::AbstractFourierSeries, args...; kws...)
-    return FourierIntegrand(f, workspace_allocate(s), args...; kws...)
-end
-
-function Base.getproperty(f::FourierIntegrand, name::Symbol)
-    name === :f && return getfield(f, :f).f
-    name === :p && return getfield(f, :f).p
-    return getfield(f, name)
+    return FourierIntegrand(f, workspace_allocate(s, period(s)), args...; kws...)
 end
 
 function (s::IntegralSolver{<:FourierIntegrand})(args...; kwargs...)
     p = MixedParameters(args...; kwargs...)
-    sol = do_solve(s, p)
+    sol = solve_p(s, p)
     return sol.u
 end
 
 function remake_cache(f::FourierIntegrand, dom, p, alg, cacheval, kwargs)
-    new = FourierIntegrand(f.f, f.w)
-    return remake_integrand_cache(new, dom, merge(f.p, p), alg, cacheval, kwargs)
+    new = FourierIntegrand(f.f.f, f.w)
+    return remake_integrand_cache(new, dom, merge(f.f.p, p), alg, cacheval, kwargs)
 end
 
 # FourierIntegrands should expect a FourierValue as input
@@ -106,7 +55,7 @@ Base.:*(B::AbstractMatrix, f::FourierValue) = FourierValue(B*f.x, f.s)
 
 (f::FourierIntegrand)(x::FourierValue, p=()) = getfield(f, :f)(x, p)
 # fallback evaluator of FourierIntegrand for algorithms without specialized rules
-(f::FourierIntegrand)(x, p=()) = f(FourierValue(x, workspace_evaluate(f.w, x)), p)
+(f::FourierIntegrand)(x, p=()) = f(FourierValue(x, f.w(x)), p)
 
 # PTR rules
 
@@ -117,32 +66,32 @@ struct FourierPTR{N,T,S,X} <: AbstractArray{Tuple{AutoSymPTR.One,FourierValue{SV
 end
 
 function fourier_ptr!(vals::AbstractArray{T,1}, w::FourierWorkspace, x::AbstractVector) where {T}
-    p = period(w.series, 1)
+    t = period(w.series, 1)
     if length(w.cache) === 1
         for (i, y) in zip(eachindex(vals), x)
-            @inbounds vals[i] = w.series(p*y)
+            @inbounds vals[i] = workspace_evaluate!(w, t*y)
         end
     else
         # we batch for memory locality in vals array on each thread
         Threads.@threads for (vrange, ichunk) in chunks(axes(vals, 1), length(w.cache), :batch)
             for i in vrange
-                @inbounds vals[i] = w.series(p*x[i])
+                @inbounds vals[i] = workspace_evaluate!(w, t*x[i], ichunk)
             end
         end
     end
     return vals
 end
 function fourier_ptr!(vals::AbstractArray{T,d}, w::FourierWorkspace, x::AbstractVector) where {T,d}
-    p = period(w.series, d)
+    t = period(w.series, d)
     if length(w.cache) === 1
         for (y, v) in zip(x, eachslice(vals, dims=d))
-            fourier_ptr!(v, workspace_contract!(w, p*y, Val(d)), x)
+            fourier_ptr!(v, workspace_contract!(w, t*y), x)
         end
     else
         # we batch for memory locality in vals array on each thread
         Threads.@threads for (vrange, ichunk) in chunks(axes(vals, d), length(w.cache), :batch)
             for i in vrange
-                ws = workspace_contract!(w, p*x[i], Val(d), ichunk)
+                ws = workspace_contract!(w, t*x[i], ichunk)
                 fourier_ptr!(view(vals, ntuple(_->(:),Val(d-1))..., i), ws, x)
             end
         end
@@ -199,110 +148,68 @@ struct FourierMonkhorstPack{d,W,T,S}
     wxs::Vector{Tuple{W,FourierValue{SVector{d,T},S}}}
 end
 
-#=
-stateful_workspace_evaluate(ws::FourierWorkspace, x::NTuple{1}) = workspace_evaluate(ws, x), (ws,)
-function stateful_workspace_evaluate(ws::FourierWorkspace, x::NTuple{N}) where {N}
-    w = workspace_contract!(ws, x[N], Val(N))
-    val, state = stateful_workspace_evaluate(w, x[1:N-1])
-    return val, (state..., ws)
-end
-
-function lazyeval(s, state, prev::NTuple{1}, u::NTuple{1})
-    if prev[1] != u[1]
-        return stateful_workspace_evaluate(state[1], map(*, u, period(state[1].series)))
-    else
-        return s, state
-    end
-end
-function lazyeval(s, state, prev::NTuple{N}, u::NTuple{N}) where {N}
-    if prev[N] != u[N]
-        stateful_workspace_evaluate(state[N], map(*, u, period(state[N].series)))
-    else
-        val, new_state = lazyeval(s, state[1:N-1], prev[1:N-1], u[1:N-1])
-        return val, (new_state..., state[N])
-    end
-end
-# TODO think of ways to parallelize this by precomputing output indices
-function fourier_symptr!(vals, w::FourierWorkspace, x::AbstractVector, wsym::AbstractArray, nsym)
-    n = 0
-    prev = ntuple(j -> zero(eltype(x)), Val(ndims(wsym)))
-    s, state = stateful_workspace_evaluate(w, prev)
-    for i in CartesianIndices(wsym)
-        n < nsym || break
-        iszero(wsym[i]) && continue
-        u = ntuple(j -> x[i[j]], Val(ndims(wsym)))
-        s, state = lazyeval(s, state, prev, u)
-        vals[n += 1] = (wsym[i], FourierValue(u, s))
-        prev = u
-    end
-end
-=#
-
-
-function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, wsym::AbstractVector, ::Tuple{}, offset, a, b, z, npt)
-    p = period(w.series, 1)
-    # offset -= 1
+function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, wsym::AbstractVector, ::Tuple{}, offset, a, b, z)
+    t = period(w.series, 1)
     o = offset-a
     if (len = length(w.cache)) === 1 # || len <= w.basecasesize[1]
-        for i in a:b # 1:npt # a:b
+        for i in a:b
             wi = wsym[i]
-            iszero(wi) && (offset -= 1; continue)
+            iszero(wi) && continue
             y = x[i]
-            # @show i+o, y, wi
-            vals[i+o] = (wi, FourierValue(SVector(y, z...), w.series(p*y)))
+            vals[i+o] = (wi, FourierValue((y, z...), workspace_evaluate!(w, t*y)))
         end
     else
         # since the ibz is convex we scatter points over threads to distribute the workload
-        Threads.@threads for (vrange, ichunk) in chunks(1:npt, len, :scatter)
+        Threads.@threads for (vrange, ichunk) in chunks(a:b, len, :scatter)
             for i in vrange
                 wi = wsym[i]
-                iszero(wi) && (offset -= 1; continue)
+                iszero(wi) && continue
                 y = x[i]
-                vals[i+offset] = (wi, FourierValue(SVector(y, z...),w.series(p*y)))
+                vals[i+o] = (wi, FourierValue((y, z...), workspace_evaluate!(w, t*y, ichunk)))
             end
         end
     end
     return vals
 end
-function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, wsym::AbstractArray, flags, offset, a, b, z, npt)
+function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, wsym::AbstractArray, flags, offset, a, b, z)
     d = ndims(wsym)
-    p = period(w.series, d)
+    t = period(w.series, d)
     flag, f = flags[begin:end-1], flags[end]
     if (len = length(w.cache)) === 1 # || len <= w.basecasesize[d]
-        for i in a:b # 1:npt # a:b
+        for i in a:b
             fi = f[i]
             fi[1] == 0 && continue
             y = x[i]
-            ws = workspace_contract!(w, p*y, Val(d))
-            _fourier_symptr!(vals, ws, x, selectdim(wsym, d, i), flag, fi..., (y, z...), npt)
+            ws = workspace_contract!(w, t*y)
+            _fourier_symptr!(vals, ws, x, selectdim(wsym, d, i), flag, fi..., (y, z...))
         end
     else
         # since the ibz is convex we scatter points over threads to distribute the workload
-        Threads.@threads for (vrange, ichunk) in chunks(1:npt, len, :scatter)
+        Threads.@threads for (vrange, ichunk) in chunks(a:b, len, :scatter)
             for i in vrange
                 fi = f[i]
                 fi[1] == 0 && continue
                 y = x[i]
-                ws = workspace_contract!(w, p*y, Val(d), ichunk)
-                _fourier_symptr!(vals, ws, x, selectdim(wsym, d, i), flag, fi..., (y, z...), npt)
+                ws = workspace_contract!(w, t*y, ichunk)
+                _fourier_symptr!(vals, ws, x, selectdim(wsym, d, i), flag, fi..., (y, z...))
             end
         end
     end
     return vals
 end
 
-function fourier_symptr!(wxs, w, u, wsym, flags, npt)
+function fourier_symptr!(wxs, w, u, wsym, flags)
     flag, f = flags[begin:end-1], flags[end]
-    return _fourier_symptr!(wxs, w, u, wsym, flag, f[]..., (), npt)
+    return _fourier_symptr!(wxs, w, u, wsym, flag, f[]..., ())
 end
 
 function FourierMonkhorstPack(w::FourierWorkspace, ::Type{T}, ndim::Val{d}, npt, syms) where {d,T}
     # unitless quadrature weight/node, but unitful value to Fourier series
     u = AutoSymPTR.ptrpoints(typeof(float(real(one(T)))), npt)
-    s = workspace_evaluate(w, ntuple(_->zero(T), ndim))
+    s = w(map(*, period(w.series), ntuple(_->zero(T), ndim)))
     wsym, flags, nsym = AutoSymPTR.symptr_rule(npt, ndim, syms)
     wxs = Vector{Tuple{eltype(wsym),FourierValue{SVector{d,eltype(u)},typeof(s)}}}(undef, nsym)
-    fourier_symptr!(wxs, w, u, wsym, flags, npt)
+    fourier_symptr!(wxs, w, u, wsym, flags)
     return FourierMonkhorstPack(npt, length(syms), wxs)
 end
 
@@ -352,6 +259,10 @@ end
 
 # dispatch on algorithms
 
+function init_buffer(f::FourierIntegrand, len)
+    return nothing
+end
+
 rule_type(::FourierPTR{N,T,S}) where {N,T,S} = FourierValue{SVector{N,T},S}
 function init_fourier_rule(w::FourierWorkspace, dom::Basis, alg::MonkhorstPack)
     @assert ndims(w.series) == ndims(dom)
@@ -385,3 +296,39 @@ end
 
 
 # IAI rules
+
+function init_nest(f::FourierIntegrand, fxx, dom, p,lims, state, algs, cacheval; kws_...)
+    kws = NamedTuple(kws_)
+    FX = typeof(fxx/oneunit(eltype(dom)))
+    TX = eltype(dom)
+    TP = Tuple{typeof(p),typeof(lims),typeof(state)}
+    if algs isa Tuple{} # inner integral
+        return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
+            v = FourierValue(limit_iterate(lims, state, x), workspace_evaluate!(f.w, x))
+            return f.f(v, p)
+        end
+    else
+        return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
+            segs, lims_, state_ = limit_iterate(lims, state, x)
+            fx = FourierIntegrand(f.f, workspace_contract!(f.w, x))
+            len = segs[end] - segs[1]
+            kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+            sol = do_solve(fx, lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval; kwargs...)
+            return sol.u
+        end
+    end
+end
+
+function do_solve(f::FourierIntegrand, lims::AbstractIteratedLimits, p_, alg::NestedQuad, cacheval; kws...)
+    g, p, segs, state = if p_ isa NestState
+        f, p_.p, p_.segs, p_.state
+    else
+        seg, lim, sta = limit_iterate(lims)
+        f, p_, seg, sta
+    end
+    dom = PuncturedInterval(segs)
+    (dim = ndims(lims)) == ndims(f.w.series) || throw(ArgumentError("variables in Fourier series don't match domain"))
+    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(dim)) : alg.algs
+    nest = init_nest(g, cacheval[dim][2], dom, p, lims, state, algs[1:dim-1], cacheval[1:dim-1]; kws...)
+    return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[dim][1]; kws...)
+end
