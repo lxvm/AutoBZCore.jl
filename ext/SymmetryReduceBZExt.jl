@@ -7,7 +7,7 @@ using StaticArrays
 using SymmetryReduceBZ
 using AutoBZCore: canonical_reciprocal_basis, SymmetricBZ, IBZ, DefaultPolyhedron,
     CubicLimits, AbstractIteratedLimits, load_limits
-import AutoBZCore: load_bz, IteratedIntegration.fixandeliminate, IteratedIntegration.segments
+import AutoBZCore: IteratedIntegration.fixandeliminate, IteratedIntegration.segments
 
 
 include("ibzlims.jl")
@@ -61,17 +61,17 @@ function fixandeliminate(pg::Polygon2, y, ::Val{2})
     return CubicLimits(xlim_from_yslice(y, pg.vert)...)
 end
 
-function (::IBZ{n,Polyhedron})(a, real_latvecs, atom_types, atom_pos, coordinates; ibzformat="half-space", makeprim=false, convention="ordinary") where {n}
+function (::IBZ{n,Polyhedron})(real_latvecs, atom_types, atom_pos, coordinates; ibzformat="half-space", makeprim=false, convention="ordinary") where {n}
     hull_cart = calc_ibz(real_latvecs, atom_types, atom_pos, coordinates, ibzformat, makeprim, convention)
-    hull = a' * polyhedron(doubledescription(hull_cart)) # rotate Cartesian basis to lattice basis in reciprocal coordinates
+    hull = real_latvecs' * polyhedron(doubledescription(hull_cart)) # rotate Cartesian basis to lattice basis in reciprocal coordinates
     hrepiscomputed(hull) || hrep(hull) # precompute hrep if it isn't already
     return load_limits(hull)
 end
 
-function (::IBZ{3,DefaultPolyhedron})(a, real_latvecs, atom_types, atom_pos, coordinates; ibzformat="convex hull", makeprim=false, convention="ordinary", digits=12)
+function (::IBZ{3,DefaultPolyhedron})(real_latvecs, atom_types, atom_pos, coordinates; ibzformat="convex hull", makeprim=false, convention="ordinary", digits=12)
     hull = calc_ibz(real_latvecs, atom_types, atom_pos, coordinates, ibzformat, makeprim, convention)
     tri_idx = hull.simplices
-    ph_vert = hull.points * a
+    ph_vert = hull.points * real_latvecs
     # tidy_vertices!(ph_vert, digits) # this should take care of rounding errors
     face_idx = faces_from_triangles(tri_idx, ph_vert)
     # face_idx = SymmetryReduceBZ.Utilities.get_uniquefacets(hull)
@@ -85,32 +85,34 @@ function tidy_vertices!(points, digits)
     for (i, p) in enumerate(points)
         points[i] = fixsign(round(p; digits=digits))
     end
-    points
+    return points
 end
 
 """
-    load_bz(::IBZ, real_latvecs, species, atom_pos; coordinates="lattice", rtol=nothing, atol=1e-9, digits=12)
+    load_ibz(::IBZ, A, B, species, positions; coordinates="lattice", rtol=nothing, atol=1e-9, digits=12)
 
 Use `SymmetryReduceBZ` to automatically load the IBZ. Since this method lives in
 an extension module, make sure you write `using SymmetryReduceBZ` before `using
 AutoBZ`.
 """
-function load_bz(bz::IBZ, real_latvecs, species, atom_pos; coordinates="lattice", rtol=nothing, atol=1e-9, digits=12)
-    d = LinearAlgebra.checksquare(real_latvecs)
-    a = convert(SMatrix{d,d,float(eltype(real_latvecs)),d^2}, real_latvecs)
-    b = canonical_reciprocal_basis(a)
+function load_ibz(bz::IBZ{N}, A::SMatrix{N,N}, B::SMatrix{N,N}, species::AbstractVector, positions::AbstractMatrix;
+    coordinates="lattice", rtol=nothing, atol=1e-9, digits=12) where {N}
+    # we need to convert arguments to unit-free since SymmetryReduceBZ doesn't support them
+    # and our limits objects must be unitless
+    real_latvecs = A / oneunit(eltype(A))
     atom_species = unique(species)
     atom_types = map(e -> findfirst(==(e), atom_species) - 1, species)
+    atom_pos = positions / oneunit(eltype(positions))
     # get symmetries
     sg = SymmetryReduceBZ.Symmetry.calc_spacegroup(real_latvecs, atom_types, atom_pos, coordinates)
     pg_ = SymmetryReduceBZ.Utilities.remove_duplicates(sg[2], rtol=something(rtol, sqrt(eps(float(maximum(real_latvecs))))), atol=atol)
-    pg = convert(Vector{SMatrix{3,3,Float64,9}}, pg_) # deal with type instability in SymmetryReduceBZ
-    syms = Ref(a') .* pg .* Ref(inv(a')) # rotate operator from Cartesian basis to lattice basis in reciprocal coordinates
+    pg = Ref(real_latvecs') .* pg_ .* Ref(inv(real_latvecs')) # rotate operator from Cartesian basis to lattice basis in reciprocal coordinates
+    syms = convert(Vector{SMatrix{3,3,Float64,9}}, pg) # deal with type instability in SymmetryReduceBZ
     map!(s -> fixsign.(round.(s, digits=digits)), syms, syms)   # clean up matrix elements
     # get convex hull
-    hull = bz(a, real_latvecs, atom_types, atom_pos, coordinates)
+    hull = bz(real_latvecs, atom_types, atom_pos, coordinates)
     # now limits and symmetries should be in reciprocal coordinates in the lattice basis
-    return SymmetricBZ(a, b, hull, syms)
+    return SymmetricBZ(A, B, hull, syms)
 end
 
 end

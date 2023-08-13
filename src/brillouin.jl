@@ -6,7 +6,7 @@ end
 function check_bases_canonical(A::AbstractMatrix, B::AbstractMatrix, atol)
     norm(A'B - 2pi*I) < atol || throw("Real and reciprocal Bravais lattice bases non-orthogonal to tolerance $atol")
 end
-canonical_reciprocal_basis(A::AbstractMatrix) = A' \ (2pi*one(A))
+canonical_reciprocal_basis(A::AbstractMatrix) = A' \ (pi*(one(A)+one(A)))
 
 # main data type
 """
@@ -43,6 +43,9 @@ nsyms(bz::SymmetricBZ) = length(bz.syms)
 
 const FullBZ = SymmetricBZ{Nothing}
 nsyms(::FullBZ) = 1
+
+Base.summary(bz::SymmetricBZ) = string(checksquare(bz.A), "-dimensional Brillouin zone with ", bz isa FullBZ ? "trivial" : nsyms(bz), " symmetries")
+Base.show(io::IO, bz::SymmetricBZ) = print(io, summary(bz))
 
 # Define traits for symmetrization based on symmetry representations
 
@@ -176,6 +179,25 @@ struct DefaultPolyhedron end
 
 IBZ(n=nothing,) = IBZ{n,DefaultPolyhedron}()
 Base.convert(::Type{AbstractBZ{d}}, ::IBZ{N,P}) where {d,N,P} = IBZ{d,P}()
+
+"""
+    load_bz(::IBZ, A, B, species::AbstractVector, positions::AbstractMatrix; kws...)
+
+`species` must have distinct labels for each atom type (e.g. can be any string or integer)
+and `positions` must be a matrix whose columns give the coordinates of the atom of the
+corresponding species.
+"""
+function load_bz(bz::IBZ, A, B, species, positions; kws...)
+    ext = Base.get_extension(@__MODULE__(), :SymmetryReduceBZExt)
+    if ext !== nothing
+        return ext.load_ibz(bz, A, B, species, positions; kws...)
+    else
+        error("SymmetryReduceBZ extension not loaded")
+    end
+end
+function load_bz(bz::IBZ{N}, A::SMatrix{N,N}, B::SMatrix{N,N}) where {N}
+    return load_bz(bz, A, B, nothing, nothing)
+end
 
 checkorthog(A::AbstractMatrix) = isdiag(transpose(A)*A)
 
