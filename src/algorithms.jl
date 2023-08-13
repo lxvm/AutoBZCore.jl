@@ -420,7 +420,8 @@ NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 function nested_cacheval(f::F, p::P, algs, segs, lims, state, x, xs...) where {F,P}
     dom = PuncturedInterval(segs)
     a, b = segs[1], segs[2]
-    alg = Base.last(algs)
+    dim = ndims(lims)
+    alg = algs[dim]
     mid = (a+b)/2 # sample point that should be safe to evaluate
     next = limit_iterate(lims, state, mid) # see what the next limit gives
     if xs isa Tuple{} # the next integral takes us to the inner integral
@@ -442,8 +443,8 @@ function nested_cacheval(f::F, p::P, algs, segs, lims, state, x, xs...) where {F
             return ((cacheval, fx*mid),)
         end
     else
-        algs_ = Base.front(algs)
-        nest = nested_cacheval(f, p, algs_, next..., x, Base.front(xs)...)
+        algs_ = algs[1:dim-1]
+        nest = nested_cacheval(f, p, algs_, next..., x, xs[1:dim-2]...)
         h = nest[end][2]
         hx = h*mid
         # units may change for outer integral
@@ -526,7 +527,7 @@ function do_solve(f::F, lims::AbstractIteratedLimits, p_, alg::NestedQuad, cache
     dom = PuncturedInterval(segs)
     dim = ndims(lims) # constant propagation :)
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(dim)) : alg.algs
-    nest = init_nest(g, cacheval[dim][2], dom, p, lims, state, Base.front(algs), Base.front(cacheval); kws...)
+    nest = init_nest(g, cacheval[dim][2], dom, p, lims, state, algs[1:dim-1], cacheval[1:dim-1]; kws...)
     return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[dim][1]; kws...)
 end
 
