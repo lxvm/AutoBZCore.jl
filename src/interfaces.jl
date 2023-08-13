@@ -174,7 +174,7 @@ function batchsolve!(out, f, ps, nthreads, callback)
         f_ = Threads.threadid() == 1 ? f : deepcopy(f) # avoid data races for in place integrators
         for (i, p) in batch
             t = time()
-            sol = solve!(f_, p)
+            sol = solve_p(f_, p)
             callback(f, i, Threads.atomic_add!(n, 1) + 1, p, sol, time() - t)
             out[i] = sol.u
         end
@@ -182,7 +182,7 @@ function batchsolve!(out, f, ps, nthreads, callback)
     return out
 end
 
-solver_type(::F, ::P) where {F,P} = Base.promote_op((f, p) -> solve!(f, p).u, F, P)
+solver_type(::F, ::P) where {F,P} = Base.promote_op((f, p) -> solve_p(f, p).u, F, P)
 
 """
     batchsolve(f::IntegralSolver, ps::AbstractArray, [T]; nthreads=Threads.nthreads())
