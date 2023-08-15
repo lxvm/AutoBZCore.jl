@@ -18,9 +18,27 @@ function QuadGKJL(; order = 7, norm = norm)
     return QuadGKJL(order, norm)
 end
 
+function init_midpoint_scale(a::T, b::T) where {T}
+    # we try to reproduce the initial midpoint used by QuadGK, and scale just needs right units
+    s = float(oneunit(T))
+    if one(T) isa Real
+        x = if (infa = isinf(a)) & (infb = isinf(b))
+            float(zero(T))
+        elseif infa
+            float(b - oneunit(b))
+        elseif infb
+            float(a + oneunit(a))
+        else
+            (a+b)/2
+        end
+        return x, s
+    else
+        return (a+b)/2, s
+    end
+end
+init_midpoint_scale(dom::PuncturedInterval) = init_midpoint_scale(endpoints(dom)...)
 function init_segbuf(f, dom, p, norm)
-    a, b = endpoints(dom)
-    x, s = (a+b)/2, (b-a)/2
+    x, s = init_midpoint_scale(dom)
     TX = typeof(x)
     fx_s = f(x, p) * s
     TI = typeof(fx_s)
@@ -28,8 +46,7 @@ function init_segbuf(f, dom, p, norm)
     return IteratedIntegration.alloc_segbuf(TX, TI, TE)
 end
 function init_segbuf(f::InplaceIntegrand, dom, p, norm)
-    a, b = endpoints(dom)
-    x, s = (a+b)/2, (b-a)/2
+    x, s = init_midpoint_scale(dom)
     TX = typeof(x)
     TI = typeof(f.I)
     fill!(f.I, zero(eltype(f.I)))
@@ -37,8 +54,7 @@ function init_segbuf(f::InplaceIntegrand, dom, p, norm)
     return IteratedIntegration.alloc_segbuf(TX, TI, TE)
 end
 function init_segbuf(f::BatchIntegrand, dom, p, norm)
-    a, b = endpoints(dom)
-    x, s = (a+b)/2, (b-a)/2
+    x, s = init_midpoint_scale(dom)
     TX = typeof(x)
     fx_s = zero(eltype(f.y)) * s    # TODO BatchIntegrand(InplaceIntegrand) should depend on size of result
     TI = typeof(fx_s)
