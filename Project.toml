@@ -21,7 +21,7 @@ HDF5Ext = "HDF5"
 
 [compat]
 AutoSymPTR = "0.3.1"
-FourierSeriesEvaluators = "0.2"
+FourierSeriesEvaluators = "0.2, 1"
 HCubature = "1.4"
 HDF5 = "0.16.15"
 IteratedIntegration = "0.3"
