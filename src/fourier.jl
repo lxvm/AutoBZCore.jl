@@ -100,6 +100,7 @@ function fourier_ptr!(vals::AbstractArray{T,d}, w::FourierWorkspace, x::Abstract
 end
 
 function FourierPTR(w::FourierWorkspace, ::Type{T}, ndim, npt) where {T}
+    FourierSeriesEvaluators.isinplace(w.series) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
     # unitless quadrature weight/node, but unitful value to Fourier series
     p = AutoSymPTR.PTR(typeof(float(real(one(T)))), ndim, npt)
     s = workspace_evaluate(w, ntuple(_->zero(T), ndim))
@@ -148,68 +149,66 @@ struct FourierMonkhorstPack{d,W,T,S}
     wxs::Vector{Tuple{W,FourierValue{SVector{d,T},S}}}
 end
 
-function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, wsym::AbstractVector, ::Tuple{}, offset, a, b, z)
+function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, npt, wsym, ::Tuple{}, idx, coord, offset)
     t = period(w.series, 1)
-    o = offset-a
-    if (len = length(w.cache)) === 1 # || len <= w.basecasesize[1]
-        for i in a:b
-            wi = wsym[i]
-            iszero(wi) && continue
-            y = x[i]
-            vals[i+o] = (wi, FourierValue((y, z...), workspace_evaluate!(w, t*y)))
-        end
-    else
-        # since the ibz is convex we scatter points over threads to distribute the workload
-        Threads.@threads for (vrange, ichunk) in chunks(a:b, len, :scatter)
-            for i in vrange
-                wi = wsym[i]
-                iszero(wi) && continue
-                y = x[i]
-                vals[i+o] = (wi, FourierValue((y, z...), workspace_evaluate!(w, t*y, ichunk)))
-            end
-        end
+    o = offset-1
+    # we can't parallelize the inner loop without knowing the offsets of each contiguous
+    # chunk, which would require a ragged array to store. We would be better off with
+    # changing the symptr algorithm to compute a convex ibz
+    # but for 3D grids this inner loop should be a large enough base case to make
+    # parallelizing worth it, although the workloads will vary piecewise linearly as a
+    # function of the slice, so we should distribute points using :scatter
+    n = 0
+    for i in 1:npt
+        @inbounds wi = wsym[i, idx...]
+        iszero(wi) && continue
+        @inbounds xi = x[i]
+        vals[o+(n+=1)] = (wi, FourierValue((xi, coord...), workspace_evaluate!(w, t*xi)))
     end
     return vals
 end
-function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, wsym::AbstractArray, flags, offset, a, b, z)
-    d = ndims(wsym)
+function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, npt, wsym, flags, idx, coord, offset)
+    d = ndims(w.series)
     t = period(w.series, d)
     flag, f = flags[begin:end-1], flags[end]
     if (len = length(w.cache)) === 1 # || len <= w.basecasesize[d]
-        for i in a:b
-            fi = f[i]
-            fi[1] == 0 && continue
-            y = x[i]
-            ws = workspace_contract!(w, t*y)
-            _fourier_symptr!(vals, ws, x, selectdim(wsym, d, i), flag, fi..., (y, z...))
+        for i in 1:npt
+            @inbounds(fi = f[i, idx...]) == 0 && continue
+            @inbounds xi = x[i]
+            ws = workspace_contract!(w, t*xi)
+            _fourier_symptr!(vals, ws, x, npt, wsym, flag, (i, idx...), (xi, coord...), fi)
         end
     else
-        # since the ibz is convex we scatter points over threads to distribute the workload
-        Threads.@threads for (vrange, ichunk) in chunks(a:b, len, :scatter)
+        # since we don't know the distribution of ibz nodes, other than that it will be
+        # piecewise linear, our best chance for a speedup from parallelizing is to scatter
+        Threads.@threads for (vrange, ichunk) in chunks(1:npt, len, :scatter)
             for i in vrange
-                fi = f[i]
-                fi[1] == 0 && continue
-                y = x[i]
-                ws = workspace_contract!(w, t*y, ichunk)
-                _fourier_symptr!(vals, ws, x, selectdim(wsym, d, i), flag, fi..., (y, z...))
+                @inbounds(fi = f[i, idx...]) == 0 && continue
+                @inbounds xi = x[i]
+                ws = workspace_contract!(w, t*xi, ichunk)
+                _fourier_symptr!(vals, ws, x, npt, wsym, flag, (i, idx...), (xi, coord...), fi)
             end
         end
     end
     return vals
 end
 
-function fourier_symptr!(wxs, w, u, wsym, flags)
+function fourier_symptr!(wxs, w, u, npt, wsym, flags)
     flag, f = flags[begin:end-1], flags[end]
-    return _fourier_symptr!(wxs, w, u, wsym, flag, f[]..., ())
+    return _fourier_symptr!(wxs, w, u, npt, wsym, flag, (), (), f[])
 end
 
 function FourierMonkhorstPack(w::FourierWorkspace, ::Type{T}, ndim::Val{d}, npt, syms) where {d,T}
     # unitless quadrature weight/node, but unitful value to Fourier series
+    FourierSeriesEvaluators.isinplace(w.series) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
     u = AutoSymPTR.ptrpoints(typeof(float(real(one(T)))), npt)
     s = w(map(*, period(w.series), ntuple(_->zero(T), ndim)))
+    # the bottleneck is likely to be symptr_rule, which is not a fast or parallel algorithm
     wsym, flags, nsym = AutoSymPTR.symptr_rule(npt, ndim, syms)
     wxs = Vector{Tuple{eltype(wsym),FourierValue{SVector{d,eltype(u)},typeof(s)}}}(undef, nsym)
-    fourier_symptr!(wxs, w, u, wsym, flags)
+    # fourier_symptr! may be worth parallelizing for expensive Fourier series, but may not
+    # be the bottleneck
+    fourier_symptr!(wxs, w, u, npt, wsym, flags)
     return FourierMonkhorstPack(npt, length(syms), wxs)
 end
 

@@ -7,6 +7,7 @@ function check_bases_canonical(A::AbstractMatrix, B::AbstractMatrix, atol)
     norm(A'B - 2pi*I) < atol || throw("Real and reciprocal Bravais lattice bases non-orthogonal to tolerance $atol")
 end
 canonical_reciprocal_basis(A::AbstractMatrix) = A' \ (pi*(one(A)+one(A)))
+canonical_ptr_basis(B) = Basis(one(B))
 
 # main data type
 """
@@ -329,7 +330,7 @@ end
 PTR(; npt=50, nthreads=Threads.nthreads()) = PTR(npt, nthreads)
 
 function bz_to_standard(bz::SymmetricBZ, alg::PTR)
-    return bz, Basis(one(bz.B)), MonkhorstPack(npt=alg.npt, syms=bz.syms, nthreads=alg.nthreads)
+     return bz, canonical_ptr_basis(bz.B), MonkhorstPack(npt=alg.npt, syms=bz.syms, nthreads=alg.nthreads)
 end
 
 
@@ -355,7 +356,7 @@ function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), 
     return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost, nthreads)
 end
 function bz_to_standard(bz::SymmetricBZ, alg::AutoPTR)
-    return bz, Basis(one(bz.B)), AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms, nthreads=alg.nthreads)
+    return bz, canonical_ptr_basis(bz.B), AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms, nthreads=alg.nthreads)
 end
 
 """
