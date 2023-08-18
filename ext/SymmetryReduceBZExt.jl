@@ -14,29 +14,25 @@ include("ibzlims.jl")
 
 function get_segs(vert::AbstractMatrix)
     rtol = atol = sqrt(eps(eltype(vert)))
-    uniquepts=Vector{NTuple{2,eltype(vert)}}(undef, size(vert, 1))
+    uniquepts=Vector{eltype(vert)}(undef, size(vert, 1))
     numpts = 0
     for i in axes(vert,1)
         v = vert[i,end]
         test = isapprox(v, atol=atol, rtol=rtol)
-        if !any(x -> test(x[1]), @view(uniquepts[begin:begin+numpts-1,end]))
+        if !any(test, @view(uniquepts[begin:begin+numpts-1,end]))
             numpts += 1
-            uniquepts[numpts] = (v,v)
+            uniquepts[numpts] = v
         end
     end
     @assert numpts >= 2 uniquepts
     resize!(uniquepts,numpts)
     sort!(uniquepts)
-    top = pop!(uniquepts)
-    for i in numpts-1:-1:1
-        uniquepts[i] = top = (uniquepts[i][2],top[1])
-    end
     return uniquepts
 end
 
 struct Polyhedron3{T<:Real} <: AbstractIteratedLimits{3,T}
     face_coord::Vector{Matrix{T}}
-    segs::Vector{Tuple{T,T}}
+    segs::Vector{T}
 end
 function segments(ph::Polyhedron3, dim)
     @assert dim == 3
@@ -45,7 +41,7 @@ end
 
 struct Polygon2{T<:Real} <: AbstractIteratedLimits{2,T}
     vert::Matrix{T}
-    segs::Vector{Tuple{T,T}}
+    segs::Vector{T}
 end
 function segments(pg::Polygon2, dim)
     @assert dim == 2

@@ -212,7 +212,7 @@ function do_solve(f, dom, p, alg::AuxQuadGKJL, cacheval;
         return IntegralSolution(val, err, true)
     elseif f isa BatchIntegrand
         xx = eltype(f.x) === Nothing ? typeof((segs[1]+segs[end])/2)[] : f.x
-        g = IteratedIntegration.BatchIntegrand((y, x) -> f.f!(y, x, p), f.y, xx, max_batch=f.max_batch)
+        g = IteratedIntegration.AuxQuadGK.BatchIntegrand((y, x) -> f.f!(y, x, p), f.y, xx, max_batch=f.max_batch)
         val, err = auxquadgk(g, segs, maxevals = maxiters,
                         rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
         return IntegralSolution(val, err, true)

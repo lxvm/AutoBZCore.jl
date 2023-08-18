@@ -19,13 +19,9 @@ function integer_lattice(n)
     end
     C
 end
-function make_inversion_ibz(A, B, dims)
-    lims = CubicLimits(zeros(dims),ones(dims)/2)
-    syms = [Diagonal(SVector{dims}(v)) for v in Iterators.product([(1,-1) for i in 1:dims]...)]
-    return SymmetricBZ(A,B,lims,syms)
-end
 
 # tests for SciML interface
+
 @testset "AutoBZCore - SciML" begin
     @testset "domains" begin
         # PuncturedInterval
@@ -170,34 +166,32 @@ end
             dims = 3
             A = I(dims)
             B = AutoBZCore.canonical_reciprocal_basis(A)
-            lims = AutoBZCore.CubicLimits(zeros(3), ones(3))
-            fbz = FullBZ(A, B, lims)
-            @test fbz == SymmetricBZ(A, B, lims, nothing)
+            fbz = load_bz(FBZ(), A)
             @test fbz.A ≈ A
             @test fbz.B ≈ B
             @test nsyms(fbz) == 1
-            @test fbz.syms === nothing
-            @test ndims(fbz) == dims
-            @test eltype(fbz) == float(eltype(B))
-            fbz = FullBZ(A)
-            @test fbz.lims isa AutoBZCore.CubicLimits
+            @test fbz.lims == AutoBZCore.CubicLimits(zeros(3), ones(3))
 
-            nsym = 8
-            syms = rand(SMatrix{dims,dims}, nsym)
-            bz = SymmetricBZ(A, B, lims, syms)
-            @test nsyms(bz) == nsym
-            @test bz.syms == syms
-            @test ndims(bz) == dims
-            @test eltype(bz) == float(eltype(B))
+            ibz = load_bz(InversionSymIBZ(), A)
+            @test ibz.A ≈ A
+            @test ibz.B ≈ B
+            @test nsyms(ibz) == 2^dims
+            @test all(isdiag, ibz.syms)
+            @test ibz.lims == AutoBZCore.CubicLimits(zeros(3), 0.5*ones(3))
+
+            cbz = load_bz(CubicSymIBZ(), A)
+            @test cbz.A ≈ A
+            @test cbz.B ≈ B
+            @test nsyms(cbz) == factorial(dims)*2^dims
+            @test cbz.lims == AutoBZCore.TetrahedralLimits(ntuple(n -> 0.5, dims))
         end
     end
 
     @testset "algorithms" begin
         dims = 3
         A = I(dims)
-        B = AutoBZCore.canonical_reciprocal_basis(A)
         vol = (2π)^dims
-        for bz in (FullBZ(A, B), make_inversion_ibz(A,B,dims))
+        for bz in (load_bz(FBZ(), A), load_bz(InversionSymIBZ(), A))
             ip = IntegralProblem((x,p) -> 1.0, bz)  # unit measure
             for alg in (IAI(), TAI(), PTR(), AutoPTR())
                 @test @inferred(solve(ip, alg)).u ≈ vol
@@ -234,7 +228,7 @@ end
             dims = 3
             A = I(dims)
             B = AutoBZCore.canonical_reciprocal_basis(A)
-            bz = FullBZ(A, B)
+            bz = load_bz(FBZ(), A, B)
             prob = IntegralProblem(f, bz, p)
             solver = IntegralSolver(IntegralProblem(f, bz), IAI())
             @test solver(p) == solve(prob, IAI()).u # use the plain interface
@@ -274,11 +268,10 @@ end
 
 end
 
-#=
 @testset "FourierExt" begin
     @testset "FourierIntegrand" begin
         for dims in 1:3
-            s = InplaceFourierSeries(integer_lattice(dims), period=1)
+            s = FourierSeries(integer_lattice(dims), period=1)
             # AutoBZ interface user function: f(x, args...; kwargs...) where args & kwargs
             # stored in MixedParameters
             # a FourierIntegrand should expect a FourierValue in the first argument
@@ -297,14 +290,13 @@ end
         for dims in 1:3
             vol = (2pi)^dims
             A = I(dims)
-            B = AutoBZCore.canonical_reciprocal_basis(A)
-            s = InplaceFourierSeries(integer_lattice(dims), period=1)
-            for bz in (FullBZ(A, B), make_inversion_ibz(A,B,dims))
+            s = FourierSeries(integer_lattice(dims), period=1)
+            for bz in (load_bz(FBZ(), A), load_bz(InversionSymIBZ(), A))
                 integrand = FourierIntegrand(f, s, 1.3, b=1.0)
                 prob = IntegralProblem(integrand, bz)
                 for alg in (IAI(), PTR(), AutoPTR(), TAI())
                     solver = IntegralSolver(prob, alg, reltol=0, abstol=1e-6)
-                    @test solver() ≈ vol*one(eltype(s)) atol=1e-6
+                    @test solver() ≈ vol atol=1e-6
                 end
             end
         end
@@ -367,5 +359,38 @@ end
 
 @testset "SymmetryReduceBZExt" begin
     include("test_ibz.jl")
+end
+
+#=
+@testset "AtomsBaseExt" begin
+    using Unitful
+    using UnitfulAtomic
+    using AtomsBase
+    # do the example of getting the volume of the bz of silicon
+    bounding_box = 10.26 / 2 * [[0, 0, 1], [1, 0, 1], [1, 1, 0]]u"bohr"
+    silicon = periodic_system([:Si =>  ones(3)/8,
+                            :Si => -ones(3)/8],
+                            bounding_box, fractional=true)
+    A = reinterpret(reshape,eltype(eltype(bounding_box)),AtomsBase.bounding_box(silicon))
+    using AutoBZCore
+    recip_vol = det(AutoBZCore.canonical_reciprocal_basis(A))
+    fbz = load_bz(FBZ(), silicon)
+    fprob = AutoBZCore.IntegralProblem((x,p) -> 1.0, fbz)
+    using SymmetryReduceBZ
+    ibz = load_bz(IBZ(), silicon)
+    iprob = AutoBZCore.IntegralProblem((x,p) -> 1.0, ibz)
+    for alg in (IAI(), PTR(), TAI())
+        @test recip_vol ≈ AutoBZCore.solve(fprob, alg).u
+        @test recip_vol ≈ AutoBZCore.solve(iprob, alg).u
+    end
+end
+
+@testset "WannierIOExt" begin
+    using WannierIO
+    # use artefacts to provide an input wout file
+    using AutoBZCore
+    fbz = load_bz(FBZ(), "svo.wout")
+    using SymmetryReduceBZ
+    ibz = load_bz(IBZ(), "svo.wout")
 end
 =#

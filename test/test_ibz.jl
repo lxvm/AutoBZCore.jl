@@ -23,7 +23,7 @@ of the ith triangle.
 - `vol::Float64`: Estimated volume of polyhedron
 """
 function ph_vol(n::Int64, tri_idx::Matrix{Int32}, ph_vert::Matrix{Float64})
-  SymmetryReduceBZExt = Base.get_extension(AutoBZ, :SymmetryReduceBZExt)
+  SymmetryReduceBZExt = Base.get_extension(AutoBZCore, :SymmetryReduceBZExt)
 
   # Vertices of faces of polyhedron, given by their indices
   face_idx = SymmetryReduceBZExt.faces_from_triangles(tri_idx, ph_vert)
@@ -97,11 +97,14 @@ function test_vol2(latvec::Matrix{Float64}, n::Int64)
     convention = "ordinary"
     ibz = calc_ibz(latvec, atom_types, atom_pos, coordinates, ibzformat,
       makeprim, convention)
-    ibz_hull = IBZ()(I, latvec, atom_types, atom_pos, coordinates)
-    vol_hull, = nested_quad(x -> 1.0, ibz_hull)
-    ibz_poly = IBZ{Polyhedron}()(I, latvec, atom_types, atom_pos, coordinates)
-    vol_poly, = nested_quad(x -> 1.0, ibz_poly)
 
+    fbz = load_bz(FBZ(), latvec)
+    (dims = size(fbz.A, 1)) == size(fbz.A, 2) || error("lattice basis matrix not square")
+    ibz_hull = load_bz(IBZ(dims), fbz.A, fbz.B, atom_types, atom_pos, coordinates=coordinates)
+    vol_hull = nested_quad(x -> 1.0, ibz_hull.lims)[1]*det(fbz.B)/(2pi)^dims
+    ibz_poly = load_bz(IBZ{dims,Polyhedron}(), fbz.A, fbz.B, atom_types, atom_pos, coordinates=coordinates)
+    vol_poly = nested_quad(x -> 1.0, ibz_poly.lims)[1]*det(fbz.B)/(2pi)^dims
+    # the loaded ibz.lims is in fractional lattice coordinates, but needs rescaling to cartesian
     # println("Reference volume: ", vol_poly)
     # println("Estimated volume: ", vol_hull)
     # println("Actual volume: ", ibz.volume)
@@ -118,9 +121,9 @@ end
   beta = pi / 3   # Lattice angle
   gamma = pi / 4  # Lattice angle
   n = 1000        # Number of integration points in z dimension
-  tol = 1e-2      # Relative error tolerance
+#   tol = 1e-2      # Relative error tolerance
 
-  for routine in (test_vol, test_vol2)
+  for (routine, tol) in ((test_vol, 1e-2), (test_vol2, 1e-6))
     # Estimate volumes of different lattices
     @test routine(genlat_CUB(a), n) < tol
     @test routine(genlat_FCC(a), n) < tol
