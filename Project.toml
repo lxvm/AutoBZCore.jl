@@ -1,38 +1,62 @@
 name = "AutoBZCore"
 uuid = "66bd3e16-1600-45cf-8f55-0b550710682b"
 authors = ["lxvm <lorenzo@vanmunoz.com>"]
-version = "0.2.3"
+version = "0.3.0"
 
 [deps]
 AutoSymPTR = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
+ChunkSplitters = "ae650224-84b6-46f8-82ea-d812ca08434e"
 FourierSeriesEvaluators = "2a892dea-6eef-4bb5-9d1c-de966c9f6db5"
+FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
 HCubature = "19dc6840-f33b-545b-b366-655c7e3ffd49"
 IteratedIntegration = "3ecdc4d6-ee34-4049-885a-a4e3631db98b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
+AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
+SymmetryReduceBZ = "49a35663-c880-4242-bebb-1ec8c0fa8046"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [extensions]
+AtomsBaseExt = "AtomsBase"
 HDF5Ext = "HDF5"
+SymmetryReduceBZExt = ["SymmetryReduceBZ", "Polyhedra"]
+UnitfulExt = "Unitful"
+WannierIOExt = "WannierIO"
 
 [compat]
-AutoSymPTR = "0.3.1"
-FourierSeriesEvaluators = "0.2"
+AtomsBase = "0.3"
+AutoSymPTR = "0.4"
+ChunkSplitters = "2"
+FourierSeriesEvaluators = "1"
+FunctionWrappers = "1"
 HCubature = "1.4"
 HDF5 = "0.16.15"
-IteratedIntegration = "0.3"
+IteratedIntegration = "0.4"
+QuadGK = "2.6"
 Reexport = "1"
 StaticArrays = "1"
+SymmetryReduceBZ = "0.1"
 julia = "1.9"
+WannierIO = "0.1,0.2"
 
 [extras]
+AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
+Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
+SymmetryReduceBZ = "49a35663-c880-4242-bebb-1ec8c0fa8046"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [targets]
-test = ["Test", "HDF5", "StaticArrays", "OffsetArrays"]
+test = ["Test", "HDF5", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra"]

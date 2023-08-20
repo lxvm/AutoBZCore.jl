@@ -18,7 +18,7 @@ For example, computing the local Green's function can be done as follows:
 
     gloc_integrand(k, h; η, ω) = inv(complex(ω,η)*I-h(k))   # define integrand evaluator
     h = FourierSeries([0.5, 0.0, 0.5]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
-    integrand = Integrand(gloc_integrand, h, η=0.1)         # construct integrand with Fourier series h and parameter η=0.1
+    integrand = ParameterIntegrand(gloc_integrand, h, η=0.1)         # construct integrand with Fourier series h and parameter η=0.1
     prob = IntegralProblem(integrand, 0, 1)                 # setup the integral problem
     alg = QuadGKJL()                                        # choose integration algorithm (also AutoPTR() and PTR())
     gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
@@ -27,8 +27,8 @@ For example, computing the local Green's function can be done as follows:
 
     gloc_integrand(h_k::FourierValue; η, ω) = inv(complex(ω,η)*I-h_k.s)     # define integrand evaluator
     h = FourierSeries([0.0; 0.5; 0.0;; 0.5; 0.0; 0.5;; 0.0; 0.5; 0.0]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
-    bz = FullBZ(2pi*I(2))                                   # construct BZ from lattice vectors A=2pi*I
-    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)   # construct integrand with Fourier series h and parameter η=0.1
+    bz = load_bz(FBZ(2), 2pi*I(2))                          # construct BZ from lattice vectors A=2pi*I
+    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)  # construct integrand with Fourier series h and parameter η=0.1
     prob = IntegralProblem(integrand, bz)                   # setup the integral problem
     alg = IAI()                                             # choose integration algorithm (also AutoPTR() and PTR())
     gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
@@ -44,32 +44,53 @@ For example, computing the local Green's function can be done as follows:
 """
 module AutoBZCore
 
-using LinearAlgebra: I, norm, det, checksquare
+using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal
 
-using StaticArrays: SVector, SMatrix, pushfirst
+using StaticArrays: SVector, SMatrix, pushfirst, sacollect
+using FunctionWrappers: FunctionWrapper
+using ChunkSplitters: chunks, getchunk
 using Reexport
 @reexport using AutoSymPTR
 @reexport using FourierSeriesEvaluators
 @reexport using IteratedIntegration
+@reexport using QuadGK
+@reexport using HCubature
 
-using IteratedIntegration: alloc_segbufs, nextrule, nextdim, RuleQuad.GaussKronrod, NestedGaussKronrod
+using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
+using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature
 
-export SymmetricBZ, FullBZ, nsyms
-export AbstractSymRep, SymRep, UnknownRep, TrivialRep
+
+export PuncturedInterval, HyperCube
 include("domains.jl")
 
-export IntegralProblem, solve
-export IAI, PTR, AutoPTR, PTR_IAI, AutoPTR_IAI, TAI, QuadGKJL, HCubatureJL
-include("algorithms.jl")
+export InplaceIntegrand
+include("inplace.jl")
 
-export MixedParameters, paramzip, paramproduct
+export BatchIntegrand, NestedBatchIntegrand
+include("batch.jl")
+
+# export IntegralProblem, solve, init, solve! # we don't export the SciML interface
 export IntegralSolver, batchsolve
-export Integrand
 include("interfaces.jl")
 
+export QuadGKJL, HCubatureJL, QuadratureFunction
+export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
+export MonkhorstPack, AutoSymPTRJL
+export NestedQuad, AbsoluteEstimate
+include("algorithms.jl")
+
+export SymmetricBZ, nsyms
+export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
+export AbstractSymRep, SymRep, UnknownRep, TrivialRep
+export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
+include("brillouin.jl")
+
+export ParameterIntegrand, paramzip, paramproduct
+include("parameters.jl")
+
 export FourierIntegrand, FourierValue
-include("rules.jl")
+include("fourier.jl")
 
 
 end

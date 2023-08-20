@@ -1,53 +1,88 @@
-"""
-    MixedParameters(args::Tuple, kwargs::NamedTuple)
+# we recreate a lot of the SciML Integrals.jl functionality, but only for our algorithms
+# the features we omit are: inplace integrands, infinite limit transformations, nout and
+# batch keywords. Otherwise, there is a correspondence between.
+# solve -> solve!
+# init -> init
 
-A struct to store full and partial sets of parameters used to evaluate
-integrands.
 """
-struct MixedParameters{A<:Tuple,K<:NamedTuple}
-    args::A
+    IntegralAlgorithm
+
+Abstract supertype for integration algorithms.
+"""
+abstract type IntegralAlgorithm end
+
+# Methods an algorithm must define
+# - init_cacheval
+# - solve!
+
+
+struct IntegralProblem{F,D,P}
+    f::F
+    dom::D
+    p::P
+    function IntegralProblem{F,D,P}(f::F, dom::D, p::P) where {F,D,P}
+        return new{F,D,P}(f, dom, p)
+    end
+end
+function IntegralProblem(f::F, dom::D, p::P=()) where {F,D,P}
+    return IntegralProblem{F,D,P}(f, dom, p)
+end
+function IntegralProblem(f::F, a::T, b::T, p::P=()) where {F,T,P}
+    dom = T <: Real ? PuncturedInterval((a, b)) : HyperCube(a, b)
+    return IntegralProblem{F,typeof(dom),P}(f, dom, p)
+end
+
+mutable struct IntegralCache{F,D,P,A,C,K}
+    f::F
+    dom::D
+    p::P
+    alg::A
+    cacheval::C
     kwargs::K
 end
-MixedParameters(args...; kwargs...) = MixedParameters(args, NamedTuple(kwargs))
 
-# parameter fusion and iteration utilities
+function make_cache(f, dom, p, alg; kwargs...)
+    cacheval = init_cacheval(f, dom, p, alg)
+    return IntegralCache(f, dom, p, alg, cacheval, NamedTuple(kwargs))
+end
 
-Base.getindex(p::MixedParameters, i::Int) = getindex(getfield(p, :args), i)
-Base.getproperty(p::MixedParameters, name::Symbol) = getproperty(getfield(p, :kwargs), name)
+function checkkwargs(kwargs)
+    for key in keys(kwargs)
+        key in (:abstol, :reltol, :maxiters) || throw(ArgumentError("keyword $key unrecognized"))
+    end
+    return nothing
+end
 
-Base.merge(p::MixedParameters, q) =
-    MixedParameters((getfield(p, :args)..., q), getfield(p, :kwargs))
-Base.merge(q, p::MixedParameters) =
-    MixedParameters((q, getfield(p, :args)...), getfield(p, :kwargs))
-Base.merge(p::MixedParameters, q::NamedTuple) =
-    MixedParameters(getfield(p, :args), merge(getfield(p, :kwargs), q))
-Base.merge(q::NamedTuple, p::MixedParameters) =
-    MixedParameters(getfield(p, :args), merge(q, getfield(p, :kwargs)))
-Base.merge(p::MixedParameters, q::Tuple) =
-    MixedParameters((getfield(p, :args)..., q...), getfield(p, :kwargs))
-Base.merge(q::Tuple, p::MixedParameters) =
-    MixedParameters((q..., getfield(p, :args)...), getfield(p, :kwargs))
-Base.merge(p::MixedParameters, q::MixedParameters) =
-    MixedParameters((getfield(p, :args)..., getfield(q, :args)...), merge(getfield(p, :kwargs), getfield(q, :kwargs)))
+"""
+    init(::IntegralProblem, ::IntegralAlgorithm; kws...)::IntegralCache
+"""
+function init(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
+    checkkwargs(NamedTuple(kwargs))
+    f = prob.f; dom = prob.dom; p = prob.p
+    return make_cache(f, dom, p, alg; kwargs...)
+end
 
-function paramzip_(::Tuple{}, ::NamedTuple{(), Tuple{}})
-    MixedParameters{Tuple{},NamedTuple{(), Tuple{}}}[]
+"""
+    solve(::IntegralProblem, ::IntegralAlgorithm; kws...)::IntegralSolution
+"""
+function solve(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
+    cache = init(prob, alg; kwargs...)
+    return solve!(cache)
 end
-function paramzip_(args::Tuple, ::NamedTuple{(), Tuple{}})
-    [MixedParameters(arg, NamedTuple()) for arg in zip(args...)]
-end
-function paramzip_(::Tuple{}, kwargs::NamedTuple)
-    [MixedParameters((), NamedTuple{keys(kwargs)}(val)) for val in zip(values(kwargs)...)]
-end
-function paramzip_(args::Tuple, kwargs::NamedTuple)
-    [MixedParameters(arg, NamedTuple{keys(kwargs)}(val)) for (arg, val) in zip(zip(args...), zip(values(kwargs)...))]
-end
-paramzip(args...; kwargs...) = paramzip_(args, NamedTuple(kwargs))
 
-function paramproduct_(args::Tuple, kwargs::NamedTuple)
-    [MixedParameters(item[1:length(args)], NamedTuple{keys(kwargs)}(item[length(args)+1:end])) for item in Iterators.product(args..., values(kwargs)...)]
+"""
+    solve!(::IntegralCache)::IntegralSolution
+"""
+function solve!(c::IntegralCache)
+    return do_solve(c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
 end
-paramproduct(args...; kwargs...) = paramproduct_(args, NamedTuple(kwargs))
+
+struct IntegralSolution{T,E}
+    u::T
+    resid::E
+    retcode::Bool
+end
+
 
 """
     IntegralSolver(cache::IntegralCache)
@@ -97,18 +132,18 @@ end
 remake_cache(args...) = IntegralCache(args...)
 remake_cache(c, p) = remake_cache(c.f, c.dom, p, c.alg, c.cacheval, c.kwargs)
 
-function do_solve(s::IntegralSolver, p)
+function solve_p(s::IntegralSolver, p)
     c = if s.cacheval===nothing
         prob = IntegralProblem(s.f, s.dom, p)
-        make_cache(prob, s.alg; s.kwargs...)
+        init(prob, s.alg; s.kwargs...)
     else
         remake_cache(s, p)
     end
-    return do_solve(c)
+    return solve!(c)
 end
 
 function (s::IntegralSolver)(p)
-    sol = do_solve(s, p)
+    sol = solve_p(s, p)
     return sol.u
 end
 
@@ -139,7 +174,7 @@ function batchsolve!(out, f, ps, nthreads, callback)
         f_ = Threads.threadid() == 1 ? f : deepcopy(f) # avoid data races for in place integrators
         for (i, p) in batch
             t = time()
-            sol = do_solve(f_, p)
+            sol = solve_p(f_, p)
             callback(f, i, Threads.atomic_add!(n, 1) + 1, p, sol, time() - t)
             out[i] = sol.u
         end
@@ -147,7 +182,7 @@ function batchsolve!(out, f, ps, nthreads, callback)
     return out
 end
 
-solver_type(::F, ::P) where {F,P} = Base.promote_op((f, p) -> do_solve(f, p).u, F, P)
+solver_type(::F, ::P) where {F,P} = Base.promote_op((f, p) -> solve_p(f, p).u, F, P)
 
 """
     batchsolve(f::IntegralSolver, ps::AbstractArray, [T]; nthreads=Threads.nthreads())
@@ -160,51 +195,10 @@ optional, but will help in case inference of that type fails.
 function batchsolve(f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); nthreads=Threads.nthreads(), callback=(x...)->nothing)
     solver = if f.cacheval === nothing
         prob = IntegralProblem(f.f, f.dom, ps[begin])
-        cache = make_cache(prob, f.alg; f.kwargs...)
+        cache = init(prob, f.alg; f.kwargs...)
         IntegralSolver(f.f, f.dom, f.alg, cache.cacheval, f.kwargs)
     else
         f
     end
     return batchsolve!(similar(ps, T), solver, ps, nthreads, callback)
-end
-
-"""
-    Integrand(f, args...; kwargs...)
-
-Represent an integrand with a partial collection of parameters `p`. When the
-`Integrand` is invoked with one argument, e.g. `int(x)`, it evaluates `f(x,
-p...; kwargs...)`. However when invoked with two arguments, as in an `IntegralProblem`,
-e.g. `int(x, p2)`, it evaluates the union of parameters `f(x, p..., p2...; kwargs...)`.
-This allows for convenient parametrization of the integrand.
-"""
-struct Integrand{F,P}
-    f::F
-    p::P
-    function Integrand{F}(f::F, p::P) where {F,P<:MixedParameters}
-        return new{F,P}(f, p)
-    end
-end
-
-function Integrand(f, args...; kwargs...)
-    p = MixedParameters(args...; kwargs...)
-    return Integrand{typeof(f)}(f, p)
-end
-
-# provide Integrals.jl interface
-function (f::Integrand)(x, q=())
-    p = merge(f.p, q)
-    return f.f(x, getfield(p, :args)...; getfield(p, :kwargs)...)
-end
-
-# move all parameters from f.p to p for convenience
-remake_integrand_cache(args...) = IntegralCache(args...)
-function remake_cache(f::Integrand, dom, p, alg, cacheval, kwargs)
-    new = Integrand(f.f)
-    return remake_integrand_cache(new, dom, merge(f.p, p), alg, cacheval, kwargs)
-end
-
-function (s::IntegralSolver{<:Integrand})(args...; kwargs...)
-    p = MixedParameters(args...; kwargs...)
-    sol = do_solve(s, p)
-    return sol.u
 end
