@@ -34,7 +34,7 @@ WannierIOExt = "WannierIO"
 [compat]
 AtomsBase = "0.3"
 AutoSymPTR = "0.4"
-ChunkSplitters = "1"
+ChunkSplitters = "2"
 FourierSeriesEvaluators = "1"
 FunctionWrappers = "1"
 HCubature = "1.4"

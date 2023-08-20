@@ -18,10 +18,20 @@
 # We use the pattern of allowing the user to pass a container with the integrand, Fourier
 # series and workspace, and use dispatch to enable the optimizations
 
-
-struct FourierIntegrand{F,P,S,C}
+# the nested batched integrand is optional, but when included it allows for thread-safe parallelization
+struct FourierIntegrand{F,P,W,N}
     f::ParameterIntegrand{F,P}
-    w::FourierWorkspace{S,C}
+    w::W
+    nest::N
+    function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace) where {F,P}
+        return new{F,P,typeof(w),Nothing}(f, w, nothing)
+    end
+    function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace, nest::NestedBatchIntegrand{<:ParameterIntegrand{F}}) where {F,P}
+        return new{F,P,typeof(w),typeof(nest)}(f, w, nest)
+    end
+    function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace, nest::ParameterIntegrand{F}) where {F,P}
+        return new{F,P,typeof(w),typeof(nest)}(f, w, nest)
+    end
 end
 
 function FourierIntegrand(f, w::FourierWorkspace, args...; kws...)
@@ -38,7 +48,9 @@ function (s::IntegralSolver{<:FourierIntegrand})(args...; kwargs...)
 end
 
 function remake_cache(f::FourierIntegrand, dom, p, alg, cacheval, kwargs)
-    new = FourierIntegrand(f.f.f, f.w)
+    # TODO decide what to do with the nest, since it may have allocated
+    fp = ParameterIntegrand(f.f.f)
+    new = f.nest === nothing ? FourierIntegrand(fp, f.w) : FourierIntegrand(fp, f.w, f.nest)
     return remake_integrand_cache(new, dom, merge(f.f.p, p), alg, cacheval, kwargs)
 end
 
@@ -53,9 +65,9 @@ Base.convert(::Type{T}, f::FourierValue) where {T<:FourierValue} = T(f.x,f.s)
 Base.zero(::Type{FourierValue{X,S}}) where {X,S} = FourierValue(zero(X), zero(S))
 Base.:*(B::AbstractMatrix, f::FourierValue) = FourierValue(B*f.x, f.s)
 
-(f::FourierIntegrand)(x::FourierValue, p=()) = getfield(f, :f)(x, p)
+(f::FourierIntegrand)(x::FourierValue, p) = f.f(x, p)
 # fallback evaluator of FourierIntegrand for algorithms without specialized rules
-(f::FourierIntegrand)(x, p=()) = f(FourierValue(x, f.w(x)), p)
+(f::FourierIntegrand)(x, p) = f(FourierValue(x, f.w(x)), p)
 
 # PTR rules
 
@@ -220,7 +232,7 @@ Base.eltype(::Type{FourierMonkhorstPack{d,T,S}}) where {d,T,S} = Tuple{Int64,Fou
 Base.length(r::FourierMonkhorstPack) = length(r.wxs)
 Base.iterate(rule::FourierMonkhorstPack, args...) = iterate(rule.wxs, args...)
 
-rule_type(::FourierMonkhorstPack{d,T,S}) where {d,T,S} = FourierValue{SVector{d,T},S}
+rule_type(::FourierMonkhorstPack{d,W,T,S}) where {d,W,T,S} = FourierValue{SVector{d,T},S}
 
 function (rule::FourierMonkhorstPack{d})(f, B::Basis, buffer=nothing) where d
     arule = AutoSymPTR.AffineQuad(rule, B)
@@ -256,10 +268,10 @@ function AutoSymPTR.nextrule(p::FourierMonkhorstPack{d,T}, r::FourierMonkhorstPa
     return FourierMonkhorstPack(r.s, T, Val(d), p.npt+r.m.Δn, r.m.syms)
 end
 
-# dispatch on algorithms
+# dispatch on PTR algorithms
 
 function init_buffer(f::FourierIntegrand, len)
-    return nothing
+    return f.nest isa NestedBatchIntegrand ? Vector{eltype(f.nest.y)}(undef, len) : nothing
 end
 
 rule_type(::FourierPTR{N,T,S}) where {N,T,S} = FourierValue{SVector{N,T},S}
@@ -293,8 +305,71 @@ function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::PTR)
     return FourierMonkhorstPack(s, eltype(dom), Val(ndims(dom)), alg.npt, bz.syms)
 end
 
+function nested_to_batched(f::FourierIntegrand, dom::Basis, rule)
+    ys = f.nest.y/prod(ntuple(n -> oneunit(eltype(dom)), Val(ndims(dom))))
+    xs = rule_type(rule)[]
+    return BatchIntegrand(ys, xs, max_batch=f.nest.max_batch) do y, x, p
+        # would be better to fully unwrap the nested structure, but this is one level
+        nchunk = length(f.nest.f)
+        Threads.@threads for ichunk in 1:nchunk
+            for (i, j) in zip(getchunk(x, ichunk, nchunk, :batch), getchunk(y, ichunk, nchunk, :batch))
+                y[j] = FourierIntegrand(f.nest.f[ichunk], FourierWorkspace(nothing,nothing))(x[i], p)
+            end
+        end
+        return nothing
+    end
+end
 
-# IAI rules
+function do_solve(f::FourierIntegrand, dom, p, alg::MonkhorstPack, cacheval; kws...)
+    g = f.nest isa NestedBatchIntegrand ? nested_to_batched(f, dom, cacheval.rule) : f.f
+    return do_solve(g, dom, p, alg, cacheval; kws...)
+end
+
+function do_solve(f::FourierIntegrand, dom, p, alg::AutoSymPTRJL, cacheval; kws...)
+    g = f.nest isa NestedBatchIntegrand ? nested_to_batched(f, dom, cacheval.cache[1]) : f.f
+    return do_solve(g, dom, p, alg, cacheval; kws...)
+end
+
+
+# dispatch on IAI algorithms
+
+function nested_cacheval(f::FourierIntegrand, p::P, algs, segs, lims, state, x, xs...) where {P}
+    dom = PuncturedInterval(segs)
+    a, b = segs[1], segs[2]
+    dim = ndims(lims)
+    alg = algs[dim]
+    mid = (a+b)/2 # sample point that should be safe to evaluate
+    next = limit_iterate(lims, state, mid) # see what the next limit gives
+    if xs isa Tuple{} # the next integral takes us to the inner integral
+        # base case test integrand of the inner integral
+        # we need to pass dummy integrands to all the outer integrals so that they can build
+        # their caches with the right types
+        if f.nest isa NestedBatchIntegrand
+            # Batch integrate the inner integral only
+            cacheval = init_cacheval(BatchIntegrand(nothing, f.nest.y, f.nest.x, max_batch=f.nest.max_batch), dom, p, alg)
+            return (nothing, cacheval, zero(eltype(f.nest.y))*mid)
+        else
+            fx = f(next,p)
+            cacheval = init_cacheval((x, p) -> fx, dom, p, alg)
+            return (nothing, cacheval, fx*mid)
+        end
+    elseif f.nest isa NestedBatchIntegrand
+        algs_ = algs[1:dim-1]
+        # numbered names to avoid type instabilities (we are not using dispatch, but the
+        # compiler's optimization for the recursive function's argument types)
+        nest0 = nested_cacheval(FourierIntegrand(f.f, f.w, f.nest.f[1]), p, algs_, next..., x, xs[1:dim-2]...)
+        cacheval = init_cacheval(BatchIntegrand(nothing, f.nest.y, f.nest.x, max_batch=f.nest.max_batch), dom, p, alg)
+        return (ntuple(n -> n == 1 ? nest0 : deepcopy(nest0), Val(length(f.nest.f))), cacheval, nest0[3]*mid)
+    else
+        algs_ = algs[1:dim-1]
+        nest1 = nested_cacheval(f, p, algs_, next..., x, xs[1:dim-2]...)
+        h = nest1[3]
+        hx = h*mid
+        # units may change for outer integral
+        cacheval = init_cacheval((x, p) -> h, dom, p, alg)
+        return (nest1, cacheval, hx)
+    end
+end
 
 function init_nest(f::FourierIntegrand, fxx, dom, p,lims, state, algs, cacheval; kws_...)
     kws = NamedTuple(kws_)
@@ -302,32 +377,75 @@ function init_nest(f::FourierIntegrand, fxx, dom, p,lims, state, algs, cacheval;
     TX = eltype(dom)
     TP = Tuple{typeof(p),typeof(lims),typeof(state)}
     if algs isa Tuple{} # inner integral
-        return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
-            v = FourierValue(limit_iterate(lims, state, x), workspace_evaluate!(f.w, x))
-            return f.f(v, p)
+        if f.nest isa NestedBatchIntegrand
+            nchunk = min(length(f.nest.f), length(f.w.cache))
+            return BatchIntegrand(f.nest.y, f.nest.x, max_batch=f.nest.max_batch) do y, x, (p, lims, state)
+                Threads.@threads for ichunk in 1:nchunk
+                    for (i, j) in zip(getchunk(x, ichunk, nchunk, :scatter), getchunk(y, ichunk, nchunk, :scatter))
+                        xi = x[i]
+                        v = FourierValue(limit_iterate(lims, state, xi), workspace_evaluate!(f.w, xi, ichunk))
+                        y[j] = f.nest.f[ichunk](v, p)
+                    end
+                end
+                return nothing
+            end
+        else
+            return (x, (p, lims, state)) -> begin
+            # return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
+                v = FourierValue(limit_iterate(lims, state, x), workspace_evaluate!(f.w, x))
+                return f.f(v, p)
+            end
         end
     else
-        return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
-            segs, lims_, state_ = limit_iterate(lims, state, x)
-            fx = FourierIntegrand(f.f, workspace_contract!(f.w, x))
-            len = segs[end] - segs[1]
-            kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-            sol = do_solve(fx, lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval; kwargs...)
-            return sol.u
+        if f.nest isa NestedBatchIntegrand
+            nchunks = min(length(f.nest.f), length(f.w.cache))
+            return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.nest.y),typeof(f.nest.x),TP}}() do y, x, (p, lims, state)
+                Threads.@threads for ichunk in 1:nchunks
+                    for (i, j) in zip(getchunk(x, ichunk, nchunks, :scatter), getchunk(y, ichunk, nchunks, :scatter))
+                        xi = x[i]
+                        segs, lims_, state_ = limit_iterate(lims, state, xi)
+                        len = segs[end] - segs[1]
+                        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+                        fx = FourierIntegrand(f.f, workspace_contract!(f.w, xi, ichunk), f.nest.f[ichunk])
+                        y[j] = do_solve(fx, lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval[ichunk]; kwargs...).u
+                    end
+                end
+                return nothing
+            end, f.nest.y, f.nest.x, max_batch=f.nest.max_batch)
+        else
+            g = f.nest === nothing ? f.f : f.nest
+            return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
+                segs, lims_, state_ = limit_iterate(lims, state, x)
+                fx = FourierIntegrand(g, workspace_contract!(f.w, x))
+                len = segs[end] - segs[1]
+                kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+                sol = do_solve(fx, lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval; kwargs...)
+                return sol.u
+            end
         end
     end
 end
 
+function init_cacheval(f::FourierIntegrand, dom::AbstractIteratedLimits, p, alg::NestedQuad)
+    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
+    return nested_cacheval(f, p, algs, limit_iterate(dom)..., interior_point(dom)...)
+end
+
 function do_solve(f::FourierIntegrand, lims::AbstractIteratedLimits, p_, alg::NestedQuad, cacheval; kws...)
-    g, p, segs, state = if p_ isa NestState
-        f, p_.p, p_.segs, p_.state
+    p, segs, state = if p_ isa NestState
+        p_.p, p_.segs, p_.state
     else
         seg, lim, sta = limit_iterate(lims)
-        f, p_, seg, sta
+        p_, seg, sta
     end
     dom = PuncturedInterval(segs)
+    g = if f.nest isa NestedBatchIntegrand && eltype(f.nest.x) === Nothing
+        FourierIntegrand(f.f, f.w, NestedBatchIntegrand(f.nest.f, f.nest.y, float(eltype(dom))[], max_batch=f.nest.max_batch))
+    else
+        f
+    end
     (dim = ndims(lims)) == ndims(f.w.series) || throw(ArgumentError("variables in Fourier series don't match domain"))
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(dim)) : alg.algs
-    nest = init_nest(g, cacheval[dim][2], dom, p, lims, state, algs[1:dim-1], cacheval[1:dim-1]; kws...)
-    return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[dim][1]; kws...)
+    nest = init_nest(g, cacheval[3], dom, p, lims, state, algs[1:dim-1], cacheval[1]; kws...)
+    return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[2]; kws...)
 end

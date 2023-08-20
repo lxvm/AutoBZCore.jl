@@ -144,6 +144,8 @@ end
             @test [ref] ≈ solve(inplaceprob, ndalg, abstol=abstol).u atol=abstol
             batchprob = IntegralProblem(BatchIntegrand((y,x,p) -> y .= f.(x,Ref(p)), Float64), dom, p)
             @test ref ≈ solve(batchprob, ndalg, abstol=abstol).u atol=abstol
+            nestedbatchprob = IntegralProblem(NestedBatchIntegrand(ntuple(n -> f, 3), Float64), dom, p)
+            @test ref ≈ solve(nestedbatchprob, ndalg, abstol=abstol).u atol=abstol
         end
 
         # AbsoluteEstimate
@@ -283,6 +285,21 @@ end
             v = IntegralSolver(FourierIntegrand(f, s), zeros(dims), ones(dims), HCubatureJL())(1.3, b=4.2)
             w = IntegralSolver(FourierIntegrand(f, s, b=4.2), zeros(dims), ones(dims), HCubatureJL())(1.3)
             @test u == v == w
+
+            # tests for the nested integrand
+            nouter = 3
+            ws = FourierSeriesEvaluators.workspace_allocate(s, FourierSeriesEvaluators.period(s), ntuple(n -> n == dims ? nouter : 1,dims))
+            p = ParameterIntegrand(f, 1.3, b=4.2)
+            nest = NestedBatchIntegrand(ntuple(n -> deepcopy(p), nouter), SVector{dims,ComplexF64})
+            for (alg, dom) in (
+                (HCubatureJL(), HyperCube(zeros(dims), ones(dims))),
+                (NestedQuad(AuxQuadGKJL()), CubicLimits(zeros(dims), ones(dims))),
+                (MonkhorstPack(), Basis(one(SMatrix{dims,dims}))),
+            )
+                prob1 = IntegralProblem(FourierIntegrand(p, s), dom)
+                prob2 = IntegralProblem(FourierIntegrand(p, ws, nest), dom)
+                @test solve(prob1, alg) == solve(prob2, alg)
+            end
         end
     end
     @testset "algorithms" begin
@@ -362,9 +379,9 @@ end
 end
 
 #=
+using Unitful
+using UnitfulAtomic
 @testset "AtomsBaseExt" begin
-    using Unitful
-    using UnitfulAtomic
     using AtomsBase
     # do the example of getting the volume of the bz of silicon
     bounding_box = 10.26 / 2 * [[0, 0, 1], [1, 0, 1], [1, 1, 0]]u"bohr"

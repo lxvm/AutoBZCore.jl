@@ -68,7 +68,6 @@ end
 
 function do_solve(f::F, dom, p, alg::QuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int)) where {F}
-
     segs = segments(dom)
     if f isa InplaceIntegrand
         g! = (y, x) -> f.f!(y, x, p)
@@ -412,6 +411,8 @@ function do_solve(f, dom, p, alg::AutoSymPTRJL, cacheval;
     return IntegralSolution(val, err, true)
 end
 
+# Meta-algorithms
+
 """
     NestedQuad(alg::IntegralAlgorithm)
     NestedQuad(algs::IntegralAlgorithm...)
@@ -433,6 +434,7 @@ struct NestedQuad{T} <: IntegralAlgorithm
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 
+# this function helps create a tree of the cachevals used by each quadrature
 function nested_cacheval(f::F, p::P, algs, segs, lims, state, x, xs...) where {F,P}
     dom = PuncturedInterval(segs)
     a, b = segs[1], segs[2]
@@ -444,32 +446,39 @@ function nested_cacheval(f::F, p::P, algs, segs, lims, state, x, xs...) where {F
         # base case test integrand of the inner integral
         # we need to pass dummy integrands to all the outer integrals so that they can build
         # their caches with the right types
-        if f isa BatchIntegrand
+        if f isa BatchIntegrand || f isa NestedBatchIntegrand
             # Batch integrate the inner integral only
             cacheval = init_cacheval(BatchIntegrand(nothing, f.y, f.x, max_batch=f.max_batch), dom, p, alg)
-            return ((cacheval, oneunit(eltype(f.y))*mid),)
+            return (nothing, cacheval, oneunit(eltype(f.y))*mid)
         elseif f isa InplaceIntegrand
             # Inplace integrate through the whole nest structure
             fxi = f.I*mid/oneunit(prod(next))
             cacheval = init_cacheval(InplaceIntegrand(nothing, fxi), dom, p, alg)
-            return ((cacheval, fxi),)
+            return (nothing, cacheval, fxi)
         else
             fx = f(next,p)
             cacheval = init_cacheval((x, p) -> fx, dom, p, alg)
-            return ((cacheval, fx*mid),)
+            return (nothing, cacheval, fx*mid)
         end
+    elseif f isa NestedBatchIntegrand
+        algs_ = algs[1:dim-1]
+        # numbered names to avoid type instabilities (we are not using dispatch, but the
+        # compiler's optimization for the recursive function's argument types)
+        nest0 = nested_cacheval(f.f[1], p, algs_, next..., x, xs[1:dim-2]...)
+        cacheval = init_cacheval(BatchIntegrand(nothing, f.y, f.x, max_batch=f.max_batch), dom, p, alg)
+        return (ntuple(n -> n == 1 ? nest0 : deepcopy(nest0), Val(length(f.f))), cacheval, nest0[3]*mid)
     else
         algs_ = algs[1:dim-1]
-        nest = nested_cacheval(f, p, algs_, next..., x, xs[1:dim-2]...)
-        h = nest[end][2]
+        nest1 = nested_cacheval(f, p, algs_, next..., x, xs[1:dim-2]...)
+        h = nest1[3]
         hx = h*mid
         # units may change for outer integral
         if f isa InplaceIntegrand
             cacheval = init_cacheval(InplaceIntegrand(nothing, hx), dom, p, alg)
-            return (nest..., (cacheval, hx))
+            return (nest1, cacheval, hx)
         else
             cacheval = init_cacheval((x, p) -> h, dom, p, alg)
-            return (nest..., (cacheval, hx))
+            return (nest1, cacheval, hx)
         end
     end
 end
@@ -486,6 +495,17 @@ function init_nest(f::F, fxx, dom, p,lims, state, algs, cacheval; kws_...) where
     if algs isa Tuple{} # inner integral
         if f isa BatchIntegrand
             return f
+        elseif f isa NestedBatchIntegrand
+            nchunk = length(f.f)
+            return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(f.x),TP}}() do y, x, (p, lims, state)
+                Threads.@threads for ichunk in 1:nchunk
+                    for (i, j) in zip(getchunk(x, ichunk, nchunk, :scatter), getchunk(y, ichunk, nchunk, :scatter))
+                        xi = x[i]
+                        y[j] = f.f[ichunk](limit_iterate(lims, state, xi), p)
+                    end
+                end
+                return nothing
+            end, f.y, f.x, max_batch=f.max_batch)
         elseif f isa InplaceIntegrand
             return InplaceIntegrand(FunctionWrapper{Nothing,Tuple{FX,TX,TP}}() do y, x, (p, lims, state)
                 f.f!(y, limit_iterate(lims, state, x), p)
@@ -502,10 +522,23 @@ function init_nest(f::F, fxx, dom, p,lims, state, algs, cacheval; kws_...) where
                 segs, lims_, state_ = limit_iterate(lims, state, x)
                 len = segs[end] - segs[1]
                 kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-                sol = do_solve(InplaceIntegrand(f.f!, f.I / oneunit(x)), lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval; kwargs...)
-                y .= sol.u
+                do_solve(InplaceIntegrand(f.f!, y), lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval; kwargs...)
                 return nothing
             end, f.I)
+        elseif f isa NestedBatchIntegrand
+            nchunks = length(f.f)
+            return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(f.x),TP}}() do y, x, (p, lims, state)
+                Threads.@threads for ichunk in 1:nchunks
+                    for (i, j) in zip(getchunk(x, ichunk, nchunks, :scatter), getchunk(y, ichunk, nchunks, :scatter))
+                        xi = x[i]
+                        segs, lims_, state_ = limit_iterate(lims, state, xi)
+                        len = segs[end] - segs[1]
+                        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+                        y[j] = do_solve(f.f[ichunk], lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval[ichunk]; kwargs...).u
+                    end
+                end
+                return nothing
+            end, f.y, f.x, max_batch=f.max_batch)
         else
             return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
                 segs, lims_, state_ = limit_iterate(lims, state, x)
@@ -526,25 +559,35 @@ end
 
 function do_solve(f::F, lims::AbstractIteratedLimits, p_, alg::NestedQuad, cacheval; kws...) where {F}
     g, p, segs, state = if p_ isa NestState
-        f, p_.p, p_.segs, p_.state
+        gg = if f isa NestedBatchIntegrand
+            fx = eltype(f.x) === Nothing ? float(eltype(p_.segs))[] : f.x
+            NestedBatchIntegrand(f.f, f.y, fx, max_batch=f.max_batch)
+        else
+            f
+        end
+        gg, p_.p, p_.segs, p_.state
     else
+        seg, lim, sta = limit_iterate(lims)
         gg = if f isa BatchIntegrand
             fx = eltype(f.x) === Nothing ? typeof(interior_point(lims))[] : f.x
             BatchIntegrand(f.y, similar(f.x, eltype(eltype(fx))), max_batch=f.max_batch) do y, xs, (p, lims, state)
                 resize!(fx, length(xs))
                 f.f!(y, map!(x -> limit_iterate(lims, state, x), fx, xs), p)
             end
+        elseif f isa NestedBatchIntegrand
+            # this should be done recursively at the outermost level, but it is lazy.
+            fx = eltype(f.x) === Nothing ? float(eltype(seg))[] : f.x
+            NestedBatchIntegrand(f.f, f.y, fx, max_batch=f.max_batch)
         else
             f
         end
-        seg, lim, sta = limit_iterate(lims)
         gg, p_, seg, sta
     end
     dom = PuncturedInterval(segs)
     dim = ndims(lims) # constant propagation :)
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(dim)) : alg.algs
-    nest = init_nest(g, cacheval[dim][2], dom, p, lims, state, algs[1:dim-1], cacheval[1:dim-1]; kws...)
-    return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[dim][1]; kws...)
+    nest = init_nest(g, cacheval[3], dom, p, lims, state, algs[1:dim-1], cacheval[1]; kws...)
+    return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[2]; kws...)
 end
 
 """

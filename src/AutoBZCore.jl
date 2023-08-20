@@ -48,7 +48,7 @@ using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal
 
 using StaticArrays: SVector, SMatrix, pushfirst, sacollect
 using FunctionWrappers: FunctionWrapper
-using ChunkSplitters: chunks
+using ChunkSplitters: chunks, getchunk
 using Reexport
 @reexport using AutoSymPTR
 @reexport using FourierSeriesEvaluators
@@ -67,7 +67,7 @@ include("domains.jl")
 export InplaceIntegrand
 include("inplace.jl")
 
-export BatchIntegrand
+export BatchIntegrand, NestedBatchIntegrand
 include("batch.jl")
 
 # export IntegralProblem, solve, init, solve! # we don't export the SciML interface
