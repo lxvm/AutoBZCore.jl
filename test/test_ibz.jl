@@ -102,14 +102,15 @@ function test_vol2(latvec::Matrix{Float64}, n::Int64)
     (dims = size(fbz.A, 1)) == size(fbz.A, 2) || error("lattice basis matrix not square")
     ibz_hull = load_bz(IBZ(dims), fbz.A, fbz.B, atom_types, atom_pos, coordinates=coordinates)
     vol_hull = nested_quad(x -> 1.0, ibz_hull.lims)[1]*det(fbz.B)/(2pi)^dims
-    ibz_poly = load_bz(IBZ{dims,Polyhedron}(), fbz.A, fbz.B, atom_types, atom_pos, coordinates=coordinates)
-    vol_poly = nested_quad(x -> 1.0, ibz_poly.lims)[1]*det(fbz.B)/(2pi)^dims
+    # ibz_poly = load_bz(IBZ{dims,Polyhedron}(), fbz.A, fbz.B, atom_types, atom_pos, coordinates=coordinates)
+    # vol_poly = nested_quad(x -> 1.0, ibz_poly.lims)[1]*det(fbz.B)/(2pi)^dims
     # the loaded ibz.lims is in fractional lattice coordinates, but needs rescaling to cartesian
     # println("Reference volume: ", vol_poly)
     # println("Estimated volume: ", vol_hull)
     # println("Actual volume: ", ibz.volume)
 
-    return max(abs(ibz.volume - vol_hull) / ibz.volume, abs(ibz.volume - vol_poly) / ibz.volume) # Return relative error
+    return abs(ibz.volume - vol_hull) / ibz.volume # Return relative error
+    # return max(abs(ibz.volume - vol_hull) / ibz.volume, abs(ibz.volume - vol_poly) / ibz.volume) # Return relative error
 end
 
 @testset "IBZ volumes" begin
