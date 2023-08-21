@@ -228,7 +228,7 @@ end
 Base.getindex(rule::FourierMonkhorstPack, i::Int) = rule.wxs[i]
 
 # iteration
-Base.eltype(::Type{FourierMonkhorstPack{d,T,S}}) where {d,T,S} = Tuple{Int64,FourierValue{SVector{d,T},S}}
+Base.eltype(::Type{FourierMonkhorstPack{d,W,T,S}}) where {d,W,T,S} = Tuple{W,FourierValue{SVector{d,T},S}}
 Base.length(r::FourierMonkhorstPack) = length(r.wxs)
 Base.iterate(rule::FourierMonkhorstPack, args...) = iterate(rule.wxs, args...)
 
@@ -264,7 +264,7 @@ function AutoSymPTR.nextrule(p::FourierPTR{d,T}, r::FourierMonkhorstPackRule) wh
     return FourierPTR(r.s, T, Val(d), length(p.p.x)+r.m.Δn)
 end
 
-function AutoSymPTR.nextrule(p::FourierMonkhorstPack{d,T}, r::FourierMonkhorstPackRule) where {d,T}
+function AutoSymPTR.nextrule(p::FourierMonkhorstPack{d,W,T}, r::FourierMonkhorstPackRule) where {d,W,T}
     return FourierMonkhorstPack(r.s, T, Val(d), p.npt+r.m.Δn, r.m.syms)
 end
 
