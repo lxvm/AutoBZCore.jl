@@ -72,10 +72,11 @@ function ParameterIntegrand(f, args...; kwargs...)
 end
 
 # provide Integrals.jl interface
-function (f::ParameterIntegrand)(x, q=())
+function (f::ParameterIntegrand)(x, q)
     p = merge(f.p, q)
     return f.f(x, getfield(p, :args)...; getfield(p, :kwargs)...)
 end
+(f::ParameterIntegrand)(x, ::NullParameters) = f(x, ())
 
 # move all parameters from f.p to p for convenience
 remake_integrand_cache(args...) = IntegralCache(args...)
@@ -88,4 +89,14 @@ function (s::IntegralSolver{<:ParameterIntegrand})(args...; kwargs...)
     p = MixedParameters(args...; kwargs...)
     sol = solve_p(s, p)
     return sol.u
+end
+
+function do_solve(f::ParameterIntegrand, dom, p, alg::EvalCounter, cacheval; kws...)
+    n::Int = 0
+    function g(x, args...; kwargs...)
+        n += 1
+        return f.f(x, args...; kwargs...)
+    end
+    sol = do_solve(ParameterIntegrand{typeof(g)}(g, f.p), dom, p, alg.alg, cacheval; kws...)
+    return IntegralSolution(sol.u, sol.resid, true, n)
 end

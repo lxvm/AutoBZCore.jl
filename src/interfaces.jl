@@ -15,6 +15,7 @@ abstract type IntegralAlgorithm end
 # - init_cacheval
 # - solve!
 
+struct NullParameters end
 
 struct IntegralProblem{F,D,P}
     f::F
@@ -24,10 +25,10 @@ struct IntegralProblem{F,D,P}
         return new{F,D,P}(f, dom, p)
     end
 end
-function IntegralProblem(f::F, dom::D, p::P=()) where {F,D,P}
+function IntegralProblem(f::F, dom::D, p::P=NullParameters()) where {F,D,P}
     return IntegralProblem{F,D,P}(f, dom, p)
 end
-function IntegralProblem(f::F, a::T, b::T, p::P=()) where {F,T,P}
+function IntegralProblem(f::F, a::T, b::T, p::P=NullParameters()) where {F,T,P}
     dom = T <: Real ? PuncturedInterval((a, b)) : HyperCube(a, b)
     return IntegralProblem{F,typeof(dom),P}(f, dom, p)
 end
@@ -81,7 +82,9 @@ struct IntegralSolution{T,E}
     u::T
     resid::E
     retcode::Bool
+    numevals::Int
 end
+# a value of numevals < 0 means it was undefined
 
 
 """

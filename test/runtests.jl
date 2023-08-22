@@ -157,6 +157,24 @@ end
         prob = IntegralProblem(f2, 0.0, 2pi, (0.5, 1e-3))
         abstol = 1e-5; reltol=1e-5
         @test solve(prob, alg, reltol=reltol).u ≈ solve(prob, ref_alg, abstol=abstol).u atol=abstol
+
+        # EvalCounter
+        for prob in (
+            IntegralProblem((x, p) -> 1.0, 0, 1),
+            IntegralProblem(InplaceIntegrand((y, x, p) -> y .= 1.0, fill(0.0)), 0, 1),
+            IntegralProblem(BatchIntegrand((y, x, p) -> y .= 1.0, Float64), 0, 1)
+        )
+            # constant integrand should always use the same number of evaluations as the
+            # base quadrature rule
+            for (alg, numevals) in (
+                (QuadratureFunction(npt=10), 10),
+                (QuadGKJL(order=7), 15),
+                (QuadGKJL(order=9), 19),
+            )
+                prob.f isa BatchIntegrand && alg isa QuadGKJL && continue
+                @test solve(prob, EvalCounter(alg)).numevals == numevals
+            end
+        end
     end
 end
 
@@ -245,13 +263,14 @@ end
             f(x, a; b) = a*x+b
             # SciML interface for ParameterIntegrand: f(x, p) (# and parameters can be preloaded and
             # p is merged with MixedParameters)
-            @test f(6.7, 1.3, b=4.2) == ParameterIntegrand(f, 1.3, b=4.2)(6.7) == ParameterIntegrand(f)(6.7, MixedParameters(1.3, b=4.2))
+            @test f(6.7, 1.3, b=4.2) == ParameterIntegrand(f, 1.3, b=4.2)(6.7, AutoBZCore.NullParameters()) == ParameterIntegrand(f)(6.7, MixedParameters(1.3, b=4.2))
             # A ParameterIntegrand merges its parameters with the problem's
             prob = IntegralProblem(ParameterIntegrand(f, 1.3, b=4.2), 0, 1)
             u = IntegralSolver(prob, QuadGKJL())()
             v = IntegralSolver(ParameterIntegrand(f), 0, 1, QuadGKJL())(1.3, b=4.2)
             w = IntegralSolver(ParameterIntegrand(f, b=4.2), 0, 1, QuadGKJL())(1.3)
             @test u == v == w
+            @test solve(prob, EvalCounter(QuadGKJL(order=7))).numevals == 15
         end
         @testset "batchsolve" begin
             # SciML interface: iterable of parameters
@@ -311,8 +330,9 @@ end
             for bz in (load_bz(FBZ(), A), load_bz(InversionSymIBZ(), A))
                 integrand = FourierIntegrand(f, s, 1.3, b=1.0)
                 prob = IntegralProblem(integrand, bz)
-                for alg in (IAI(), PTR(), AutoPTR(), TAI())
-                    solver = IntegralSolver(prob, alg, reltol=0, abstol=1e-6)
+                for alg in (IAI(), PTR(), AutoPTR(), TAI()), counter in (false, true)
+                    new_alg = counter ? EvalCounter(alg) : alg
+                    solver = IntegralSolver(prob, new_alg, reltol=0, abstol=1e-6)
                     @test solver() ≈ vol atol=1e-6
                 end
             end

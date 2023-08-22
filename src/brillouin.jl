@@ -291,7 +291,7 @@ function do_solve(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm, cacheval; _kws.
     sol = do_solve(f, dom, p, alg, cacheval; kws_...)
     val = j*symmetrize(f, bz_, sol.u)
     err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
-    return IntegralSolution(val, err, sol.retcode)
+    return IntegralSolution(val, err, sol.retcode, sol.numevals)
 end
 
 # AutoBZAlgorithms must implement:
@@ -404,3 +404,19 @@ an `abstol` is used since computational effort may be wasted via a `reltol` with
 the naive `nested_quadgk`.
 """
 AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI(), kws...) = AbsoluteEstimate(ptr, iai; reltol=reltol, kws...)
+
+
+# do not export this, just for internal use
+struct AutoBZEvalCounter{B,D,A} <: AutoBZAlgorithm
+    bz::B
+    dom::D
+    alg::A
+end
+
+function bz_to_standard(bz::SymmetricBZ, alg::AutoBZEvalCounter)
+    return alg.bz, alg.dom, EvalCounter(alg.alg)
+end
+
+function do_solve(f, bz::SymmetricBZ, p, alg::EvalCounter{<:AutoBZAlgorithm}, cacheval; kws...)
+    return do_solve(f, bz, p, AutoBZEvalCounter(bz_to_standard(bz, alg.alg)...), cacheval; kws...)
+end

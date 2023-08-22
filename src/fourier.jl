@@ -449,3 +449,23 @@ function do_solve(f::FourierIntegrand, lims::AbstractIteratedLimits, p_, alg::Ne
     nest = init_nest(g, cacheval[3], dom, p, lims, state, algs[1:dim-1], cacheval[1]; kws...)
     return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[2]; kws...)
 end
+
+function do_solve(f::FourierIntegrand, dom, p, alg::EvalCounter, cacheval; kws...)
+    if f.nest isa NestedBatchIntegrand
+        error("NestedBatchIntegrand not yet supported with EvalCounter")
+    else
+        n::Int = 0
+        function g(args...; kwargs...)
+            n += 1
+            return f.f.f(args...; kwargs...)
+        end
+        h = FourierIntegrand(ParameterIntegrand{typeof(g)}(g, f.f.p), f.w)
+        sol = do_solve(h, dom, p, alg.alg, cacheval; kws...)
+        return IntegralSolution(sol.u, sol.resid, true, n)
+    end
+end
+
+# method needed to resolve ambiguities
+function do_solve(f::FourierIntegrand, bz::SymmetricBZ, p, alg::EvalCounter{<:AutoBZAlgorithm}, cacheval; kws...)
+    return do_solve(f, bz, p, AutoBZEvalCounter(bz_to_standard(bz, alg.alg)...), cacheval; kws...)
+end
