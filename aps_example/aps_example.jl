@@ -14,13 +14,13 @@ using StaticArrays, OffsetArrays
 
 H_R = OffsetArray(
     Array{SMatrix{n,m,eltype(eltype(hrdat.H)),n*m}}(undef, Rsize...),
-    Rmin[1]:Rmax[1], Rmin[2]:Rmax[2], Rmin[3]:Rmax[3]
+    map(:, Rmin, Rmax)...
 )
 for (i, h) in zip(hrdat.Rvectors, hrdat.H)
     H_R[CartesianIndex(Tuple(i))] = h
 end
 
-using AutoBZCore, WannierIO, HChebInterp, LinearAlgebra
+using AutoBZCore, LinearAlgebra
 
 bz = load_bz(CubicSymIBZ(), "svo.wout")
 # bz = load_bz(IBZ(), "svo.wout") # works with SymmetryReduceBZ.jl installed
@@ -30,12 +30,12 @@ h = FourierSeries(H_R, period=1.0)
 dos_integrand(h_k::FourierValue, η, ω) = -imag(tr(inv((ω+im*η)*I - h_k.s)))/pi
 integrand = FourierIntegrand(dos_integrand, h, η)
 
-alg = IAI()
-dos_solver_iai = IntegralSolver(integrand, bz, alg; abstol=1e-3)
-dos_iai = hchebinterp(dos_solver_iai, 10, 15; atol=1e-2)
+dos_solver_iai = IntegralSolver(integrand, bz, IAI(); abstol=1e-3)
+dos_solver_ptr = IntegralSolver(integrand, bz, PTR(npt=100); abstol=1e-3)
 
-alg = PTR(npt=100)
-dos_solver_ptr = IntegralSolver(integrand, bz, alg; abstol=1e-3)
+using HChebInterp
+
+dos_iai = hchebinterp(dos_solver_iai, 10, 15; atol=1e-2)
 dos_ptr = hchebinterp(dos_solver_ptr, 10, 15; atol=1e-2)
 
 using CairoMakie
