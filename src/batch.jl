@@ -37,6 +37,16 @@ Array buffers for those types are allocated internally.
 BatchIntegrand(f!, Y::Type, X::Type=Nothing; max_batch::Integer=typemax(Int)) =
     BatchIntegrand(f!, Y[], X[], max_batch)
 
+
+"""
+    NestedBatchIntegrand(f::Tuple, y::AbstractVector, x::AbstractVector, max_batch::Integer)
+
+An integrand type intended for multi-threaded evaluation of [`NestedQuad`](@ref). The caller
+provides a tuple `f` of worker functions that can evaluate the same integrand on different
+threads, so as to avoid race conditions. These workers can also be `NestedBatchIntegrand`s
+depending on if the user wants to parallelize the integration at multiple levels of nesting.
+The other arguments are the same as for [`BatchIntegrand`](@ref).
+"""
 struct NestedBatchIntegrand{F,N,T,Y<:AbstractVector,X<:AbstractVector}
     f::NTuple{N,T}
     y::Y

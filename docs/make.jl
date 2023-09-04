@@ -17,8 +17,11 @@ makedocs(
     modules=[AutoBZCore],
     pages = [
         "Home" => "index.md",
-        "Integration" => "integration.md",
-        "Brillouin zones" => "bz.md",
+        "Examples" => "examples.md",
+        "Integrands" => "integrands.md",
+        "Algorithms" => "algorithms.md",
+        "Reference" => "reference.md",
+        "Extensions" => "extensions.md",
     ],
 )
 

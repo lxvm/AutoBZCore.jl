@@ -34,9 +34,23 @@ struct FourierIntegrand{F,P,W,N}
     end
 end
 
+"""
+    FourierIntegrand(f, w::FourierWorkspace, args...; kws...)
+
+Constructs an integrand of the form `f(FourierValue(x,w(x)), args...; kws...)` where the
+Fourier series in `w` is evaluated efficiently, i.e. one dimension at a time, with
+compatible algorithms.
+"""
 function FourierIntegrand(f, w::FourierWorkspace, args...; kws...)
     return FourierIntegrand(ParameterIntegrand(f, args...; kws...), w)
 end
+
+"""
+    FourierIntegrand(f, s::AbstractFourierSeries, args...; kws...)
+
+Outer constructor for `FourierIntegrand` that wraps the Fourier series `s` into a
+single-threaded `FourierWorkspace`.
+"""
 function FourierIntegrand(f, s::AbstractFourierSeries, args...; kws...)
     return FourierIntegrand(f, workspace_allocate(s, period(s)), args...; kws...)
 end

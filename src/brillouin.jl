@@ -130,6 +130,14 @@ abstract type AbstractBZ{d} end
     load_bz(::AbstractBZ, A::AbstractMatrix, [B::AbstractMatrix])
 
 Interface to loading Brillouin zones
+
+!!! note "Assumptions"
+    `AutoBZCore` assumes that all calculations occur in the reciprocal
+    lattice basis, since that is the basis in which Wannier interpolants are most
+    efficiently described. See [`SymmetricBZ`](@ref) for details. We also assume that the
+    integrands are cheap to evaluate, which is why we provide adaptive methods in the first
+    place, so that return types can be determined at runtime (and mechanisms are in place
+    for compile time as well)
 """
 function load_bz end
 

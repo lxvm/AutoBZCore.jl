@@ -172,14 +172,14 @@ function do_solve(f, dom, p, alg::QuadratureFunction, cacheval;
     else
         x -> f(x, p)
     end
-    I = sum(1:length(segs)-1) do i
+    A = sum(1:length(segs)-1) do i
         a, b = segs[i], segs[i+1]
         s = (b-a)/2
-        rule = AutoSymPTR.AffineQuad(rule, s, a, 1, s)
-        return AutoSymPTR.quadsum(rule, g, s, buffer)
+        arule = AutoSymPTR.AffineQuad(rule, s, a, 1, s)
+        return AutoSymPTR.quadsum(arule, g, s, buffer)
     end
 
-    return IntegralSolution(I, nothing, true, -1)
+    return IntegralSolution(A, nothing, true, -1)
 end
 
 # Here we put the quadrature algorithms from IteratedIntegration

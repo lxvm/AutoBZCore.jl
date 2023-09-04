@@ -1,46 +1,49 @@
 """
-The package providing the functionality and abstractions for `AutoBZ.jl`. It
-provides both [`SymmetricBZ`](@ref), which is a type that stores information
-about the Brillouin zone (BZ), and [`IntegralSolver`](@ref), a type that
-provides a functor interface to parametrize `IntegralProblem`s as defined by
-[Integrals.jl](https://docs.sciml.ai/Integrals/stable/). The package also
-provides the optimized [`FourierIntegrand`](@ref). The package integrates with
-[FourierSeriesEvaluators.jl](https://github.com/lxvm/FourierSeriesEvaluators.jl),
-[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl), and
-[AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl) to provide a generic
-interface to efficient algorithms for BZ integration.
+A package providing a common interface to integration algorithms intended for applications
+including Brillouin-zone integration and Wannier interpolation. Its design is influenced by
+high-level libraries like Integrals.jl, and it makes use of Julia's multiple dispatch to
+provide the same interface for integrands with optimized inplace, batched, and Fourier
+series evaluation.
 
-For example, computing the local Green's function can be done as follows:
+### Quickstart
 
-    using LinearAlgebra
-    using FourierSeriesEvaluators
-    using AutoBZCore
+As a first example, we integrate sine over [0,1] as a function of its period.
+```
+julia> using AutoBZCore
 
-    gloc_integrand(k, h; η, ω) = inv(complex(ω,η)*I-h(k))   # define integrand evaluator
-    h = FourierSeries([0.5, 0.0, 0.5]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
-    integrand = ParameterIntegrand(gloc_integrand, h, η=0.1)         # construct integrand with Fourier series h and parameter η=0.1
-    prob = IntegralProblem(integrand, 0, 1)                 # setup the integral problem
-    alg = QuadGKJL()                                        # choose integration algorithm (also AutoPTR() and PTR())
-    gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
-    gloc(ω=0.0)                                             # evaluate gloc at frequency ω=0.0
+julia> f = IntegralSolver((x,p) -> sin(p*x), 0, 1, QuadGKJL());
 
+julia> f(0.3) # solves the integral of sin(p*x) over [0,1] with p=0.3
+0.14887836958131329
+```
+Notice that we construct an [`IntegralSolver`](@ref) object that we can evaluate at
+different parameters with a function-like interface. For more examples, see the
+documentation.
 
-    gloc_integrand(h_k::FourierValue; η, ω) = inv(complex(ω,η)*I-h_k.s)     # define integrand evaluator
-    h = FourierSeries([0.0; 0.5; 0.0;; 0.5; 0.0; 0.5;; 0.0; 0.5; 0.0]; period=1, offset=-2) # construct cos(2πk) 1D integer lattice Hamiltonian
-    bz = load_bz(FBZ(2), 2pi*I(2))                          # construct BZ from lattice vectors A=2pi*I
-    integrand = FourierIntegrand(gloc_integrand, h, η=0.1)  # construct integrand with Fourier series h and parameter η=0.1
-    prob = IntegralProblem(integrand, bz)                   # setup the integral problem
-    alg = IAI()                                             # choose integration algorithm (also AutoPTR() and PTR())
-    gloc = IntegralSolver(prob, alg; abstol=1e-3)           # construct a solver for gloc to within specified tolerance
-    gloc(ω=0.0)                                             # evaluate gloc at frequency ω=0.0
+### Features
 
-!!! note "Assumptions"
-    `AutoBZCore` assumes that all calculations occur in the
-    reciprocal lattice basis, since that is the basis in which Wannier
-    interpolants are most efficiently described. See [`SymmetricBZ`](@ref) for
-    details. We also assume that the integrands are cheap to evaluate, which is why we
-    provide adaptive methods in the first place, so that return types can be determined at
-    runtime (and mechanisms are in place for compile time as well)
+Special integrand interfaces
+- [`ParameterIntegrand`](@ref): allows user integrand to use keyword arguments
+- [`InplaceIntegrand`](@ref): allows an integrand to write its result inplace to an array
+- [`BatchIntegrand`](@ref): allows user-side parallelization on e.g. shared memory,
+  distributed memory, or the gpu
+- [`FourierIntegrand`](@ref): efficient evaluation of Fourier series for cubatures with
+  hierachical grids
+
+Quadrature algorithms:
+- Trapezoidal rule and FastGaussQuadrature.jl: [`QuadratureFunction`](@ref)
+- h-adaptive quadrature (Gauss-Kronrod): [`QuadGKJL`](@ref)
+- h-adaptive cubature (Genz-Malik): [`HCubatureJL`](@ref)
+- p-adaptive, symmetrized Monkhorst-Pack: [`AutoSymPTRJL`](@ref)
+
+Meta-Algorithms:
+- Iterated integration: [`NestedQuad`](@ref)
+- Integrand evaluation counter: [`EvalCounter`](@ref)
+
+# Extended help
+
+If you experience issues with AutoBZCore.jl, please report a bug on the [GitHub
+page](https://github.com/lxvm/AutoBZCore.jl) to contact the developers.
 """
 module AutoBZCore
 
