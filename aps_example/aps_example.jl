@@ -16,8 +16,8 @@ H_R = OffsetArray(
     Array{SMatrix{n,m,eltype(eltype(hrdat.H)),n*m}}(undef, Rsize...),
     map(:, Rmin, Rmax)...
 )
-for (i, h) in zip(hrdat.Rvectors, hrdat.H)
-    H_R[CartesianIndex(Tuple(i))] = h
+for (i, h, n) in zip(hrdat.Rvectors, hrdat.H, hrdat.Rdegens)
+    H_R[CartesianIndex(Tuple(i))] = h / n
 end
 
 using AutoBZCore, LinearAlgebra
