@@ -325,7 +325,7 @@ function nested_to_batched(f::FourierIntegrand, dom::Basis, rule)
     return BatchIntegrand(ys, xs, max_batch=f.nest.max_batch) do y, x, p
         # would be better to fully unwrap the nested structure, but this is one level
         nchunk = length(f.nest.f)
-        Threads.@threads for ichunk in 1:nchunk
+        Threads.@threads for ichunk in 1:min(nchunk, length(x))
             for (i, j) in zip(getchunk(x, ichunk, nchunk, :batch), getchunk(y, ichunk, nchunk, :batch))
                 y[j] = FourierIntegrand(f.nest.f[ichunk], FourierWorkspace(nothing,nothing))(x[i], p)
             end
@@ -394,7 +394,7 @@ function init_nest(f::FourierIntegrand, fxx, dom, p,lims, state, algs, cacheval;
         if f.nest isa NestedBatchIntegrand
             nchunk = min(length(f.nest.f), length(f.w.cache))
             return BatchIntegrand(f.nest.y, f.nest.x, max_batch=f.nest.max_batch) do y, x, (p, lims, state)
-                Threads.@threads for ichunk in 1:nchunk
+                Threads.@threads for ichunk in 1:min(nchunk, length(x))
                     for (i, j) in zip(getchunk(x, ichunk, nchunk, :scatter), getchunk(y, ichunk, nchunk, :scatter))
                         xi = x[i]
                         v = FourierValue(limit_iterate(lims, state, xi), workspace_evaluate!(f.w, xi, ichunk))
@@ -414,7 +414,7 @@ function init_nest(f::FourierIntegrand, fxx, dom, p,lims, state, algs, cacheval;
         if f.nest isa NestedBatchIntegrand
             nchunks = min(length(f.nest.f), length(f.w.cache))
             return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.nest.y),typeof(f.nest.x),TP}}() do y, x, (p, lims, state)
-                Threads.@threads for ichunk in 1:nchunks
+                Threads.@threads for ichunk in 1:min(nchunks, length(x))
                     for (i, j) in zip(getchunk(x, ichunk, nchunks, :scatter), getchunk(y, ichunk, nchunks, :scatter))
                         xi = x[i]
                         segs, lims_, state_ = limit_iterate(lims, state, xi)
