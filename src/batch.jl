@@ -47,16 +47,22 @@ threads, so as to avoid race conditions. These workers can also be `NestedBatchI
 depending on if the user wants to parallelize the integration at multiple levels of nesting.
 The other arguments are the same as for [`BatchIntegrand`](@ref).
 """
-struct NestedBatchIntegrand{F,N,T,Y<:AbstractVector,X<:AbstractVector}
-    f::NTuple{N,T}
+struct NestedBatchIntegrand{F,T,Y<:AbstractVector,X<:AbstractVector}
+    f::T
     y::Y
     x::X
     max_batch::Int
     function NestedBatchIntegrand(f::NTuple{N,F}, y::Y, x::X, max_batch::Integer) where {N,F,Y,X}
-        return new{F,N,F,Y,X}(f, y, x, max_batch)
+        return new{F,NTuple{N,F},Y,X}(f, y, x, max_batch)
     end
     function NestedBatchIntegrand(f::NTuple{N,T}, y::Y, x::X, max_batch::Integer) where {N,F,T<:NestedBatchIntegrand{F},Y,X}
-        return new{F,N,T,Y,X}(f, y, x, max_batch)
+        return new{F,NTuple{N,T},Y,X}(f, y, x, max_batch)
+    end
+    function NestedBatchIntegrand(f::AbstractArray{F}, y::Y, x::X, max_batch::Integer) where {F,Y,X}
+        return new{F,typeof(f),Y,X}(f, y, x, max_batch)
+    end
+    function NestedBatchIntegrand(f::AbstractArray{T}, y::Y, x::X, max_batch::Integer) where {F,T<:NestedBatchIntegrand{F},Y,X}
+        return new{F,typeof(f),Y,X}(f, y, x, max_batch)
     end
 end
 
