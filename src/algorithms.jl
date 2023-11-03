@@ -644,7 +644,7 @@ end
     EvalCounter(::IntegralAlgorithm)
 
 An algorithm which counts the evaluations used by another algorithm.
-The solution is stored in the `sol.u` field and the count in the `sol.resid` field.
+The count is stored in the `sol.numevals` field.
 """
 struct EvalCounter{T<:IntegralAlgorithm} <: IntegralAlgorithm
     alg::T
