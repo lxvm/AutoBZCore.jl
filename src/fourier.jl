@@ -483,3 +483,25 @@ end
 function do_solve(f::FourierIntegrand, bz::SymmetricBZ, p, alg::EvalCounter{<:AutoBZAlgorithm}, cacheval; kws...)
     return do_solve(f, bz, p, AutoBZEvalCounter(bz_to_standard(bz, alg.alg)...), cacheval; kws...)
 end
+
+# TODO: fix the following, which makes julia crash:
+#=
+using AutoBZCore
+using AutoBZCore: IntegralProblem, solve
+f = FourierIntegrand(x -> x.s, FourierSeries(rand(3,3), period=1.0))
+prob = IntegralProblem(f, CubicLimits([0.0, 0.0], [1.0, 1.0]))
+sol = solve(prob, NodeLogger(NestedQuad(QuadGKJL())))
+=#
+function do_solve(f::FourierIntegrand, dom, p, alg::NodeLogger, cacheval; kws...)
+    nodes = pointtype(dom)[]
+    if f.nest isa NestedBatchIntegrand
+        # TODO allocate a bunch of accumulators associated with the leaves of the nested
+        # integrand or rewrap the algorithms in NestedQuad
+        error("NestedBatchIntegrand not yet supported with NodeLogger")
+    else
+        g = v -> (push!(nodes, v.x); f(v, p))
+        h = FourierIntegrand(ParameterIntegrand{typeof(g)}(g, f.f.p), f.w)
+        sol = do_solve(h, dom, p, alg.alg, cacheval; kws...)
+        return IntegralSolution(sol.u, sol.resid, sol.retcode, sol.numevals, nodes)
+    end
+end
