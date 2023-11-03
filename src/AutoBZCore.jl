@@ -80,7 +80,7 @@ include("interfaces.jl")
 export QuadGKJL, HCubatureJL, QuadratureFunction
 export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
 export MonkhorstPack, AutoSymPTRJL
-export NestedQuad, AbsoluteEstimate, EvalCounter
+export NestedQuad, AbsoluteEstimate, EvalCounter, NodeLogger
 include("algorithms.jl")
 
 export SymmetricBZ, nsyms

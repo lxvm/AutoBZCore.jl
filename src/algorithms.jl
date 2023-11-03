@@ -676,3 +676,39 @@ function do_solve(f, dom, p, alg::EvalCounter, cacheval; kws...)
         return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
     end
 end
+
+
+"""
+    NodeLogger(::IntegralAlgorithm)
+
+An algorithm which stores the quadrature nodes used by another algorithm.
+The nodes are stored in the `sol.nodes` field of the solution as a vector.
+"""
+struct NodeLogger{T<:IntegralAlgorithm} <: IntegralAlgorithm
+    alg::T
+end
+
+function init_cacheval(f, dom, p, alg::NodeLogger)
+    return init_cacheval(f, dom, p, alg.alg)
+end
+
+function do_solve(f, dom, p, alg::NodeLogger, cacheval; kws...)
+    nodes = pointtype(dom)[]
+    if f isa InplaceIntegrand
+        gi = (y, x, p) -> (push!(nodes, x); f.f!(y, x, p))
+        soli = do_solve(InplaceIntegrand(gi, f.I), dom, p, alg.alg, cacheval; kws...)
+        return IntegralSolution(soli.u, soli.resid, soli.retcode, soli.numevals, nodes)
+    elseif f isa BatchIntegrand
+        gb = (y, x, p) -> (append!(nodes, x); f.f!(y, x, p))
+        solb = do_solve(BatchIntegrand(gb, f.y, f.x, max_batch=f.max_batch), dom, p, alg.alg, cacheval; kws...)
+        return IntegralSolution(solb.u, solb.resid, solb.retcode, solb.numevals, nodes)
+    elseif f isa NestedBatchIntegrand
+        # TODO allocate a bunch of accumulators associated with the leaves of the nested
+        # integrand or rewrap the algorithms in NestedQuad
+        error("NestedBatchIntegrand not yet supported with NodeLogger")
+    else
+        g = (x, p) -> (push!(nodes, x); f(x, p))
+        sol = do_solve(g, dom, p, alg.alg, cacheval; kws...)
+        return IntegralSolution(sol.u, sol.resid, sol.retcode, sol.numevals, nodes)
+    end
+end

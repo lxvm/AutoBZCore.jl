@@ -78,12 +78,16 @@ function solve!(c::IntegralCache)
     return do_solve(c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
 end
 
-struct IntegralSolution{T,E}
+struct IntegralSolution{T,E,N}
     u::T
     resid::E
     retcode::Bool
     numevals::Int
+    nodes::N
 end
+
+IntegralSolution(u, resid, retcode, numevals, nodes=nothing) =
+    IntegralSolution(u, resid, retcode, numevals, nodes)
 # a value of numevals < 0 means it was undefined
 
 
