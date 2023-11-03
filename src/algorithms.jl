@@ -506,7 +506,7 @@ function init_nest(f::F, fxx, dom, p,lims, state, algs, cacheval; kws_...) where
         elseif f isa NestedBatchIntegrand
             nchunk = length(f.f)
             return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(f.x),TP}}() do y, x, (p, lims, state)
-                Threads.@threads for ichunk in 1:nchunk
+                Threads.@threads for ichunk in 1:min(nchunk, length(x))
                     for (i, j) in zip(getchunk(x, ichunk, nchunk, :scatter), getchunk(y, ichunk, nchunk, :scatter))
                         xi = x[i]
                         y[j] = f.f[ichunk](limit_iterate(lims, state, xi), p)
@@ -536,7 +536,7 @@ function init_nest(f::F, fxx, dom, p,lims, state, algs, cacheval; kws_...) where
         elseif f isa NestedBatchIntegrand
             nchunks = length(f.f)
             return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(f.x),TP}}() do y, x, (p, lims, state)
-                Threads.@threads for ichunk in 1:nchunks
+                Threads.@threads for ichunk in 1:min(nchunks, length(x))
                     for (i, j) in zip(getchunk(x, ichunk, nchunks, :scatter), getchunk(y, ichunk, nchunks, :scatter))
                         xi = x[i]
                         segs, lims_, state_ = limit_iterate(lims, state, xi)
