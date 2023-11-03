@@ -40,6 +40,7 @@ struct SymmetricBZ{S,L,d,TA,TB,d2}
     end
 end
 
+pointtype(::SymmetricBZ{S,L,d,TA,TB,d2}) where {S,L,d,TA,TB,d2} = SVector{d,typeof(float(one(TB)))}
 nsyms(bz::SymmetricBZ) = length(bz.syms)
 
 const FullBZ = SymmetricBZ{Nothing}
