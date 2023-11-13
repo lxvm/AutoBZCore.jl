@@ -117,7 +117,8 @@ const liblock = ReentrantLock()
 """
     batchsolve(h5::H5DataStore, f::IntegralSolver, ps, [T]; verb=true, nthreads=Threads.nthreads())
 
-Batchsolver
+Solves the integral `f` at all parameters `ps` in a multi-threaded fashion, using `nthreads`
+threads to parallelize over `ps`, and writes the results to the `h5` archive.
 """
 function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=solver_type(f, ps[begin]); flush=true, verb=true, nthreads=Threads.nthreads())
     isconcretetype(T) || throw(ArgumentError("Result type of integrand is abstract or could not be inferred. Please provide the concrete return type to save to HDF5"))
@@ -127,6 +128,7 @@ function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=sol
     gE = create_dataset(h5, "E", Float64, dims)
     gt = create_dataset(h5, "t", Float64, dims)
     gr = create_dataset(h5, "retcode", Int32, dims)
+    gn = create_dataset(h5, "numevals", Int, dims)
     gp = param_group(h5, eltype(ps), dims)
     flush && Base.flush(h5)
 
@@ -138,6 +140,7 @@ function batchsolve(h5::H5DataStore, f::IntegralSolver, ps::AbstractArray, T=sol
             set_value(gE, i, isnothing(sol.resid) ? NaN : convert(Float64, T<:AuxValue ? sol.resid.val : sol.resid))
             set_value(gt, i, t)
             set_value(gr, i, Integer(sol.retcode))
+            set_value(gn, i, sol.numevals)
             param_record(gp, p, i)
             flush && Base.flush(h5)
         finally
