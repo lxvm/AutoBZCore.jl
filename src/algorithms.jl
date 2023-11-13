@@ -39,24 +39,27 @@ end
 init_midpoint_scale(dom::PuncturedInterval) = init_midpoint_scale(endpoints(dom)...)
 function init_segbuf(f, dom, p, norm)
     x, s = init_midpoint_scale(dom)
-    TX = typeof(x)
-    fx_s = f(x, p) * s
+    u = x/oneunit(x)
+    TX = typeof(u)
+    fx_s = f(x, p) * s/oneunit(s)
     TI = typeof(fx_s)
     TE = typeof(norm(fx_s))
     return IteratedIntegration.alloc_segbuf(TX, TI, TE)
 end
 function init_segbuf(f::InplaceIntegrand, dom, p, norm)
     x, s = init_midpoint_scale(dom)
-    TX = typeof(x)
-    TI = typeof(f.I)
+    u = x/oneunit(x)
+    TX = typeof(u)
+    TI = typeof(f.I *s/oneunit(s))
     fill!(f.I, zero(eltype(f.I)))
-    TE = typeof(norm(f.I))
+    TE = typeof(norm(f.I)*s/oneunit(s))
     return IteratedIntegration.alloc_segbuf(TX, TI, TE)
 end
 function init_segbuf(f::BatchIntegrand, dom, p, norm)
     x, s = init_midpoint_scale(dom)
-    TX = typeof(x)
-    fx_s = zero(eltype(f.y)) * s    # TODO BatchIntegrand(InplaceIntegrand) should depend on size of result
+    u = x/oneunit(x)
+    TX = typeof(u)
+    fx_s = zero(eltype(f.y)) * s/oneunit(s)    # TODO BatchIntegrand(InplaceIntegrand) should depend on size of result
     TI = typeof(fx_s)
     TE = typeof(norm(fx_s))
     return IteratedIntegration.alloc_segbuf(TX, TI, TE)
@@ -70,16 +73,21 @@ end
 function do_solve(f::F, dom, p, alg::QuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int)) where {F}
     segs = segments(dom)
+    # we need to strip units from the limits since infinity transformations change the units
+    # of the limits, which can break the segbuf
+    u = oneunit(eltype(dom))
+    usegs = map(x -> x/u, segs)
     if f isa InplaceIntegrand
-        g! = (y, x) -> f.f!(y, x, p)
-        val, err = quadgk!(g!, f.I, segs..., maxevals = maxiters,
-                        rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(val, err, true, -1)
+        g! = (y, x) -> f.f!(y, u*x, p)
+        result = f.I / u
+        val, err = quadgk!(g!, result, usegs..., maxevals = maxiters,
+                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
+        return IntegralSolution(f.I .= u .* val, u*err, true, -1)
     else
-        g = x -> f(x, p)
-        val, err = quadgk(g, segs..., maxevals = maxiters,
-                        rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(val, err, true, -1)
+        g = x -> f(u*x, p)
+        val, err = quadgk(g, usegs..., maxevals = maxiters,
+                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
+        return IntegralSolution(u*val, u*err, true, -1)
     end
 end
 
@@ -208,22 +216,26 @@ function do_solve(f, dom, p, alg::AuxQuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
     segs = segments(dom)
+    u = oneunit(eltype(dom))
+    usegs = map(x -> x/u, segs)
     if f isa InplaceIntegrand
-        g! = (y, x) -> f.f!(y, x, p)
-        val, err = auxquadgk!(g!, f.I, segs, maxevals = maxiters,
-                        rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(val, err, true, -1)
+        g! = (y, x) -> f.f!(y, u*x, p)
+        result = f.I / u
+        val, err = auxquadgk!(g!, result, usegs, maxevals = maxiters,
+                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
+        return IntegralSolution(f.I .= u .* val, u*err, true, -1)
     elseif f isa BatchIntegrand
         xx = eltype(f.x) === Nothing ? typeof((segs[1]+segs[end])/2)[] : f.x
-        g = IteratedIntegration.AuxQuadGK.BatchIntegrand((y, x) -> f.f!(y, x, p), f.y, xx, max_batch=f.max_batch)
-        val, err = auxquadgk(g, segs, maxevals = maxiters,
-                        rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(val, err, true, -1)
+        g_ = (y, x) -> (resize!(xx, length(x)); f.f!(y, xx .= u .* x, p))
+        g = IteratedIntegration.AuxQuadGK.BatchIntegrand(g_, f.y, xx/u, max_batch=f.max_batch)
+        val, err = auxquadgk(g, usegs, maxevals = maxiters,
+                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
+        return IntegralSolution(u*val, u*err, true, -1)
     else
-        g = x -> f(x, p)
-        val, err = auxquadgk(g, segs, maxevals = maxiters,
-                        rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(val, err, true, -1)
+        g = x -> f(u*x, p)
+        val, err = auxquadgk(g, usegs, maxevals = maxiters,
+                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
+        return IntegralSolution(u*val, u*err, true, -1)
     end
 end
 
@@ -497,8 +509,9 @@ end
 
 function init_nest(f::F, fxx, dom, p,lims, state, algs, cacheval; kws_...) where {F}
     kws = NamedTuple(kws_)
-    FX = typeof(fxx/oneunit(eltype(dom)))
-    TX = eltype(dom)
+    xx = float(oneunit(eltype(dom)))
+    FX = typeof(fxx/xx)
+    TX = typeof(xx)
     TP = Tuple{typeof(p),typeof(lims),typeof(state)}
     if algs isa Tuple{} # inner integral
         if f isa BatchIntegrand

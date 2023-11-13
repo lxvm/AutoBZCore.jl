@@ -29,7 +29,7 @@ function IntegralProblem(f::F, dom::D, p::P=NullParameters()) where {F,D,P}
     return IntegralProblem{F,D,P}(f, dom, p)
 end
 function IntegralProblem(f::F, a::T, b::T, p::P=NullParameters()) where {F,T,P}
-    dom = T <: Real ? PuncturedInterval((a, b)) : HyperCube(a, b)
+    dom = T <: Number ? PuncturedInterval((a, b)) : HyperCube(a, b)
     return IntegralProblem{F,typeof(dom),P}(f, dom, p)
 end
 
@@ -122,7 +122,7 @@ following interface `fun(args...; kwargs...) -> solve(IntegralProblem(f, lb, ub,
 MixedParameters(args..., kwargs...)), alg)`.
 """
 function IntegralSolver(f, a::T, b::T, alg::IntegralAlgorithm; kwargs...) where {T}
-    dom = T <: Real ? PuncturedInterval((a, b)) : HyperCube(a, b)
+    dom = T <: Number ? PuncturedInterval((a, b)) : HyperCube(a, b)
     return IntegralSolver(f, dom, alg; kwargs...)
 end
 

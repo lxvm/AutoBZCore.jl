@@ -387,8 +387,9 @@ end
 
 function init_nest(f::FourierIntegrand, fxx, dom, p,lims, state, algs, cacheval; kws_...)
     kws = NamedTuple(kws_)
-    FX = typeof(fxx/oneunit(eltype(dom)))
-    TX = eltype(dom)
+    xx = float(oneunit(eltype(dom)))
+    FX = typeof(fxx/xx)
+    TX = typeof(xx)
     TP = Tuple{typeof(p),typeof(lims),typeof(state)}
     if algs isa Tuple{} # inner integral
         if f.nest isa NestedBatchIntegrand
