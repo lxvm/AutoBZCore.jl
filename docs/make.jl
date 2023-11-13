@@ -18,6 +18,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Examples" => "examples.md",
+        "Problems" => "problems.md",
         "Integrands" => "integrands.md",
         "Algorithms" => "algorithms.md",
         "Reference" => "reference.md",

@@ -1,4 +1,10 @@
-# Quadrature
+# Integral algorithms
+
+```@docs
+AutoBZCore.IntegralAlgorithm
+```
+
+## Quadrature
 
 ```@docs
 AutoBZCore.QuadratureFunction
@@ -8,7 +14,7 @@ AutoBZCore.ContQuadGKJL
 AutoBZCore.MeroQuadGKJL
 ```
 
-# Cubature
+## Cubature
 
 ```@docs
 AutoBZCore.HCubatureJL
@@ -16,7 +22,7 @@ AutoBZCore.MonkhorstPack
 AutoBZCore.AutoSymPTRJL
 ```
 
-# Meta-algorithms
+## Meta-algorithms
 
 ```@docs
 AutoBZCore.NestedQuad
@@ -24,7 +30,7 @@ AutoBZCore.EvalCounter
 AutoBZCore.AbsoluteEstimate
 ```
 
-# BZ-specific
+# BZ-specific integral algorithms
 
 In order to make algorithms domain-agnostic, the BZ loaded from
 [`load_bz`](@ref) can be called with the algorithms below, which are wrappers
@@ -32,6 +38,7 @@ for algorithms above with the additional capability of mapping integrals over
 the IBZ to the FBZ.
 
 ```@docs
+AutoBZCore.AutoBZAlgorithm
 AutoBZCore.IAI
 AutoBZCore.TAI
 AutoBZCore.PTR

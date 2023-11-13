@@ -126,13 +126,21 @@ Abstract supertype for all Brillouin zone data types parametrized by dimension.
 abstract type AbstractBZ{d} end
 
 """
-    load_bz(::AbstractBZ, T::Type)
-    load_bz(::AbstractBZ, A::AbstractMatrix, [B::AbstractMatrix])
+    load_bz(bz::AbstractBZ, [T::Type=Float64])
+    load_bz(bz::AbstractBZ, A::AbstractMatrix, [B::AbstractMatrix])
 
-Interface to loading Brillouin zones
+Interface to loading Brillouin zones.
 
-!!! note "Assumptions"
-    `AutoBZCore` assumes that all calculations occur in the reciprocal
+## Arguments
+- `bz::AbstractBZ`: a kind of Brillouin zone to construct, e.g. [`FBZ`](@ref) or
+  [`IBZ`](@ref)
+- `T::Type`: a numeric type to set the precision of the domain (default: `Float64`)
+- `A::AbstractMatrix`: a ``d \\times d`` matrix whose columns are the real-space lattice
+  vectors of a ``d``-dimensional crystal
+- `B::AbstractMatrix`: a ``d \\times d`` matrix whose columns are the reciprocal-space
+  lattice vectors of a ``d``-dimensional Brillouin zone (default: `A' \\ 2πI`)
+
+!!! note "Assumptions" `AutoBZCore` assumes that all calculations occur in the reciprocal
     lattice basis, since that is the basis in which Wannier interpolants are most
     efficiently described. See [`SymmetricBZ`](@ref) for details. We also assume that the
     integrands are cheap to evaluate, which is why we provide adaptive methods in the first

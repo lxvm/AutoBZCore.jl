@@ -39,7 +39,9 @@ end
 
 Constructs an integrand of the form `f(FourierValue(x,w(x)), args...; kws...)` where the
 Fourier series in `w` is evaluated efficiently, i.e. one dimension at a time, with
-compatible algorithms.
+compatible algorithms. `f` should accept parameters as arguments and keywords, similar to a
+[`ParameterIntegrand`](@ref) although the first argument to `f` will always be a
+[`FourierValue`](@ref).
 """
 function FourierIntegrand(f, w::FourierWorkspace, args...; kws...)
     return FourierIntegrand(ParameterIntegrand(f, args...; kws...), w)
@@ -70,6 +72,13 @@ end
 
 # FourierIntegrands should expect a FourierValue as input
 
+"""
+    FourierValue(x, s)
+
+A container used by [`FourierIntegrand`](@ref) to pass a point, `x`, and the value of a
+Fourier series evaluated at the point, `s`, to integrands. The properties `x` and `s` of a
+`FourierValue` store the point and evaluated series, respectively.
+"""
 struct FourierValue{X,S}
     x::X
     s::S

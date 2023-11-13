@@ -1,3 +1,10 @@
+"""
+    PuncturedInterval(s)
+
+Represent an interval `(a, b)` with interior points deleted by `s = (a, c1, ..., cN, b)`, so
+that the integration algorithm can avoid the points `c1, ..., cN` for e.g. discontinuities.
+`s` must be a tuple or vector.
+"""
 struct PuncturedInterval{T,S}
     s::S
     PuncturedInterval(s::S) where {N,T,S<:NTuple{N,T}} = new{T,S}(s)
@@ -7,6 +14,11 @@ Base.eltype(::Type{PuncturedInterval{T,S}}) where {T,S} = T
 segments(p::PuncturedInterval) = p.s
 endpoints(p::PuncturedInterval) = (p.s[begin], p.s[end])
 
+"""
+    HyperCube(a, b)
+
+Represents a hypercube spanned by the vertices `a, b`, which must be iterables of the same length.
+"""
 struct HyperCube{d,T}
     a::SVector{d,T}
     b::SVector{d,T}

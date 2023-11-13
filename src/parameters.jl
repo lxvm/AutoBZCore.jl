@@ -1,8 +1,12 @@
 """
     MixedParameters(args::Tuple, kwargs::NamedTuple)
+    MixedParameters(args...; kwargs...)
 
-A struct to store full and partial sets of parameters used to evaluate
-integrands.
+A struct to store the arguments and keyword arguments to a function. Indicies access
+`args`, i.e. `MixedParameters(args...; kwargs...)[i] == args[i]` and properties access
+`kwargs`, i.e. `MixedParameters(args...; kwargs...).name == kwargs.name`.
+
+Used internally to store partially complete collections of function arguments or parameters.
 """
 struct MixedParameters{A<:Tuple,K<:NamedTuple}
     args::A
@@ -42,11 +46,26 @@ end
 function paramzip_(args::Tuple, kwargs::NamedTuple)
     [MixedParameters(arg, NamedTuple{keys(kwargs)}(val)) for (arg, val) in zip(zip(args...), zip(values(kwargs)...))]
 end
+"""
+    paramzip(args...; kwargs...)
+
+Behaves similarly to `zip(zip(args...), zip(kwargs...))` with [`MixedParameters`](@ref)
+return values so that `paramzip(args...; kwargs...)[i][j] == args[j][i]` and
+`paramzip(args...; kwargs...)[i].name == kwargs.name[i]`.
+"""
 paramzip(args...; kwargs...) = paramzip_(args, NamedTuple(kwargs))
 
 function paramproduct_(args::Tuple, kwargs::NamedTuple)
     [MixedParameters(item[1:length(args)], NamedTuple{keys(kwargs)}(item[length(args)+1:end])) for item in Iterators.product(args..., values(kwargs)...)]
 end
+
+"""
+    paramproduct(args...; kwargs...)
+
+Behaves similarly to `product(args..., kwargs...)` with [`MixedParameters`](@ref) return
+values so that `paramzip(args...; kwargs...)[i1, ...,ij, il, ...in] ==
+MixedParameters(args[begin][i1], ..., args[end][ij]; kwargs[begin][il], ..., kwargs[end][in])`
+"""
 paramproduct(args...; kwargs...) = paramproduct_(args, NamedTuple(kwargs))
 
 """

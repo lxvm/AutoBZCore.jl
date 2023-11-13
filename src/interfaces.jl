@@ -15,8 +15,22 @@ abstract type IntegralAlgorithm end
 # - init_cacheval
 # - solve!
 
+"""
+    NullParameters()
+
+A singleton type representing absent parameters
+"""
 struct NullParameters end
 
+"""
+    IntegralProblem(f, domain, [p=NullParameters])
+    IntegralProblem(f, a::T, b::T, [p=NullParameters]) where {T}
+
+Collects the data need to define an integral of a function `f(x, p)` over a `domain`
+containing the points, `x`, and set with parameters `p` (default: [`NullParameters`](@ref)).
+If the domain is an interval or hypercube, it can also be specified by its endpoints `a, b`,
+and it gets converted to a [`PuncturedInterval`](@ref) or [`HyperCube`](@ref).
+"""
 struct IntegralProblem{F,D,P}
     f::F
     dom::D
@@ -56,6 +70,10 @@ end
 
 """
     init(::IntegralProblem, ::IntegralAlgorithm; kws...)::IntegralCache
+
+Construct a cache for an [`IntegralProblem`](@ref), [`IntegralAlgorithm`](@ref), and the
+keyword arguments to the solver (i.e. `abstol`, `reltol`, or `maxiters`) that can be reused
+for solving the problem for multiple different parameters of the same type.
 """
 function init(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
     checkkwargs(NamedTuple(kwargs))
@@ -65,6 +83,25 @@ end
 
 """
     solve(::IntegralProblem, ::IntegralAlgorithm; kws...)::IntegralSolution
+
+Compute the solution to the given [`IntegralProblem`](@ref) using the given
+[`IntegralAlgorithm`](@ref) for the given keyword arguments to the solver (i.e. `abstol`,
+`reltol`, or `maxiters`).
+
+## Keywords
+- `abstol`: an absolute error tolerance to get the solution to a specified number of
+  absolute digits, e.g. 1e-3 requests accuracy to 3 decimal places.  Note that this number
+  must have the same units as the integral. (default: nothing)
+- `reltol`: a relative error tolerance equivalent to specifying a number of significant
+  digits of accuracy, e.g. 1e-4 requests accuracy to roughly 4 significant digits. (default:
+  nothing)
+- `maxiters`: a soft upper limit on the number of integrand evaluations (default:
+  `typemax(Int)`)
+
+Solvers typically converge only to the weakest error condition. For example, a relative
+tolerance can be used in combination with a smaller-than necessary absolute tolerance so
+that the solution is resolved up to the requested significant digits, unless the integral is
+smaller than the absolute tolerance.
 """
 function solve(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
     cache = init(prob, alg; kwargs...)
@@ -73,6 +110,8 @@ end
 
 """
     solve!(::IntegralCache)::IntegralSolution
+
+Compute the solution to an [`IntegralProblem`](@ref) constructed from [`init`](@ref).
 """
 function solve!(c::IntegralCache)
     return do_solve(c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
@@ -88,10 +127,17 @@ end
 
 
 """
-    IntegralSolver(cache::IntegralCache)
+    IntegralSolver(f, dom, alg; [abstol, reltol, maxiters])
+    IntegralSolver(f, lb, ub, alg::AbstractIntegralAlgorithm; [abstol, reltol, maxiters])
 
-This struct is a functor that solves an integral problem as a function of the problem
-parameters for a given algorithms and tolerances.
+Returns a functor, `fun`, that accepts input parameters `p` and solves the corresponding
+integral `fun(p) -> solve(IntegralProblem(f, lb, ub, p), alg).u`. See [`solve`](@ref) for
+details on the keywords.
+
+If `f` is a [`ParameterIntegrand`](@ref) or [`FourierIntegrand`](@ref), then the functor
+interface is modified to accept parameters as function arguments, and the following is done:
+`fun(args...; kwargs...) ->  solve(IntegralProblem(f, lb, ub, merge(f.p,
+MixedParameters(args...; kwargs...))), alg).u` where `f.p` are the preset parameters of `f`.
 """
 struct IntegralSolver{F,D,A,T,K} <: Function
     f::F
@@ -105,22 +151,12 @@ end
 # method as an optimization to the caller
 init_solver_cacheval(f, dom, alg) = nothing
 
-"""
-    IntegralSolver(f, dom, alg; abstol, reltol, maxiters)
-"""
 function IntegralSolver(f, dom, alg::IntegralAlgorithm; kwargs...)
     checkkwargs(NamedTuple(kwargs))
     cacheval = init_solver_cacheval(f, dom, alg)
     return IntegralSolver(f, dom, alg, cacheval, NamedTuple(kwargs))
 end
 
-"""
-    IntegralSolver(f, lb, ub, alg::AbstractIntegralAlgorithm; abstol, reltol, maxiters)
-
-Returns a functor, `fun`, that accepts `MixedParameters` for input via the
-following interface `fun(args...; kwargs...) -> solve(IntegralProblem(f, lb, ub,
-MixedParameters(args..., kwargs...)), alg)`.
-"""
 function IntegralSolver(f, a::T, b::T, alg::IntegralAlgorithm; kwargs...) where {T}
     dom = T <: Number ? PuncturedInterval((a, b)) : HyperCube(a, b)
     return IntegralSolver(f, dom, alg; kwargs...)
