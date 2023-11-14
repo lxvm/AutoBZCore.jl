@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
-          architecture: arch: ${{ matrix.arch }}
+          arch: ${{ matrix.arch }}
       - uses: julia-actions/setup-julia@v1
         with:
           version: ${{ matrix.version }}
