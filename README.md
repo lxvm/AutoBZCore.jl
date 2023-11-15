@@ -1,5 +1,10 @@
 # AutoBZCore.jl
 
+| Documentation | Build Status | Coverage | Version |
+| :-: | :-: | :-: | :-: |
+| [![][docs-stable-img]][docs-stable-url] | [![][action-img]][action-url] | [![][codecov-img]][codecov-url] | [![ver-img]][ver-url] |
+| [![][docs-dev-img]][docs-dev-url] | [![][pkgeval-img]][pkgeval-url] | [![][aqua-img]][aqua-url] | [![deps-img]][deps-url] |
+
 This package provides a common interface to integration algorithms that are
 efficient and high-order accurate for computational tasks including
 Brillouin-zone integration and Wannier interpolation. For further information on
@@ -34,3 +39,29 @@ and is free/open-source software under the MIT license.
 - [Brillouin.jl](https://github.com/thchr/Brillouin.jl)
 - [TightBinding.jl](https://github.com/cometscome/TightBinding.jl)
 - [`wannier-berri`](https://github.com/wannier-berri/wannier-berri)
+
+<!-- badges -->
+
+[docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg
+[docs-stable-url]: https://lxvm.github.io/AutoBZCore.jl/stable/
+
+[docs-dev-img]: https://img.shields.io/badge/docs-dev-blue.svg
+[docs-dev-url]: https://lxvm.github.io/AutoBZCore.jl/dev/
+
+[action-img]: https://github.com/lxvm/AutoBZCore.jl/actions/workflows/CI.yml/badge.svg?branch=main
+[action-url]: https://github.com/lxvm/AutoBZCore.jl/actions/?query=workflow:CI
+
+[pkgeval-img]: https://juliahub.com/docs/General/AutoBZCore/stable/pkgeval.svg
+[pkgeval-url]: https://juliahub.com/ui/Packages/General/AutoBZCore
+
+[codecov-img]: https://codecov.io/github/lxvm/AutoBZCore.jl/branch/main/graph/badge.svg
+[codecov-url]: https://app.codecov.io/github/lxvm/AutoBZCore.jl
+
+[aqua-img]: https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg
+[aqua-url]: https://github.com/JuliaTesting/Aqua.jl
+
+[ver-img]: https://juliahub.com/docs/AutoBZCore/version.svg
+[ver-url]: https://juliahub.com/ui/Packages/AutoBZCore/UDEDl
+
+[deps-img]: https://juliahub.com/docs/General/AutoBZCore/stable/deps.svg
+[deps-url]: https://juliahub.com/ui/Packages/General/AutoBZCore?t=2
