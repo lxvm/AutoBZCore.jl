@@ -52,11 +52,12 @@ struct NestedBatchIntegrand{F,T,Y<:AbstractVector,X<:AbstractVector}
     y::Y
     x::X
     max_batch::Int
-    function NestedBatchIntegrand(f::NTuple{N,F}, y::Y, x::X, max_batch::Integer) where {N,F,Y,X}
-        return new{F,NTuple{N,F},Y,X}(f, y, x, max_batch)
-    end
-    function NestedBatchIntegrand(f::NTuple{N,T}, y::Y, x::X, max_batch::Integer) where {N,F,T<:NestedBatchIntegrand{F},Y,X}
-        return new{F,NTuple{N,T},Y,X}(f, y, x, max_batch)
+    function NestedBatchIntegrand(f::NTuple, y::Y, x::X, max_batch::Integer) where {Y,X}
+        if eltype(f) <: NestedBatchIntegrand
+            return new{_nesttype(eltype(f)),typeof(f),Y,X}(f, y, x, max_batch)
+        else
+            return new{eltype(f),typeof(f),Y,X}(f, y, x, max_batch)
+        end
     end
     function NestedBatchIntegrand(f::AbstractArray{F}, y::Y, x::X, max_batch::Integer) where {F,Y,X}
         return new{F,typeof(f),Y,X}(f, y, x, max_batch)
@@ -66,6 +67,7 @@ struct NestedBatchIntegrand{F,T,Y<:AbstractVector,X<:AbstractVector}
     end
 end
 
+_nesttype(::Type{<:NestedBatchIntegrand{F}}) where {F} = F
 function NestedBatchIntegrand(f, y, x; max_batch::Integer=typemax(Int))
     return NestedBatchIntegrand(f, y, x, max_batch)
 end

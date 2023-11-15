@@ -11,6 +11,9 @@ using AutoBZCore
 using AutoBZCore: IntegralProblem, solve, MixedParameters
 using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
 
+using Aqua
+
+Aqua.test_all(AutoBZCore, project_toml_formatting=false)
 
 function integer_lattice(n)
     C = OffsetArray(zeros(ntuple(_ -> 3, n)), repeat([-1:1], n)...)

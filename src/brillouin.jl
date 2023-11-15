@@ -246,7 +246,7 @@ function permutation_matrices(t::Val{n}) where {n}
     permutations = permutation_tuples(ntuple(identity, t))
     (sacollect(SMatrix{n,n,Int,n^2}, ifelse(j == p[i], 1, 0) for i in 1:n, j in 1:n) for p in permutations)
 end
-permutation_tuples(C::NTuple{N,T}) where {N,T} = @inbounds((C[i], p...)::NTuple{N,T} for i in eachindex(C) for p in permutation_tuples(C[[j for j in eachindex(C) if j != i]]))
+permutation_tuples(C::NTuple{N}) where {N} = @inbounds((C[i], p...)::typeof(C) for i in eachindex(C) for p in permutation_tuples(C[[j for j in eachindex(C) if j != i]]))
 permutation_tuples(C::NTuple{1}) = C
 n_permutations(n::Integer) = factorial(n)
 

@@ -7,7 +7,7 @@ that the integration algorithm can avoid the points `c1, ..., cN` for e.g. disco
 """
 struct PuncturedInterval{T,S}
     s::S
-    PuncturedInterval(s::S) where {N,T,S<:NTuple{N,T}} = new{T,S}(s)
+    PuncturedInterval(s::S) where {N,S<:NTuple{N}} = new{eltype(s),S}(s)
     PuncturedInterval(s::S) where {T,S<:AbstractVector{T}} = new{T,S}(s)
 end
 Base.eltype(::Type{PuncturedInterval{T,S}}) where {T,S} = T
@@ -23,8 +23,8 @@ struct HyperCube{d,T}
     a::SVector{d,T}
     b::SVector{d,T}
 end
-function HyperCube(a::NTuple{d,T}, b::NTuple{d,S}) where {d,T,S}
-    F = promote_type(T,S)
+function HyperCube(a::NTuple{d}, b::NTuple{d}) where {d}
+    F = promote_type(eltype(a), eltype(b))
     return HyperCube{d,F}(SVector{d,F}(a), SVector{d,F}(b))
 end
 HyperCube(a, b) = HyperCube(promote(a...), promote(b...))
