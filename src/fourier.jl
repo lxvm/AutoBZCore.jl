@@ -54,8 +54,37 @@ Outer constructor for `FourierIntegrand` that wraps the Fourier series `s` into 
 single-threaded `FourierWorkspace`.
 """
 function FourierIntegrand(f, s::AbstractFourierSeries, args...; kws...)
-    return FourierIntegrand(f, workspace_allocate(s, period(s)), args...; kws...)
+    return FourierIntegrand(f, workspace_allocate_vec(s, period(s)), args...; kws...)
 end
+
+# similar to workspace_allocate, but more type-stable because of loop unrolling and vector types
+function workspace_allocate_vec(s::AbstractFourierSeries{N}, x::NTuple{N,Any}, len::NTuple{N,Integer}=ntuple(one,Val(N))) where {N}
+    # Only the top-level workspace has an AbstractFourierSeries in the series field
+    # In the lower level workspaces the series field has a cache that can be contract!-ed
+    # into a series
+    dim = Val(N)
+    if N == 1
+        c = FourierSeriesEvaluators.allocate(s, x[N], dim)
+        ws = Vector{typeof(c)}(undef, len[N])
+        ws[1] = c
+        for n in 2:len[N]
+            ws[n] = FourierSeriesEvaluators.allocate(s, x[N], dim)
+        end
+    else
+        c = FourierSeriesEvaluators.allocate(s, x[N], dim)
+        t = FourierSeriesEvaluators.contract!(c, s, x[N], dim)
+        c_ = FourierWorkspace(c, workspace_allocate_vec(t, x[1:N-1], len[1:N-1]).cache)
+        ws = Vector{typeof(c_)}(undef, len[N])
+        ws[1] = c_
+        for n in 2:len[N]
+            _c = FourierSeriesEvaluators.allocate(s, x[N], dim)
+            _t = FourierSeriesEvaluators.contract!(_c, s, x[N], dim)
+            ws[n] = FourierWorkspace(_c, workspace_allocate_vec(_t, x[1:N-1], len[1:N-1]).cache)
+        end
+    end
+    return FourierWorkspace(s, ws)
+end
+
 
 function (s::IntegralSolver{<:FourierIntegrand})(args...; kwargs...)
     p = MixedParameters(args...; kwargs...)

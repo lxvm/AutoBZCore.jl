@@ -236,9 +236,9 @@ Base.convert(::Type{AbstractBZ{d}}, ::InversionSymIBZ) where {d} = InversionSymI
 
 function load_bz(::InversionSymIBZ{N}, A::SMatrix{N,N}, B::SMatrix{N,N,TB}) where {N,TB}
     checkorthog(A) || @warn "Non-orthogonal lattice vectors detected with InversionSymIBZ. Unexpected behavior may occur"
-    T = typeof(one(TB)); V = SVector{N,T}
+    t = one(TB); V = SVector{N,typeof(t)}
     lims = CubicLimits(zero(V), fill(1//2, V))
-    syms = map(S -> one(T)*S, sign_flip_matrices(Val(N)))
+    syms = map(S -> t*S, sign_flip_matrices(Val(N)))
     return SymmetricBZ(A, B, lims, syms)
 end
 
@@ -273,9 +273,9 @@ Base.convert(::Type{AbstractBZ{d}}, ::CubicSymIBZ) where {d} = CubicSymIBZ{d}()
 
 function load_bz(::CubicSymIBZ{N}, A::SMatrix{N,N}, B::SMatrix{N,N,TB}) where {N,TB}
     checkorthog(A) || @warn "Non-orthogonal lattice vectors detected with CubicSymIBZ. Unexpected behavior may occur"
-    T = typeof(one(TB))
-    lims = TetrahedralLimits(fill(1//2, SVector{N,T}))
-    syms = map(S -> one(T)*S, cube_automorphisms(Val{N}()))
+    t = one(TB)
+    lims = TetrahedralLimits(fill(1//2, SVector{N,typeof(t)}))
+    syms = map(S -> t*S, cube_automorphisms(Val{N}()))
     return SymmetricBZ(A, B, lims, syms)
 end
 
