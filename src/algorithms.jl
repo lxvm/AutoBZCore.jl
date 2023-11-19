@@ -485,4 +485,4 @@ function do_solve_evalcounter(f, dom, p, alg, cacheval; kws...)
     return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
 end
 
-integralerror(alg::EvalCounter, I) = integralerror(alg, I)
+integralerror(alg::EvalCounter, I) = integralerror(alg.alg, I)
