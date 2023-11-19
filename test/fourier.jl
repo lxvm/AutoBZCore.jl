@@ -1,10 +1,10 @@
 using Test, LinearAlgebra, OffsetArrays, StaticArrays, AutoBZCore
 using AutoBZCore: IntegralProblem, solve, MixedParameters
 
-function integer_lattice(n)
+function integer_lattice(n, t=1/n)
     C = OffsetArray(zeros(ntuple(_ -> 3, n)), repeat([-1:1], n)...)
     for i in 1:n, j in (-1, 1)
-        C[CartesianIndex(ntuple(k -> k == i ? j : 0, n))] = 1/2n
+        C[CartesianIndex(ntuple(k -> k == i ? j : 0, n))] = t/2
     end
     C
 end
@@ -56,4 +56,16 @@ end
             end
         end
     end
+
+    # check NestedIntegrand gets integrand evaluations correct (i.e. NestedQuad with EvalCounter)
+    prob = IntegralProblem(FourierIntegrand(f, FourierSeries(integer_lattice(2), period=3), b=1.0), CubicLimits((0.0, 0.0), (1.0, 1.0)), 2.0)
+    sol1 = solve(prob, EvalCounter(NestedQuad(QuadGKJL(order=7))))
+    sol2 = solve(prob, NestedQuad(EvalCounter(QuadGKJL(order=7))))
+    nest = NestedIntegrand(FourierIntegrand(FourierSeries(integer_lattice(1, 1/2), period=3)) do x, p
+        f_ = FourierIntegrand((y,q; kws...) -> f(y,q; kws...)+x.s*p, FourierSeries(integer_lattice(1, 1/2), period=3), b=1.0)
+        prb = IntegralProblem(f_, 0.0, 1.0, p)
+        return solve(prb, EvalCounter(QuadGKJL(order=7)))
+    end)
+    sol3 = solve(IntegralProblem(nest, 0.0, 1.0, 2.0), EvalCounter(QuadGKJL(order=7)))
+    @test sol1.numevals == sol2.numevals == sol3.numevals == (2*7+1)^2
 end

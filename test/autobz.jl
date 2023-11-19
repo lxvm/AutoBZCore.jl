@@ -94,6 +94,18 @@ end
         @test u == v == w
         @test solve(prob, EvalCounter(QuadGKJL(order=7))).numevals == 15
     end
+    @testset "EvalCounter" begin
+        bz2 = load_bz(FBZ(), I(2))
+        prob = IntegralProblem((x,p) -> sum(y -> sin(y*p), x), bz2, 2.0)
+        sol1 = solve(prob, EvalCounter(IAI(QuadGKJL(order=7))))
+        sol2 = solve(prob, IAI(EvalCounter(QuadGKJL(order=7))))
+        nest = NestedIntegrand() do x, p
+            prb = IntegralProblem((y,q) -> sum(z -> sin(z*q), (y..., x...)), 0.0, 1.0, p)
+            return solve(prb, EvalCounter(QuadGKJL(order=7)))
+        end
+        sol3 = solve(IntegralProblem(nest, 0.0, 1.0, 2.0), EvalCounter(QuadGKJL(order=7)))
+        @test sol1.numevals == sol2.numevals == sol3.numevals == (2*7+1)^2
+    end
     @testset "batchsolve" begin
         # SciML interface: iterable of parameters
         prob = IntegralProblem((x, p) -> p, 0, 1)

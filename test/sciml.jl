@@ -156,4 +156,15 @@ end
             @test solve(prob, EvalCounter(alg)).numevals == numevals
         end
     end
+
+    # NestedIntegrand gets integrand evaluations correct (i.e. NestedQuad with EvalCounter)
+    prob = IntegralProblem((x,p) -> sum(y -> sin(y*p), x), CubicLimits((0.0, 0.0), (1.0, 1.0)), 2.0)
+    sol1 = solve(prob, EvalCounter(NestedQuad(QuadGKJL(order=7))))
+    sol2 = solve(prob, NestedQuad(EvalCounter(QuadGKJL(order=7))))
+    nest = NestedIntegrand() do x, p
+        prb = IntegralProblem((y,q) -> sum(z -> sin(z*q), (y..., x...)), 0.0, 1.0, p)
+        return solve(prb, EvalCounter(QuadGKJL(order=7)))
+    end
+    sol3 = solve(IntegralProblem(nest, 0.0, 1.0, 2.0), EvalCounter(QuadGKJL(order=7)))
+    @test sol1.numevals == sol2.numevals == sol3.numevals == (2*7+1)^2
 end
