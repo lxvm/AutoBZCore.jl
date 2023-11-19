@@ -67,12 +67,6 @@ using HCubature: hcubature
 export PuncturedInterval, HyperCube
 include("domains.jl")
 
-export InplaceIntegrand
-include("inplace.jl")
-
-export BatchIntegrand, NestedBatchIntegrand
-include("batch.jl")
-
 # export IntegralProblem, solve, init, solve! # we don't export the SciML interface
 export IntegralSolver, batchsolve
 include("interfaces.jl")
@@ -80,7 +74,7 @@ include("interfaces.jl")
 export QuadGKJL, HCubatureJL, QuadratureFunction
 export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
 export MonkhorstPack, AutoSymPTRJL
-export NestedQuad, AbsoluteEstimate, EvalCounter
+export AbsoluteEstimate, EvalCounter
 include("algorithms.jl")
 
 export SymmetricBZ, nsyms
@@ -88,6 +82,15 @@ export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, SymRep, UnknownRep, TrivialRep
 export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
 include("brillouin.jl")
+
+export NestedIntegrand, NestedQuad
+include("nested.jl")
+
+export InplaceIntegrand
+include("inplace.jl")
+
+export BatchIntegrand, NestedBatchIntegrand
+include("batch.jl")
 
 export ParameterIntegrand, paramzip, paramproduct
 include("parameters.jl")

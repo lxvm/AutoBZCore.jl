@@ -110,17 +110,12 @@ function (s::IntegralSolver{<:ParameterIntegrand})(args...; kwargs...)
     return sol.u
 end
 
-function do_solve(f::ParameterIntegrand, dom, p, alg::EvalCounter, cacheval; kws...)
+function do_solve_evalcounter(f::ParameterIntegrand, dom, p, alg, cacheval; kws...)
     n::Int = 0
     function g(x, args...; kwargs...)
         n += 1
         return f.f(x, args...; kwargs...)
     end
-    sol = do_solve(ParameterIntegrand{typeof(g)}(g, f.p), dom, p, alg.alg, cacheval; kws...)
+    sol = do_solve(ParameterIntegrand{typeof(g)}(g, f.p), dom, p, alg, cacheval; kws...)
     return IntegralSolution(sol.u, sol.resid, true, n)
-end
-
-# ambiguity
-function do_solve(f::ParameterIntegrand, bz::SymmetricBZ, p, alg::EvalCounter{<:AutoBZAlgorithm}, cacheval; kws...)
-    return do_solve(f, bz, p, AutoBZEvalCounter(bz_to_standard(bz, alg.alg)...), cacheval; kws...)
 end

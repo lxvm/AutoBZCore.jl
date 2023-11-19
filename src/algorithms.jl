@@ -1,7 +1,12 @@
-# Methods an algorithm must define
+# Methods an algorithm must define a dispatch for
 # - init_cacheval
 # - do_solve
+# - error_type
+# no other arguments should be dispatched - instead define a function specific to the
+# algorithm to use for dispatch on the integrand type
 
+# typically each new integrand type will have to implement some algorithm-specific functions
+# to be compatible. Here we just define the default behavior for out-of-place integrands
 
 # Here we replicate the algorithms provided by SciML
 
@@ -18,6 +23,19 @@ function QuadGKJL(; order = 7, norm = norm)
     return QuadGKJL(order, norm)
 end
 
+function init_cacheval(f, dom, p, alg::QuadGKJL)
+    return init_segbuf(f, dom, p, alg.norm)
+end
+function init_segbuf(f, dom, p, norm)
+    x, s = init_midpoint_scale(dom)
+    u = x/oneunit(x)
+    TX = typeof(u)
+    fx_s = f(x, p) * s/oneunit(s)
+    TI = typeof(fx_s)
+    TE = typeof(norm(fx_s))
+    return IteratedIntegration.alloc_segbuf(TX, TI, TE)
+end
+init_midpoint_scale(dom::PuncturedInterval) = init_midpoint_scale(endpoints(dom)...)
 function init_midpoint_scale(a::T, b::T) where {T}
     # we try to reproduce the initial midpoint used by QuadGK, and scale just needs right units
     s = float(oneunit(T))
@@ -36,60 +54,29 @@ function init_midpoint_scale(a::T, b::T) where {T}
         return (a+b)/2, s
     end
 end
-init_midpoint_scale(dom::PuncturedInterval) = init_midpoint_scale(endpoints(dom)...)
-function init_segbuf(f, dom, p, norm)
-    x, s = init_midpoint_scale(dom)
-    u = x/oneunit(x)
-    TX = typeof(u)
-    fx_s = f(x, p) * s/oneunit(s)
-    TI = typeof(fx_s)
-    TE = typeof(norm(fx_s))
-    return IteratedIntegration.alloc_segbuf(TX, TI, TE)
-end
-function init_segbuf(f::InplaceIntegrand, dom, p, norm)
-    x, s = init_midpoint_scale(dom)
-    u = x/oneunit(x)
-    TX = typeof(u)
-    TI = typeof(f.I *s/oneunit(s))
-    fill!(f.I, zero(eltype(f.I)))
-    TE = typeof(norm(f.I)*s/oneunit(s))
-    return IteratedIntegration.alloc_segbuf(TX, TI, TE)
-end
-function init_segbuf(f::BatchIntegrand, dom, p, norm)
-    x, s = init_midpoint_scale(dom)
-    u = x/oneunit(x)
-    TX = typeof(u)
-    fx_s = zero(eltype(f.y)) * s/oneunit(s)    # TODO BatchIntegrand(InplaceIntegrand) should depend on size of result
-    TI = typeof(fx_s)
-    TE = typeof(norm(fx_s))
-    return IteratedIntegration.alloc_segbuf(TX, TI, TE)
-end
-function init_cacheval(f, dom, p, alg::QuadGKJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("QuadGK doesn't support nested batching"))
-    f isa BatchIntegrand && throw(ArgumentError("QuadGK doesn't support batched integrands"))
-    return init_segbuf(f, dom, p, alg.norm)
-end
 
 function do_solve(f::F, dom, p, alg::QuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int)) where {F}
     segs = segments(dom)
+    return do_solve_quadgk(f, segs, p, cacheval, alg.order, alg.norm, reltol, abstol, maxiters)
+end
+function do_solve_quadgk(f, segs, p, cacheval, order, norm, reltol, abstol, maxiters)
     # we need to strip units from the limits since infinity transformations change the units
     # of the limits, which can break the segbuf
-    u = oneunit(eltype(dom))
+    u = oneunit(eltype(segs))
     usegs = map(x -> x/u, segs)
-    if f isa InplaceIntegrand
-        g! = (y, x) -> f.f!(y, u*x, p)
-        result = f.I / u
-        val, err = quadgk!(g!, result, usegs..., maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(f.I .= u .* val, u*err, true, -1)
-    else
-        g = x -> f(u*x, p)
-        val, err = quadgk(g, usegs..., maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(u*val, u*err, true, -1)
-    end
+    g = x -> f(u*x, p)
+    val, err = quadgk(g, usegs..., maxevals = maxiters,
+                    rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = order, norm = norm, segbuf=cacheval)
+    return IntegralSolution(u*val, u*err, true, -1)
 end
+
+"""
+    integralerror(alg::IntegralAlgorithm, I)
+
+Return the norm/error of the value of the integral `I` as computed by the algorithm `alg`.
+"""
+integralerror(alg::QuadGKJL, I) = alg.norm(I)
 
 """
     HCubatureJL(; norm=norm, initdiv=1)
@@ -103,25 +90,20 @@ end
 HCubatureJL(; norm=norm, initdiv=1) = HCubatureJL(norm, initdiv)
 
 function init_cacheval(f, dom, p, ::HCubatureJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("HCubatureJL doesn't support nested batching"))
-    f isa BatchIntegrand && throw(ArgumentError("HCubatureJL doesn't support batching"))
     return Some(nothing)
 end
 
 function do_solve(f, dom, p, alg::HCubatureJL, cacheval;
                     reltol = 0, abstol = 0, maxiters = typemax(Int))
-
-    g = if f isa InplaceIntegrand
-        fx = f.I / oneunit(eltype(dom))
-        x -> (f.f!(fx, x, p); fx*one(eltype(dom)))
-    else
-        x -> f(x, p)
-    end
     a, b = endpoints(dom)
+    g = assemble_hintegrand(f, dom, p)
     routine = a isa Number ? hquadrature : hcubature
     val, err = routine(g, a, b; norm = alg.norm, initdiv = alg.initdiv, atol=abstol, rtol=reltol, maxevals=maxiters)
     return IntegralSolution(val, err, true, -1)
 end
+assemble_hintegrand(f, dom, p) = x -> f(x, p)
+
+integralerror(alg::HCubatureJL, I) = alg.norm(I)
 
 """
     trapz(n::Integer)
@@ -159,27 +141,20 @@ struct QuadratureFunction{F} <: IntegralAlgorithm
     nthreads::Int
 end
 QuadratureFunction(; fun=trapz, npt=50, nthreads=Threads.nthreads()) = QuadratureFunction(fun, npt, nthreads)
-init_buffer(f, len) = nothing
-init_buffer(f::BatchIntegrand, len) = Vector{eltype(f.y)}(undef, len)
-function init_cacheval(f, dom::PuncturedInterval, p, alg::QuadratureFunction)
-    f isa NestedBatchIntegrand && throw(ArgumentError("QuadratureFunction doesn't support nested batching"))
+function init_cacheval(f, dom, p, alg::QuadratureFunction)
     buf = init_buffer(f, alg.nthreads)
     x, w = alg.fun(alg.npt)
     return (rule=[(w,x) for (w,x) in zip(w,x)], buffer=buf)
 end
+init_buffer(f, len) = nothing
 
-function do_solve(f, dom, p, alg::QuadratureFunction, cacheval;
+
+function do_solve(f, dom, p, ::QuadratureFunction, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
     rule = cacheval.rule; buffer=cacheval.buffer
+    dom isa PuncturedInterval || throw(ArgumentError("QuadratureFunction only supports 1d quadrature problems"))
     segs = segments(dom)
-    g = if f isa BatchIntegrand
-        xx = eltype(f.x) === Nothing ? typeof((segs[1]+segs[end])/2)[] : f.x
-        AutoSymPTR.BatchIntegrand((y,x) -> f.f!(y,x,p), f.y, xx, max_batch=f.max_batch)
-    elseif f isa InplaceIntegrand
-        AutoSymPTR.InplaceIntegrand((y,x) -> f.f!(y,x,p), f.I)
-    else
-        x -> f(x, p)
-    end
+    g = assemble_pintegrand(f, p, dom, rule)
     A = sum(1:length(segs)-1) do i
         a, b = segs[i], segs[i+1]
         s = (b-a)/2
@@ -189,6 +164,9 @@ function do_solve(f, dom, p, alg::QuadratureFunction, cacheval;
 
     return IntegralSolution(A, nothing, true, -1)
 end
+assemble_pintegrand(f, p, dom, rule) = x -> f(x, p)
+
+integralerror(::QuadratureFunction, I) = nothing
 
 # Here we put the quadrature algorithms from IteratedIntegration
 
@@ -208,7 +186,6 @@ function AuxQuadGKJL(; order = 7, norm = norm)
 end
 
 function init_cacheval(f, dom, p, alg::AuxQuadGKJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("AuxQuadGKJL doesn't support nested batching"))
     return init_segbuf(f, dom, p, alg.norm)
 end
 
@@ -216,28 +193,20 @@ function do_solve(f, dom, p, alg::AuxQuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
     segs = segments(dom)
-    u = oneunit(eltype(dom))
-    usegs = map(x -> x/u, segs)
-    if f isa InplaceIntegrand
-        g! = (y, x) -> f.f!(y, u*x, p)
-        result = f.I / u
-        val, err = auxquadgk!(g!, result, usegs, maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(f.I .= u .* val, u*err, true, -1)
-    elseif f isa BatchIntegrand
-        xx = eltype(f.x) === Nothing ? typeof((segs[1]+segs[end])/2)[] : f.x
-        g_ = (y, x) -> (resize!(xx, length(x)); f.f!(y, xx .= u .* x, p))
-        g = IteratedIntegration.AuxQuadGK.BatchIntegrand(g_, f.y, xx/u, max_batch=f.max_batch)
-        val, err = auxquadgk(g, usegs, maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(u*val, u*err, true, -1)
-    else
-        g = x -> f(u*x, p)
-        val, err = auxquadgk(g, usegs, maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(u*val, u*err, true, -1)
-    end
+    return do_solve_auxquadgk(f, segs, p, cacheval, alg.order, alg.norm, reltol, abstol, maxiters)
 end
+
+function do_solve_auxquadgk(f, segs, p, cacheval, order, norm, reltol, abstol, maxiters)
+    u = oneunit(eltype(segs))
+    usegs = map(x -> x/u, segs)
+    g = x -> f(u*x, p)
+    val, err = auxquadgk(g, usegs, maxevals = maxiters,
+                    rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = order, norm = norm, segbuf=cacheval)
+    return IntegralSolution(u*val, u*err, true, -1)
+end
+
+integralerror(alg::AuxQuadGKJL, I) = alg.norm(I)
+
 
 """
     ContQuadGKJL(; order = 7, norm = norm, rho = 1.0, rootmeth = IteratedIntegration.ContQuadGK.NewtonDeflation())
@@ -258,11 +227,7 @@ function ContQuadGKJL(; order = 7, norm = norm, rho = 1.0, rootmeth = IteratedIn
     return ContQuadGKJL(order, norm, rho, rootmeth)
 end
 
-function init_cacheval(f, dom, p, alg::ContQuadGKJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("ContQuadGK doesn't support nested batching"))
-    f isa BatchIntegrand && throw(ArgumentError("ContQuadGK doesn't support batching"))
-    f isa InplaceIntegrand && throw(ArgumentError("ContQuadGK doesn't support inplace integrands"))
-
+function init_cacheval(f, dom, p, alg ::ContQuadGKJL)
     a, b = endpoints(dom)
     x, s = (a+b)/2, (b-a)/2
     TX = typeof(x)
@@ -281,12 +246,16 @@ end
 function do_solve(f, dom, p, alg::ContQuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
+    dom isa PuncturedInterval || throw(ArgumentError("ContQuadGKJL only supports 1d quadrature problems"))
     segs = segments(dom)
-    g = x -> f(x, p)
+    g = assemble_cont_integrand(f, p)
     val, err = contquadgk(g, segs, maxevals = maxiters, rho = alg.rho, rootmeth = alg.rootmeth,
                     rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, r_segbuf=cacheval.r, c_segbuf=cacheval.c)
     return IntegralSolution(val, err, true, -1)
 end
+assemble_cont_integrand(f, p) = x -> f(x, p)
+
+integralerror(alg::ContQuadGKJL, I) = alg.norm(I)
 
 """
     MeroQuadGKJL(; order = 7, norm = norm, rho = 1.0, rootmeth = IteratedIntegration.MeroQuadGK.NewtonDeflation())
@@ -307,9 +276,6 @@ function MeroQuadGKJL(; order = 7, norm = norm, rho = 1.0, rootmeth = IteratedIn
 end
 
 function init_cacheval(f, dom, p, alg::MeroQuadGKJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("MeroQuadGK doesn't support nested batching"))
-    f isa BatchIntegrand && throw(ArgumentError("MeroQuadGK doesn't support batching"))
-    f isa InplaceIntegrand && throw(ArgumentError("MeroQuadGK doesn't support inplace integrands"))
     a, b = endpoints(dom)
     x, s = (a + b)/2, (b-a)/2
     fx_s = one(ComplexF64) * s # ignore the actual integrand since it is written to CF64 array
@@ -320,12 +286,17 @@ end
 function do_solve(f, dom, p, alg::MeroQuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
+    dom isa PuncturedInterval || throw(ArgumentError("MeroQuadGKJL only supports 1d quadrature problems"))
     segs = segments(dom)
-    g = x -> f(x, p)
+    g = assemble_mero_integrand(f, p)
     val, err = meroquadgk(g, segs, maxevals = maxiters, rho = alg.rho, rootmeth = alg.rootmeth,
                     rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
     return IntegralSolution(val, err, true, -1)
 end
+assemble_mero_integrand(f, p) = x -> f(x, p)
+
+integralerror(alg::MeroQuadGKJL, I) = alg.norm(I)
+
 
 # Algorithms from AutoSymPTR.jl
 
@@ -355,11 +326,8 @@ function init_rule(dom::Basis, alg::MonkhorstPack)
     end
 end
 
-rule_type(::AutoSymPTR.PTR{N,T}) where {N,T} = SVector{N,T}
-rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
-
-function init_cacheval(f, dom::Basis, p, alg::MonkhorstPack)
-    f isa NestedBatchIntegrand && throw(ArgumentError("MonkhorstPack doesn't support nested batching"))
+function init_cacheval(f, dom, p, alg::MonkhorstPack)
+    dom isa Basis || throw(ArgumentError("MonkhorstPack only supports Basis for domain. Please open an issue."))
     rule = init_rule(dom, alg)
     buf = init_buffer(f, alg.nthreads)
     return (rule=rule, buffer=buf)
@@ -367,17 +335,13 @@ end
 
 function do_solve(f, dom, p, alg::MonkhorstPack, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
-    g = if f isa BatchIntegrand
-        xx = eltype(f.x) === Nothing ? typeof(dom*zero(rule_type(cacheval.rule)))[] : f.x
-        AutoSymPTR.BatchIntegrand((y,x) -> f.f!(y,x,p), f.y, xx, max_batch=f.max_batch)
-    elseif f isa InplaceIntegrand
-        AutoSymPTR.InplaceIntegrand((y,x) -> f.f!(y,x,p), f.I)
-    else
-        x -> f(x, p)
-    end
+    dom isa Basis || throw(ArgumentError("MonkhorstPack only supports Basis for domain. Please open an issue."))
+    g = assemble_pintegrand(f, p, dom, cacheval.rule)
     I = cacheval.rule(g, dom, cacheval.buffer)
     return IntegralSolution(I, nothing, true, -1)
 end
+
+integralerror(::MonkhorstPack, I) = nothing
 
 """
     AutoSymPTRJL(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2, nthreads=Threads.nthreads())
@@ -407,8 +371,8 @@ end
 function init_rule(dom::Basis, alg::AutoSymPTRJL)
     return AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
 end
-function init_cacheval(f, dom::Basis, p, alg::AutoSymPTRJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("AutoSymPTRJL doesn't support nested batching"))
+function init_cacheval(f, dom, p, alg::AutoSymPTRJL)
+    dom isa Basis || throw(ArgumentError("AutoSymPTRJL only supports Basis for domain. Please open an issue."))
     rule = init_rule(dom, alg)
     cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
     buffer = init_buffer(f, alg.nthreads)
@@ -418,18 +382,14 @@ end
 function do_solve(f, dom, p, alg::AutoSymPTRJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
-    g = if f isa BatchIntegrand
-        xx = eltype(f.x) === Nothing ? typeof(dom*zero(rule_type(cacheval.cache[1])))[] : f.x
-        AutoSymPTR.BatchIntegrand((y,x) -> f.f!(y,x,p), f.y, xx, max_batch=f.max_batch)
-    elseif f isa InplaceIntegrand
-        AutoSymPTR.InplaceIntegrand((y,x) -> f.f!(y,x,p), f.I)
-    else
-        x -> f(x, p)
-    end
+    dom isa Basis || throw(ArgumentError("AutoSymPTRJL only supports Basis for domain. Please open an issue."))
+    g = assemble_pintegrand(f, p, dom, first(cacheval.cache))
     val, err = autosymptr(g, dom; syms = alg.syms, rule = cacheval.rule, cache = cacheval.cache, keepmost = alg.keepmost,
         abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm, buffer=cacheval.buffer)
     return IntegralSolution(val, err, true, -1)
 end
+
+integralerror(alg::AutoSymPTRJL, I) = alg.norm(I)
 
 # Meta-algorithms
 
@@ -454,162 +414,7 @@ struct NestedQuad{T} <: IntegralAlgorithm
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 
-# this function helps create a tree of the cachevals used by each quadrature
-function nested_cacheval(f::F, p::P, algs, segs, lims, state, x, xs...) where {F,P}
-    dom = PuncturedInterval(segs)
-    a, b = segs[1], segs[2]
-    dim = ndims(lims)
-    alg = algs[dim]
-    mid = (a+b)/2 # sample point that should be safe to evaluate
-    next = limit_iterate(lims, state, mid) # see what the next limit gives
-    if xs isa Tuple{} # the next integral takes us to the inner integral
-        # base case test integrand of the inner integral
-        # we need to pass dummy integrands to all the outer integrals so that they can build
-        # their caches with the right types
-        if f isa BatchIntegrand || f isa NestedBatchIntegrand
-            # Batch integrate the inner integral only
-            cacheval = init_cacheval(BatchIntegrand(nothing, f.y, f.x, max_batch=f.max_batch), dom, p, alg)
-            return (nothing, cacheval, oneunit(eltype(f.y))*mid)
-        elseif f isa InplaceIntegrand
-            # Inplace integrate through the whole nest structure
-            fxi = f.I*mid/oneunit(prod(next))
-            cacheval = init_cacheval(InplaceIntegrand(nothing, fxi), dom, p, alg)
-            return (nothing, cacheval, fxi)
-        else
-            fx = f(next,p)
-            cacheval = init_cacheval((x, p) -> fx, dom, p, alg)
-            return (nothing, cacheval, fx*mid)
-        end
-    elseif f isa NestedBatchIntegrand
-        algs_ = algs[1:dim-1]
-        # numbered names to avoid type instabilities (we are not using dispatch, but the
-        # compiler's optimization for the recursive function's argument types)
-        nest0 = nested_cacheval(f.f[1], p, algs_, next..., x, xs[1:dim-2]...)
-        cacheval = init_cacheval(BatchIntegrand(nothing, f.y, f.x, max_batch=f.max_batch), dom, p, alg)
-        return (ntuple(n -> n == 1 ? nest0 : deepcopy(nest0), Val(length(f.f))), cacheval, nest0[3]*mid)
-    else
-        algs_ = algs[1:dim-1]
-        nest1 = nested_cacheval(f, p, algs_, next..., x, xs[1:dim-2]...)
-        h = nest1[3]
-        hx = h*mid
-        # units may change for outer integral
-        if f isa InplaceIntegrand
-            cacheval = init_cacheval(InplaceIntegrand(nothing, hx), dom, p, alg)
-            return (nest1, cacheval, hx)
-        else
-            cacheval = init_cacheval((x, p) -> h, dom, p, alg)
-            return (nest1, cacheval, hx)
-        end
-    end
-end
-function init_cacheval(f, dom::AbstractIteratedLimits, p, alg::NestedQuad)
-    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
-    return nested_cacheval(f, p, algs, limit_iterate(dom)..., interior_point(dom)...)
-end
-
-function init_nest(f::F, fxx, dom, p,lims, state, algs, cacheval; kws_...) where {F}
-    kws = NamedTuple(kws_)
-    xx = float(oneunit(eltype(dom)))
-    FX = typeof(fxx/xx)
-    TX = typeof(xx)
-    TP = Tuple{typeof(p),typeof(lims),typeof(state)}
-    if algs isa Tuple{} # inner integral
-        if f isa BatchIntegrand
-            return f
-        elseif f isa NestedBatchIntegrand
-            nchunk = length(f.f)
-            return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(f.x),TP}}() do y, x, (p, lims, state)
-                Threads.@threads for ichunk in 1:min(nchunk, length(x))
-                    for (i, j) in zip(getchunk(x, ichunk, nchunk, :scatter), getchunk(y, ichunk, nchunk, :scatter))
-                        xi = x[i]
-                        y[j] = f.f[ichunk](limit_iterate(lims, state, xi), p)
-                    end
-                end
-                return nothing
-            end, f.y, f.x, max_batch=f.max_batch)
-        elseif f isa InplaceIntegrand
-            return InplaceIntegrand(FunctionWrapper{Nothing,Tuple{FX,TX,TP}}() do y, x, (p, lims, state)
-                f.f!(y, limit_iterate(lims, state, x), p)
-                return nothing
-            end, f.I)
-        else
-            return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
-                return f(limit_iterate(lims, state, x), p)
-            end
-        end
-    else
-        if f isa InplaceIntegrand
-            return InplaceIntegrand(FunctionWrapper{Nothing,Tuple{FX,TX,TP}}() do y, x, (p, lims, state)
-                segs, lims_, state_ = limit_iterate(lims, state, x)
-                len = segs[end] - segs[1]
-                kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-                do_solve(InplaceIntegrand(f.f!, y), lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval; kwargs...)
-                return nothing
-            end, f.I)
-        elseif f isa NestedBatchIntegrand
-            nchunks = length(f.f)
-            return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(f.x),TP}}() do y, x, (p, lims, state)
-                Threads.@threads for ichunk in 1:min(nchunks, length(x))
-                    for (i, j) in zip(getchunk(x, ichunk, nchunks, :scatter), getchunk(y, ichunk, nchunks, :scatter))
-                        xi = x[i]
-                        segs, lims_, state_ = limit_iterate(lims, state, xi)
-                        len = segs[end] - segs[1]
-                        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-                        y[j] = do_solve(f.f[ichunk], lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval[ichunk]; kwargs...).u
-                    end
-                end
-                return nothing
-            end, f.y, f.x, max_batch=f.max_batch)
-        else
-            return FunctionWrapper{FX,Tuple{TX,TP}}() do x, (p, lims, state)
-                segs, lims_, state_ = limit_iterate(lims, state, x)
-                len = segs[end] - segs[1]
-                kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-                sol = do_solve(f, lims_, NestState(p, segs, state_), NestedQuad(algs), cacheval; kwargs...)
-                return sol.u
-            end
-        end
-    end
-end
-
-struct NestState{P,G,S}
-    p::P
-    segs::G
-    state::S
-end
-
-function do_solve(f::F, lims::AbstractIteratedLimits, p_, alg::NestedQuad, cacheval; kws...) where {F}
-    g, p, segs, state = if p_ isa NestState
-        gg = if f isa NestedBatchIntegrand
-            fx = eltype(f.x) === Nothing ? float(eltype(p_.segs))[] : f.x
-            NestedBatchIntegrand(f.f, f.y, fx, max_batch=f.max_batch)
-        else
-            f
-        end
-        gg, p_.p, p_.segs, p_.state
-    else
-        seg, lim, sta = limit_iterate(lims)
-        gg = if f isa BatchIntegrand
-            fx = eltype(f.x) === Nothing ? typeof(interior_point(lims))[] : f.x
-            BatchIntegrand(f.y, similar(f.x, eltype(eltype(fx))), max_batch=f.max_batch) do y, xs, (p, lims, state)
-                resize!(fx, length(xs))
-                f.f!(y, map!(x -> limit_iterate(lims, state, x), fx, xs), p)
-            end
-        elseif f isa NestedBatchIntegrand
-            # this should be done recursively at the outermost level, but it is lazy.
-            fx = eltype(f.x) === Nothing ? float(eltype(seg))[] : f.x
-            NestedBatchIntegrand(f.f, f.y, fx, max_batch=f.max_batch)
-        else
-            f
-        end
-        gg, p_, seg, sta
-    end
-    dom = PuncturedInterval(segs)
-    dim = ndims(lims) # constant propagation :)
-    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(dim)) : alg.algs
-    nest = init_nest(g, cacheval[3], dom, p, lims, state, algs[1:dim-1], cacheval[1]; kws...)
-    return do_solve(nest, dom, (p, lims, state), algs[dim], cacheval[2]; kws...)
-end
+integralerror(alg::NestedQuad, I) = integralerror(alg.algs isa IntegralAlgorithm ? alg.algs : last(alg.algs), I)
 
 """
     AbsoluteEstimate(est_alg, abs_alg; kws...)
@@ -652,6 +457,8 @@ function do_solve(f, dom, p, alg::AbsoluteEstimate, cacheval;
                     abstol=atol, reltol=zero(rtol), maxiters=maxiters)
 end
 
+integralerror(alg::AbsoluteEstimate, I) = integralerror(alg, I)
+
 
 """
     EvalCounter(::IntegralAlgorithm)
@@ -668,24 +475,14 @@ function init_cacheval(f, dom, p, alg::EvalCounter)
 end
 
 function do_solve(f, dom, p, alg::EvalCounter, cacheval; kws...)
-    if f isa InplaceIntegrand
-        ni::Int = 0
-        gi = (y, x, p) -> (ni += 1; f.f!(y, x, p))
-        soli = do_solve(InplaceIntegrand(gi, f.I), dom, p, alg.alg, cacheval; kws...)
-        return IntegralSolution(soli.u, soli.resid, soli.retcode, ni)
-    elseif f isa BatchIntegrand
-        nb::Int = 0
-        gb = (y, x, p) -> (nb += length(x); f.f!(y, x, p))
-        solb = do_solve(BatchIntegrand(gb, f.y, f.x, max_batch=f.max_batch), dom, p, alg.alg, cacheval; kws...)
-        return IntegralSolution(solb.u, solb.resid, solb.retcode, nb)
-    elseif f isa NestedBatchIntegrand
-        # TODO allocate a bunch of accumulators associated with the leaves of the nested
-        # integrand or rewrap the algorithms in NestedQuad
-        error("NestedBatchIntegrand not yet supported with EvalCounter")
-    else
-        n::Int = 0
-        g = (x, p) -> (n += 1; f(x, p)) # we need let to prevent Core.Box around the captured variable
-        sol = do_solve(g, dom, p, alg.alg, cacheval; kws...)
-        return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
-    end
+    return do_solve_evalcounter(f, dom, p, alg.alg, cacheval; kws...)
 end
+
+function do_solve_evalcounter(f, dom, p, alg, cacheval; kws...)
+    n::Int = 0
+    g = (x, p) -> (n += 1; f(x, p))
+    sol = do_solve(g, dom, p, alg, cacheval; kws...)
+    return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
+end
+
+integralerror(alg::EvalCounter, I) = integralerror(alg, I)
