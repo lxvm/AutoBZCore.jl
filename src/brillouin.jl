@@ -292,12 +292,14 @@ Cartesian coordinates as a post-processing step.
 """
 abstract type AutoBZAlgorithm <: IntegralAlgorithm end
 
-function init_cacheval(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm)
+function init_cacheval(f, bz, p, bzalg::AutoBZAlgorithm)
+    bz isa SymmetricBZ || throw(ArgumentError("AbstractBZAlgorithms only support domains created by load_bz"))
     _, dom, alg = bz_to_standard(bz, bzalg)
     return init_cacheval(f, dom, p, alg)
 end
 
-function do_solve(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm, cacheval; _kws...)
+function do_solve(f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws...)
+    bz isa SymmetricBZ || throw(ArgumentError("AbstractBZAlgorithms only support domains created by load_bz"))
     bz_, dom, alg = bz_to_standard(bz, bzalg)
 
     j = abs(det(bz_.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
