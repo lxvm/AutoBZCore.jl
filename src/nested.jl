@@ -1,11 +1,11 @@
 """
-    NestedIntegrand(f, [g=nothin])
+    NestedIntegrand(f, [g=nothing])
 
-Use this wrapper to signal that the integrand `f(x,p)` returns an
-[`IntegralSolution`](@ref), meaning that the integrand is itself an integral. Optionally, a
-function `g(x, p, f(x,p).u)` can be provided that will transform the value of the inner
-integral can be provided. The purpose of this interface is to allow for counting integrand
-evaluations correctly when nesting integrals.
+Use this wrapper to signal that the integrand `f(x,p)` returns an `IntegralSolution`,
+meaning that the integrand involves the calculation of an integral. Optionally, a function
+`g(x, p, f(x,p).u)` can be provided that will transform the value of the inner integral can
+be provided. The purpose of this interface is to allow for counting integrand evaluations
+correctly when nesting integrals.
 """
 struct NestedIntegrand{F,G}
     f::F

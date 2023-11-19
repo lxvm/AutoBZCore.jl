@@ -39,3 +39,9 @@ AutoBZCore.FourierIntegrand
 ```@docs
 AutoBZCore.NestedBatchIntegrand
 ```
+
+# NestedIntegrand
+
+```@docs
+AutoBZCore.NestedIntegrand
+```

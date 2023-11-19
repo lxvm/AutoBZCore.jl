@@ -41,5 +41,6 @@ AutoBZCore.trapz
 AutoBZCore.cube_automorphisms
 AutoBZCore.batchparam
 AutoBZCore.symmetrize
+AutoBZCore.integralerror
 AutoBZCore.FourierValue
 ```
