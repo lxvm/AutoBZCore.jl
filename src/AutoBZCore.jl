@@ -74,7 +74,7 @@ include("interfaces.jl")
 export QuadGKJL, HCubatureJL, QuadratureFunction
 export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
 export MonkhorstPack, AutoSymPTRJL
-export AbsoluteEstimate, EvalCounter
+export AbsoluteEstimate, NestedQuad, EvalCounter
 include("algorithms.jl")
 
 export SymmetricBZ, nsyms
@@ -83,7 +83,7 @@ export AbstractSymRep, SymRep, UnknownRep, TrivialRep
 export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
 include("brillouin.jl")
 
-export NestedIntegrand, NestedQuad
+export NestedIntegrand
 include("nested.jl")
 
 export InplaceIntegrand
