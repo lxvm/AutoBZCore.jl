@@ -5,7 +5,11 @@ Use this wrapper to signal that the integrand `f(x,p)` returns an `IntegralSolut
 meaning that the integrand involves the calculation of an integral. Optionally, a function
 `g(x, p, f(x,p).u)` can be provided that will transform the value of the inner integral can
 be provided. The purpose of this interface is to allow for counting integrand evaluations
-correctly when nesting integrals.
+correctly when nesting integrals. To get the total number of function evaluations of the
+inner and outer integrals, replace both respective algorithms by `alg -> EvalCounter(alg)`.
+
+When using `NestedQuad(EvalCounter(alg))` the nested integrand evaluations will not appear
+and only the evaluations of the outer integral are counted.
 """
 struct NestedIntegrand{F,G}
     f::F
@@ -13,6 +17,11 @@ struct NestedIntegrand{F,G}
 end
 
 NestedIntegrand(f) = NestedIntegrand(f, nothing)
+
+function (n::NestedIntegrand)(x, p)
+    sol = n.f(x, p)
+    return isnothing(n.g) ? sol.u : n.g(x, p, sol.u)
+end
 
 assemble_nested_integrand(f::NestedIntegrand) = assemble_nested_integrand(f.f, f.g)
 assemble_nested_integrand(f, g) = (x, p) -> g(x, p, f(x, p).u)
@@ -125,20 +134,31 @@ end
 function assemble_nested_integrand(f::F, fxx, dom, p, lims, state, ::Tuple{}, cacheval; kws...) where {F}
     return (x, p) -> f(limit_iterate(lims, state, x), p)
 end
+
+struct NestedIntegralWorker{F,L,A,S,K,C}
+    f::F
+    lims::L
+    algs::A
+    state::S
+    kws::K
+    cacheval::C
+end
+function (w::NestedIntegralWorker)(x, p)
+    f, lims, state, kws, algs, cacheval = w.f, w.lims, w.state, w.kws, w.algs, w.cacheval
+    segs, lims_, state_ = limit_iterate(lims, state, x)
+    len = segs[end] - segs[1]
+    kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+    return do_solve(f, StatefulLimits(segs, state_, lims_), p, NestedQuad(algs), cacheval; kwargs...)
+end
+
 # TODO: specialize with a function wrapper only when the integrand is passed as a wrapper
-function assemble_nested_integrand(f::F, fxx, dom, p, lims, state, algs, cacheval; kws_...) where {F}
-    kws = NamedTuple(kws_)
+function assemble_nested_integrand(f::F, fxx, dom, p, lims, state, algs, cacheval; kws...) where {F}
+    w = NestedIntegralWorker(f, lims, algs, state, NamedTuple(kws), cacheval)
     xx = float(oneunit(eltype(dom)))
     TX = typeof(xx)
     TP = typeof(p)
     err = integralerror(last(algs), fxx)
-    f_ = FunctionWrapper{IntegralSolution{typeof(fxx),typeof(err)},Tuple{TX,TP}}() do x, p
-        # here we rescale the next absolute tolerance to have the right units
-        segs, lims_, state_ = limit_iterate(lims, state, x)
-        len = segs[end] - segs[1]
-        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-        return do_solve(f, StatefulLimits(segs, state_, lims_), p, NestedQuad(algs), cacheval; kwargs...)
-    end
+    f_ = FunctionWrapper{IntegralSolution{typeof(fxx),typeof(err)},Tuple{TX,TP}}(w)
     return NestedIntegrand(f_)
 end
 

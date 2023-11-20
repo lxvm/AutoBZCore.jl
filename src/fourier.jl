@@ -19,19 +19,20 @@
 # series and workspace, and use dispatch to enable the optimizations
 
 # the nested batched integrand is optional, but when included it allows for thread-safe parallelization
-struct FourierIntegrand{F,P,W,N}
-    f::ParameterIntegrand{F,P}
+struct FourierIntegrand{F,P,W,N,I}
+    f::I
     w::W
     nest::N
-    function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace) where {F,P}
-        return new{F,P,typeof(w),Nothing}(f, w, nothing)
-    end
-    function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace, nest::NestedBatchIntegrand{<:ParameterIntegrand{F}}) where {F,P}
-        return new{F,P,typeof(w),typeof(nest)}(f, w, nest)
-    end
-    function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace, nest::ParameterIntegrand{F}) where {F,P}
-        return new{F,P,typeof(w),typeof(nest)}(f, w, nest)
-    end
+end
+
+function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace) where {F,P}
+    return FourierIntegrand{F,P,typeof(w),Nothing,typeof(f)}(f, w, nothing)
+end
+function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace, nest::NestedBatchIntegrand{<:ParameterIntegrand{F}}) where {F,P}
+    return FourierIntegrand{F,P,typeof(w),typeof(nest),typeof(f)}(f, w, nest)
+end
+function FourierIntegrand(f::ParameterIntegrand{F,P}, w::FourierWorkspace, nest::ParameterIntegrand{F}) where {F,P}
+    return FourierIntegrand{F,P,typeof(w),typeof(nest),typeof(f)}(f, w, nest)
 end
 
 """
@@ -359,7 +360,12 @@ end
 
 function do_solve_evalcounter(f::FourierIntegrand, dom, p, alg, cacheval; kws...)
     if f.nest isa NestedBatchIntegrand
-        throw(ArgumentError("EvalCounter has not implemented NestedBatchIntegrand. Please open an issue."))
+        w = wrap_with_counter(f.f)
+        u = NestedBatchIntegrand(w, f.y, f.x, max_batch=f.max_batch)
+        FourierIntegrand(WrapperCounter(f.f), f.w, u)
+        sol = do_solve(g, dom, p, alg, cacheval; kws...)
+        n = sum(s -> s.numevals, FlatView(u), init=0)
+        return IntegralSolution(sol.u, sol.resid, sol.retcode, iszero(n) ? -1 : n)
     else
         n::Int = 0
         function g(args...; kwargs...)
@@ -408,6 +414,16 @@ function assemble_nested_integrand(f::FourierIntegrand, fxx, dom, p, lims, state
             end
             return nothing
         end
+        #=
+        return nested_to_batched(f.nest) do i, w, x, p
+            n = 0
+            while (len = length(FlatView(w.nest.f[n+=1]))) < i
+                i -= len
+            end
+            v = FourierValue(limit_iterate(lims, state, x), workspace_evaluate!(f.w[i], x, i))
+            f.nest.f[i](v, p)
+        end
+        =#
     else
         return (x, p) -> begin
             v = FourierValue(limit_iterate(lims, state, x), workspace_evaluate!(f.w, x))

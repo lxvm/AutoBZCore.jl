@@ -11,6 +11,7 @@ struct PuncturedInterval{T,S}
     PuncturedInterval(s::S) where {T,S<:AbstractVector{T}} = new{T,S}(s)
 end
 Base.eltype(::Type{PuncturedInterval{T,S}}) where {T,S} = T
+Base.ndims(::PuncturedInterval) = 1
 segments(p::PuncturedInterval) = p.s
 endpoints(p::PuncturedInterval) = (p.s[begin], p.s[end])
 
@@ -29,5 +30,5 @@ function HyperCube(a::NTuple{d}, b::NTuple{d}) where {d}
 end
 HyperCube(a, b) = HyperCube(promote(a...), promote(b...))
 Base.eltype(::Type{HyperCube{d,T}}) where {d,T} = T
-
+Base.ndims(::HyperCube{d}) where {d} = d
 endpoints(c::HyperCube) = (c.a, c.b)

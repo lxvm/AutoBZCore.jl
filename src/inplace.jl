@@ -90,3 +90,10 @@ function assemble_nested_integrand(f::InplaceIntegrand, fxx, dom, p, lims, state
         return nothing
     end, f.I)
 end
+
+function assemble_nested_integrand(::InplaceIntegrand, ::Nothing)
+    throw(ArgumentError("NestedIntegrand(InplaceIntegrand) is not supported. Please open an issue"))
+end
+function assemble_nested_integrand(::InplaceIntegrand, g)
+    throw(ArgumentError("NestedIntegrand(InplaceIntegrand) is not supported. Please open an issue"))
+end

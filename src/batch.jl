@@ -87,7 +87,7 @@ end
 
 function do_solve_evalcounter(f::BatchIntegrand, dom, p, alg, cacheval; kws...)
     n::Int = 0
-    g = (y, x, p) -> (n += length(x); f.f!(y, x, p))
+    g = (y, x, p) -> (n += length(x); f.f!(y, x, p); return nothing)
     sol = do_solve(BatchIntegrand(g, f.y, f.x, max_batch=f.max_batch), dom, p, alg, cacheval; kws...)
     return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
 end
@@ -110,6 +110,13 @@ function assemble_nested_integrand(f::BatchIntegrand, fxx, dom, p, lims, state, 
     end
 end
 
+function assemble_nested_integrand(::BatchIntegrand, ::Nothing)
+    throw(ArgumentError("NestedIntegrand(BatchIntegrand) is not support. Please open an issue"))
+end
+function assemble_nested_integrand(::BatchIntegrand, g)
+    throw(ArgumentError("NestedIntegrand(BatchIntegrand) is not support. Please open an issue"))
+end
+
 """
     NestedBatchIntegrand(f::Tuple, y::AbstractVector, x::AbstractVector, max_batch::Integer)
 
@@ -124,19 +131,19 @@ struct NestedBatchIntegrand{F,T,Y<:AbstractVector,X<:AbstractVector}
     y::Y
     x::X
     max_batch::Int
-    function NestedBatchIntegrand(f::NTuple, y::Y, x::X, max_batch::Integer) where {Y,X}
-        if eltype(f) <: NestedBatchIntegrand
-            return new{_nesttype(eltype(f)),typeof(f),Y,X}(f, y, x, max_batch)
-        else
-            return new{eltype(f),typeof(f),Y,X}(f, y, x, max_batch)
-        end
+end
+function NestedBatchIntegrand(f::NTuple, y::Y, x::X, max_batch::Integer) where {Y,X}
+    if eltype(f) <: NestedBatchIntegrand
+        return NestedBatchIntegrand{_nesttype(eltype(f)),typeof(f),Y,X}(f, y, x, max_batch)
+    else
+        return NestedBatchIntegrand{eltype(f),typeof(f),Y,X}(f, y, x, max_batch)
     end
-    function NestedBatchIntegrand(f::AbstractArray{F}, y::Y, x::X, max_batch::Integer) where {F,Y,X}
-        return new{F,typeof(f),Y,X}(f, y, x, max_batch)
-    end
-    function NestedBatchIntegrand(f::AbstractArray{T}, y::Y, x::X, max_batch::Integer) where {F,T<:NestedBatchIntegrand{F},Y,X}
-        return new{F,typeof(f),Y,X}(f, y, x, max_batch)
-    end
+end
+function NestedBatchIntegrand(f::AbstractArray{F}, y::Y, x::X, max_batch::Integer) where {F,Y,X}
+    return NestedBatchIntegrand{F,typeof(f),Y,X}(f, y, x, max_batch)
+end
+function NestedBatchIntegrand(f::AbstractArray{T}, y::Y, x::X, max_batch::Integer) where {F,T<:NestedBatchIntegrand{F},Y,X}
+    return NestedBatchIntegrand{F,typeof(f),Y,X}(f, y, x, max_batch)
 end
 
 _nesttype(::Type{<:NestedBatchIntegrand{F}}) where {F} = F
@@ -148,56 +155,139 @@ function NestedBatchIntegrand(f, ::Type{Y}, ::Type{X}=Nothing; kws...) where {Y,
     return NestedBatchIntegrand(f, Y[], X[]; kws...)
 end
 
-function init_segbuf(::NestedBatchIntegrand, dom, p, norm)
-    throw(ArgumentError("Cannot allocate a segbuf for NestedBatchIntegrand. Please open an issue."))
-end
-function do_solve_quadgk(::NestedBatchIntegrand, segs, p, cacheval, reltol, abstol, maxiters)
-    throw(ArgumentError("QuadGKJL has not implemented NestedBatchIntegrand. Please open an issue."))
-end
-
-function assemble_hintegrand(::NestedBatchIntegrand, dom, p)
-    throw(ArgumentError("HCubature.jl does not support batching. Consider opening an issue upstream."))
-end
-
-init_buffer(f::NestedBatchIntegrand, len) = Vector{eltype(f.y)}(undef, len)
-
-# TODO: unwrap the NestedBatchIntegrand recursively
-function assemble_pintegrand(f::NestedBatchIntegrand, p, dom, rule)
-    ys = f.y/prod(ntuple(n -> oneunit(eltype(dom)), Val(ndims(dom))))
-    xs = if eltype(f.x) === Nothing
-        x = last(first(rule))
-        dom isa Basis ? typeof(dom*x)[] : typeof(oneunit(eltype(dom))*x)[]
-    else
-        f.x
-    end
-    return AutoSymPTR.BatchIntegrand(ys, xs, max_batch=f.max_batch) do y, x
-        # would be better to fully unwrap the nested structure, but this is one level
-        nchunk = length(f.f)
+# this is the implementation of the multi-threading
+function nested_to_batched(callback::C, f::NestedBatchIntegrand) where {C}
+    workers = FlatView(f)
+    return BatchIntegrand(f.y, f.x, max_batch=f.max_batch) do y, x, p
+        nchunk = length(workers)
         Threads.@threads for ichunk in 1:min(nchunk, length(x))
             for (i, j) in zip(getchunk(x, ichunk, nchunk, :batch), getchunk(y, ichunk, nchunk, :batch))
-                y[j] = f.f[ichunk](x[i], p)
+                y[j] = callback(ichunk, workers, x[i], p)
             end
         end
         return nothing
     end
 end
+nested_to_batched(f::NestedBatchIntegrand) = nested_to_batched((i, w, x, p) -> w[i](x, p), f)
 
-function do_solve_auxquadgk(::NestedBatchIntegrand, segs, p, cacheval, order, norm, reltol, abstol, maxiters)
-    throw(ArgumentError("AuxQuadGKJL has not implemented NestedBatchIntegrand. Please open an issue."))
+struct FlatView{T}
+    nest::T
+end
+Base.eltype(::Type{FlatView{T}}) where {T} = _nesttype(T)
+function Base.length(f::FlatView)
+    if eltype(f.nest.f) <: NestedBatchIntegrand
+        return sum(length∘FlatView, f.nest.f, init=0)
+    else
+        return length(f.nest.f)
+    end
+end
+# I think the complexity is O(depth)
+function Base.getindex(f::FlatView, i::Int)::_nesttype(typeof(f.nest))
+    if eltype(f.nest.f) <: NestedBatchIntegrand
+        n = 0
+        while (len = length(FlatView(f.nest.f[n+=1]))) < i
+            i -= len
+        end
+        Base.getindex(FlatView(f.nest.f[n]), i)
+    else
+        return Base.getindex(f.nest.f, i)
+    end
+end
+function Base.iterate(f::FlatView)
+    (len = length(f)) == 0 && return nothing
+    return f[1], (2, len)
+end
+function Base.iterate(f::FlatView, state)
+    n, len = state
+    n > len && return nothing
+    item = f[n]
+    n += 1
+    return item, (n, len)
 end
 
-function assemble_cont_integrand(::NestedBatchIntegrand, p)
-    throw(ArgumentError("ContQuadGK.jl doesn't support batching. Consider opening an issue upstream."))
+function init_segbuf(f::NestedBatchIntegrand, dom, p, norm)
+    x, s = init_midpoint_scale(dom)
+    u = x/oneunit(x)
+    TX = typeof(u)
+    fx_s = zero(eltype(f.y)) * s/oneunit(s)    # TODO BatchIntegrand(InplaceIntegrand) should depend on size of result
+    TI = typeof(fx_s)
+    TE = typeof(norm(fx_s))
+    return IteratedIntegration.alloc_segbuf(TX, TI, TE)
 end
 
-function assemble_mero_integrand(::NestedBatchIntegrand, p)
-    throw(ArgumentError("MeroQuadGK.jl doesn't support batching. Consider opening an issue upstream."))
+function do_solve_quadgk(f::NestedBatchIntegrand, segs, p, order, norm, cacheval, reltol, abstol, maxiters)
+    w = nested_to_batched(f)
+    return do_solve_quadgk(w, segs, p, order, norm, cacheval, reltol, abstol, maxiters)
 end
 
+function assemble_hintegrand(f::NestedBatchIntegrand, dom, p)
+    w = nested_to_batched(f)
+    return assemble_hintegrand(w, dom, p)
+end
+
+init_buffer(f::NestedBatchIntegrand, len) = Vector{eltype(f.y)}(undef, len)
+
+function assemble_pintegrand(f::NestedBatchIntegrand, p, dom, rule)
+    w = nested_to_batched(f)
+    ys = w.y/prod(ntuple(n -> oneunit(eltype(dom)), Val(ndims(dom))))
+    xs = if eltype(w.x) === Nothing
+        x = last(first(rule))
+        dom isa Basis ? typeof(dom*x)[] : typeof(oneunit(eltype(dom))*x)[]
+    else
+        w.x
+    end
+    return AutoSymPTR.BatchIntegrand((y, x) -> w.f!(y, x, p), ys, xs, max_batch=f.max_batch)
+end
+
+function do_solve_auxquadgk(f::NestedBatchIntegrand, segs, p, cacheval, order, norm, reltol, abstol, maxiters)
+    w = nested_to_batched(f)
+    return do_solve_auxquadgk(w,  segs, p, cacheval, order, norm, reltol, abstol, maxiters)
+end
+
+function assemble_cont_integrand(f::NestedBatchIntegrand, p)
+    w = nested_to_batched(f)
+    return assemble_cont_integrand(w, p)
+end
+
+function assemble_mero_integrand(f::NestedBatchIntegrand, p)
+    w = nested_to_batched(f)
+    return assemble_mero_integrand(w, p)
+end
+
+mutable struct WrapperCounter{F}
+    numevals::Int
+    const f::F
+end
+WrapperCounter(f) = WrapperCounter(0, f)
+function (f::WrapperCounter)(args...; kws...)
+    if f.f isa NestedIntegrand
+        sol = f.f.f(args...; kws...)
+        sol.numevals
+        f.numevals += sol.numevals > 0 ? sol.numevals : 0
+        return isnothing(f.f.g) ? sol.u : f.f.g(args..., sol.u; kws...)
+    else
+        f.numevals += 1
+        return f.f(args...; kws...)
+    end
+end
+
+# we allocate when creating the wrapper, and since this is typically once per integral it
+# should be fine
 function do_solve_evalcounter(f::NestedBatchIntegrand, dom, p, alg, cacheval; kws...)
-    throw(ArgumentError("EvalCounter has not implemented NestedBatchIntegrand. Please open an issue."))
+    w = wrap_with_counter(f.f)
+    g = NestedBatchIntegrand(w, f.y, f.x, max_batch=f.max_batch)
+    sol = do_solve(g, dom, p, alg, cacheval; kws...)
+    n = sum(s -> s.numevals, FlatView(g), init=0)
+    return IntegralSolution(sol.u, sol.resid, sol.retcode, iszero(n) ? -1 : n)
 end
 
+function wrap_with_counter(nest)
+    if eltype(nest) <: NestedBatchIntegrand
+        map(f -> NestedBatchIntegrand(wrap_with_counter(f.f), f.y, f.x, max_batch=f.max_batch), nest)
+    else
+        map(WrapperCounter, nest)
+    end
+end
 
 function init_nested_cacheval(f::NestedBatchIntegrand, p, segs, lims, state, alg::IntegralAlgorithm)
     dom = PuncturedInterval(segs)
@@ -223,34 +313,55 @@ function init_nested_cacheval(f::NestedBatchIntegrand, p, segs, lims, state, alg
 end
 
 function assemble_nested_integrand(f::NestedBatchIntegrand, fxx, dom, p, lims, state, ::Tuple{}, (fx, cacheval); kws...)
-    TP = typeof(p)
-    nchunk = length(f.f)
-    return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(fx),TP}}() do y, x, p
-        Threads.@threads for ichunk in 1:min(nchunk, length(x))
-            for (i, j) in zip(getchunk(x, ichunk, nchunk, :scatter), getchunk(y, ichunk, nchunk, :scatter))
-                xi = x[i]
-                y[j] = f.f[ichunk](limit_iterate(lims, state, xi), p)
-            end
-        end
-        return nothing
-    end, f.y, fx, max_batch=f.max_batch)
+    return nested_to_batched((i, w, x, p) -> w[i](limit_iterate(lims, state, x), p), f)
+ end
+
+# this wrapper avoids unnecessary allocations in the common case of nested quad
+# if we just did nested_to_batched then the inner integrals wouldn't be counted as nested integrands
+struct WrappedIntegrandBuffer{B,P,S,L,A,C,K,F,X,E}
+    fbuf::B
+    p::P
+    state::S
+    lims::L
+    algs::A
+    cbuf::C
+    kws::K
+    fxx::F
+    xx::X
+    err::E
+end
+Base.length(w::WrappedIntegrandBuffer) = length(w.fbuf)
+function Base.eltype(::Type{WrappedIntegrandBuffer{B,P,S,L,A,C,K,F,X,E}}) where {B,P,S,L,A,C,K,F,X,E}
+    return NestedIntegrand{FunctionWrapper{IntegralSolution{F,E},Tuple{X,P}},Nothing}
+end
+function Base.getindex(w::WrappedIntegrandBuffer, n::Int)
+    f, lims, algs, state, kws, c, fxx, err, xx, p = w.fbuf[n], w.lims, w.algs, w.state, w.kws, w.cbuf[n], w.fxx, w.err, w.xx, w.p
+    w_ = NestedIntegralWorker(f, lims, algs, state, kws, c)
+    f_ = FunctionWrapper{IntegralSolution{typeof(fxx),typeof(err)},Tuple{typeof(xx),typeof(p)}}(w_)
+    return NestedIntegrand(f_)
+end
+function Base.iterate(w::WrappedIntegrandBuffer)
+    next = iterate(w.fbuf)
+    isnothing(next) && return nothing
+    return w[1], (2, next[2])
+end
+function Base.iterate(w::WrappedIntegrandBuffer, (n, state))
+    next = iterate(w.fbuf, state)
+    isnothing(next) && return nothing
+    item = w[n]
+    n += 1
+    return item, (n, next[2])
 end
 
-# TODO: make this function return a NestedIntegrand
-function assemble_nested_integrand(f::NestedBatchIntegrand, fxx, dom, p, lims, state, algs, (fx, cacheval); kws_...)
-    kws = NamedTuple(kws_)
+
+# This function returns a  NestedBatchIntegrand(NestedIntegrand)
+# TODO: only use a functionwrapper when provided with the integrand
+function assemble_nested_integrand(f::NestedBatchIntegrand, fxx, dom, p, lims, state, algs, (fx, cacheval); kws...)
+    xx = float(oneunit(eltype(dom)))
+    TX = typeof(xx)
     TP = typeof(p)
-    nchunks = length(f.f)
-    return BatchIntegrand(FunctionWrapper{Nothing,Tuple{typeof(f.y),typeof(fx),TP}}() do y, x, p
-        Threads.@threads for ichunk in 1:min(nchunks, length(x))
-            for (i, j) in zip(getchunk(x, ichunk, nchunks, :scatter), getchunk(y, ichunk, nchunks, :scatter))
-                xi = x[i]
-                segs, lims_, state_ = limit_iterate(lims, state, xi)
-                len = segs[end] - segs[1]
-                kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-                y[j] = do_solve(f.f[ichunk], StatefulLimits(segs, state_, lims_), p, NestedQuad(algs), cacheval[ichunk]; kwargs...).u
-            end
-        end
-        return nothing
-    end, f.y, fx, max_batch=f.max_batch)
+    err = integralerror(last(algs), fxx)
+    w = WrappedIntegrandBuffer(f.f, p, state, lims, algs, cacheval, NamedTuple(kws), fxx, xx, err)
+    T = NestedIntegrand{FunctionWrapper{IntegralSolution{typeof(fxx),typeof(err)},Tuple{TX,TP}},Nothing}
+    return NestedBatchIntegrand{T,typeof(w),typeof(f.y),typeof(f.x)}(w, f.y, f.x, f.max_batch)
 end
