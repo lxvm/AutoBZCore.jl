@@ -56,7 +56,7 @@ mutable struct IntegralCache{F,D,P,A,C,K}
     kwargs::K
 end
 
-function make_cache(f, dom, p, alg; kwargs...)
+function make_cache(f, dom, p, alg::IntegralAlgorithm; kwargs...)
     cacheval = init_cacheval(f, dom, p, alg)
     return IntegralCache(f, dom, p, alg, cacheval, NamedTuple(kwargs))
 end
