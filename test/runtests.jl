@@ -434,3 +434,6 @@ end
     ibz = load_bz(IBZ(), "svo.wout")
 end
 =#
+
+
+include("dos.jl")
