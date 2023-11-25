@@ -17,6 +17,13 @@ function AutoBZCore.dos_solve(h, domain, p, alg::RationalRichardson, cacheval;
     E = domain
 
     f_ = η -> begin
+
+        if cacheval.alg isa AutoPTR
+            ptr = cacheval.alg
+            cacheval.alg = AutoPTR(; norm=ptr.norm, a=oftype(ptr.a, η), nmin=ptr.nmin, nmax=ptr.nmax,
+                                    n₀=ptr.n₀, Δn=ptr.Δn, keepmost=2, nthreads=ptr.nthreads)
+        end
+
         cacheval.p = (E, η)
         return AutoBZCore.solve!(cacheval).u
     end
