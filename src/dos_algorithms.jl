@@ -12,6 +12,7 @@
 Compute a density of states extrapolation by smearing the Dirac distribution
 with a rational kernel of order `m`, as presented in ["Computing Spectral
 Measures of Self-Adjoint operators"](https://doi.org/10.1137/20M1330944).
+This algorithm requires `using Richardson`.
 
 This algorithm assumes that the operator `H` is a function of a continuous
 crystal momentum, `H(k)`, and will use the integration algorithm `alg` to
