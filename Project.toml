@@ -14,18 +14,19 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
-Richardson = "708f8203-808e-40c0-ba2d-98a6953ed40d"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
+Richardson = "708f8203-808e-40c0-ba2d-98a6953ed40d"
 SymmetryReduceBZ = "49a35663-c880-4242-bebb-1ec8c0fa8046"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [extensions]
+AutoBZCoreRichardsonExt = "Richardson"
 AtomsBaseExt = "AtomsBase"
 HDF5Ext = "HDF5"
 SymmetryReduceBZExt = ["SymmetryReduceBZ", "Polyhedra"]
@@ -58,6 +59,7 @@ AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
+Richardson = "708f8203-808e-40c0-ba2d-98a6953ed40d"
 Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 SymmetryReduceBZ = "49a35663-c880-4242-bebb-1ec8c0fa8046"
@@ -66,4 +68,4 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [targets]
-test = ["Aqua", "LinearAlgebra", "Test", "HDF5", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra"]
+test = ["Aqua", "LinearAlgebra", "Test", "HDF5", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "Richardson"]

@@ -96,3 +96,5 @@ Compute the solution of a problem from the initialized cache
 function solve!(c::DOSCache)
   return dos_solve(c.H, c.domain, c.p, c.alg, c.cacheval; c.kwargs...)
 end
+
+function dos_solve end

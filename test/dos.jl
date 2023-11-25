@@ -1,4 +1,4 @@
-using Test, AutoBZCore, LinearAlgebra
+using Test, AutoBZCore, LinearAlgebra, Richardson
 
 # cos(x) band with dos 1/sqrt(1-ω^2)/pi
 for h in (x -> sum(y -> cospi(2y), x), FourierSeries([0.5, 0.0, 0.5], period=1.0, offset=-2))

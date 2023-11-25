@@ -62,8 +62,6 @@ using Reexport
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
 using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature
-using Richardson: extrapolate
-
 
 export PuncturedInterval, HyperCube
 include("domains.jl")
