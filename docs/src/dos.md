@@ -22,3 +22,44 @@ AutoBZCore.DOSAlgorithm
 AutoBZCore.GGR
 AutoBZCore.RationalRichardson
 ```
+
+## Caching interface
+
+Using the [`AutoBZCore.init`](@ref) and [`AutoBZCore.solve!`](@ref) functions, it is possible to
+construct a cache to solve a [`DOSProblem`](@ref) for several energies or
+several Hamiltonians. As an example of solving for several energies,
+```julia
+using Richardson, AutoBZCore
+h = x -> sum(y -> cospi(2y), x)
+E = 0.3
+bz = load_bz(FBZ(), [2pi;;])
+prob = DOSProblem(h, E, bz)
+atol = 1e-8
+alg = RationalRichardson(; m=2, abstol=atol/10)
+cache = AutoBZCore.init(prob, alg; abstol=atol)
+Es = range(-2, 2, length=1000)
+data = map(Es) do E
+    cache.domain = E
+    AutoBZCore.solve!(cache).u
+end
+```
+
+As an example of interchanging Hamiltonians, which must remain the same type,
+```julia
+using AutoBZCore, FourierSeriesEvaluators
+
+h = FourierSeries(SMatrix{1,1,Float64,1}.([0.5, 0.0, 0.5]), period=1.0, offset=-2)
+bz = load_bz(FBZ(), [2pi;;])
+prob = DOSProblem(h, 0.0, bz)
+alg = GGR()
+
+cache = AutoBZCore.init(prob, alg)
+sol1 = AutoBZCore.solve!(cache)
+
+h.c .*= 2
+cache.isfresh = true
+
+sol2 = AutoBZCore.solve!(cache)
+
+sol1.u*2 ≈ sol2.u
+```

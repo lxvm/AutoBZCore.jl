@@ -52,7 +52,15 @@ mutable struct DOSCache{H,D,P,A,C,K}
   p::P
   alg::A
   cacheval::C
+  isfresh::Bool # true if H has been replaced/modified, otherwise false
   kwargs::K
+end
+
+function Base.setproperty!(cache::DOSCache, name::Symbol, item)
+    if name === :H
+        setfield!(cache, :isfresh, true)
+    end
+    return setfield!(cache, name, item)
 end
 
 # by default, algorithms won't have anything in the cache
@@ -60,7 +68,7 @@ init_cacheval(h, dom, p, ::DOSAlgorithm) = nothing
 
 function make_cache(h, dom, p, alg::DOSAlgorithm; kwargs...)
   cacheval = init_cacheval(h, dom, p, alg)
-  return DOSCache(h, dom, p, alg, cacheval, NamedTuple(kwargs))
+  return DOSCache(h, dom, p, alg, cacheval, false, NamedTuple(kwargs))
 end
 
 # check same keywords as for integral problems: abstol, reltol, maxiters
@@ -94,7 +102,13 @@ end
 Compute the solution of a problem from the initialized cache
 """
 function solve!(c::DOSCache)
-  return dos_solve(c.H, c.domain, c.p, c.alg, c.cacheval; c.kwargs...)
+
+    if c.isfresh
+        c.cacheval = init_cacheval(c.H, c.domain, c.p, c.alg)
+        c.isfresh = false
+    end
+
+    return dos_solve(c.H, c.domain, c.p, c.alg, c.cacheval; c.kwargs...)
 end
 
 function dos_solve end
