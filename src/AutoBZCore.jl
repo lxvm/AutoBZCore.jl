@@ -47,7 +47,7 @@ page](https://github.com/lxvm/AutoBZCore.jl) to contact the developers.
 """
 module AutoBZCore
 
-using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr
+using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr, diag, eigen, Hermitian
 
 using StaticArrays: SVector, SMatrix, pushfirst, sacollect
 using FunctionWrappers: FunctionWrapper
@@ -97,7 +97,8 @@ include("fourier.jl")
 export DOSProblem
 include("dos_interfaces.jl")
 
-export RationalRichardson
+export GGR, RationalRichardson
 include("dos_algorithms.jl")
+include("dos_ggr.jl")
 
 end

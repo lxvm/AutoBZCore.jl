@@ -7,6 +7,27 @@
 # - any function or H_R
 
 """
+    GGR(; npt=50)
+
+Generalized Gilat-Raubenheimer method as in ["Generalized Gilat–Raubenheimer method for
+density-of-states calculation in photonic
+crystals"](https://doi.org/10.1088/2040-8986/aaae52).
+This method requires the Hamiltonian and its derivatives, and performs a linear
+extrapolation at each k-point in an equispace grid. The algorithm is expected to show
+second-order convergence and suffer reduced error at band crossings compared to
+interpolatory methods.
+
+## Arguments
+- `npt`: the number of k-points per dimension
+"""
+struct GGR <: DOSAlgorithm
+    npt::Int
+end
+GGR(; npt=50) = GGR(npt)
+
+# Extension algorithms
+
+"""
     RationalRichardson(; alg=IAI(), m=2, h=1.0, power=1, contract=0.125, breaktol=2, kwargs...)
 
 Compute a density of states extrapolation by smearing the Dirac distribution

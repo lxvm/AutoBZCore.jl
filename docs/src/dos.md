@@ -15,10 +15,10 @@ AutoBZCore.DOSProblem
 Currently the available algorithms are experimental and we would like to include
 the following reference algorithms that are more common in the literature in a future release:
 - (Linear) Tetrahedron Method
-- Gilat-Raubenheimer Method
 - Adaptive Gaussian briadening
 
 ```@docs
 AutoBZCore.DOSAlgorithm
+AutoBZCore.GGR
 AutoBZCore.RationalRichardson
 ```
