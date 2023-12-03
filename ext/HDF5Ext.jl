@@ -45,12 +45,12 @@ function autobz_create_dataset(parent, path, T::Type, dims_)
     ax = ntuple(_-> :, Val(ndims(T)))
     return create_dataset(parent, path, eltype(T), dims), ax
 end
-function autobz_create_dataset(parent, path, ::Type{AuxValue{T}}, dims) where T
+function autobz_create_dataset(parent, path, ::Type{AuxValue{T,A}}, dims) where {T, A}
     # split auxvalue into two groups for easier interoperability with other languages, since
     # the HDF5 compound type could be a challenge
     g = create_group(parent, "I")
     gval, axval = autobz_create_dataset(g, "val", T, dims)
-    gaux, axaux = autobz_create_dataset(g, "aux", T, dims)
+    gaux, axaux = autobz_create_dataset(g, "aux", A, dims)
     return (gval, gaux), (axval, axaux)
 end
 
