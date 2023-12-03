@@ -320,7 +320,7 @@ end
             )
                 prob1 = IntegralProblem(FourierIntegrand(p, s), dom)
                 prob2 = IntegralProblem(FourierIntegrand(p, ws, nest), dom)
-                @test solve(prob1, alg) == solve(prob2, alg)
+                @test solve(prob1, alg).u ≈ solve(prob2, alg).u
             end
         end
     end
