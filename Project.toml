@@ -1,7 +1,7 @@
 name = "AutoBZCore"
 uuid = "66bd3e16-1600-45cf-8f55-0b550710682b"
 authors = ["lxvm <lorenzo@vanmunoz.com>"]
-version = "0.3.4"
+version = "0.3.5"
 
 [deps]
 AutoSymPTR = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
