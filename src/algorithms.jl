@@ -140,7 +140,7 @@ function trapz(n::Integer)
 end
 
 """
-    QuadratureFunction(; fun=trapz, npt=50, nthreads=Threads.nthreads())
+    QuadratureFunction(; fun=trapz, npt=50, nthreads=1)
 
 Quadrature rule for the standard interval [-1,1] computed from a function `x, w = fun(npt)`.
 The nodes and weights should be set so the integral of `f` on [-1,1] is `sum(w .* f.(x))`.
@@ -158,7 +158,7 @@ struct QuadratureFunction{F} <: IntegralAlgorithm
     npt::Int
     nthreads::Int
 end
-QuadratureFunction(; fun=trapz, npt=50, nthreads=Threads.nthreads()) = QuadratureFunction(fun, npt, nthreads)
+QuadratureFunction(; fun=trapz, npt=50, nthreads=1) = QuadratureFunction(fun, npt, nthreads)
 init_buffer(f, len) = nothing
 init_buffer(f::BatchIntegrand, len) = Vector{eltype(f.y)}(undef, len)
 function init_cacheval(f, dom::PuncturedInterval, p, alg::QuadratureFunction)
@@ -330,7 +330,7 @@ end
 # Algorithms from AutoSymPTR.jl
 
 """
-    MonkhorstPack(; npt=50, syms=nothing, nthreads=Threads.nthreads())
+    MonkhorstPack(; npt=50, syms=nothing, nthreads=1)
 
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
 using the `PTR` rule from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
@@ -344,7 +344,7 @@ struct MonkhorstPack{S} <: IntegralAlgorithm
     syms::S
     nthreads::Int
 end
-MonkhorstPack(; npt=50, syms=nothing, nthreads=Threads.nthreads()) = MonkhorstPack(npt, syms, nthreads)
+MonkhorstPack(; npt=50, syms=nothing, nthreads=1) = MonkhorstPack(npt, syms, nthreads)
 function init_rule(dom::Basis, alg::MonkhorstPack)
     # rule = AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
     # return rule(eltype(dom), Val(ndims(dom)))
@@ -380,7 +380,7 @@ function do_solve(f, dom, p, alg::MonkhorstPack, cacheval;
 end
 
 """
-    AutoSymPTRJL(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2, nthreads=Threads.nthreads())
+    AutoSymPTRJL(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2, nthreads=1)
 
 Periodic trapezoidal rule with automatic convergence to tolerances passed to the
 solver with respect to `norm` using the routine `autosymptr` from
@@ -401,7 +401,7 @@ struct AutoSymPTRJL{F,S} <: IntegralAlgorithm
     syms::S
     nthreads::Int
 end
-function AutoSymPTRJL(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2, syms=nothing, nthreads=Threads.nthreads())
+function AutoSymPTRJL(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2, syms=nothing, nthreads=1)
     return AutoSymPTRJL(norm, a, nmin, nmax, n₀, Δn, keepmost, syms, nthreads)
 end
 function init_rule(dom::Basis, alg::AutoSymPTRJL)
