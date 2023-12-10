@@ -97,7 +97,7 @@ include("fourier.jl")
 export DOSProblem
 include("dos_interfaces.jl")
 
-export GGR, RationalRichardson
+export GGR
 include("dos_algorithms.jl")
 include("dos_ggr.jl")
 

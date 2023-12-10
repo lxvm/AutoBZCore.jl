@@ -1,4 +1,4 @@
-using Test, AutoBZCore, LinearAlgebra, Richardson, StaticArrays, OffsetArrays, Elliptic
+using Test, AutoBZCore, LinearAlgebra, StaticArrays, OffsetArrays, Elliptic
 using GeneralizedGaussianQuadrature: generalizedquadrature
 
 # test set of known DOS examples
@@ -101,33 +101,14 @@ for (model, solution, bandwidth, bzkind) in (
     bz = load_bz(bzkind, I(ndims(model)))
     prob = DOSProblem(model, float(zero(B)), bz)
     E = Float64[-B - 1, -0.8B, -0.6B, -0.2B, 0.1B, 0.3B, 0.5B, 0.7B, 0.9B, B + 2]
-    @info "time" model
     for alg in (GGR(; npt=200),)
         cache = AutoBZCore.init(prob, alg)
         for e in E
-            @show e
             cache.domain = e
             @test AutoBZCore.solve!(cache).u ≈ solution(e) atol=1e-2
         end
     end
 end
-
-# cos(x) band with dos 1/sqrt(1-ω^2)/pi
-for h in (x -> sum(y -> cospi(2y), x), FourierSeries(SMatrix{1,1,Float64,1}.([0.5, 0.0, 0.5]), period=1.0, offset=-2))
-    E = 0.3
-    bz = load_bz(FBZ(), [2pi;;])
-
-    prob = DOSProblem(h, E, bz)
-
-    atol = 1e-6
-
-    for alg in (RationalRichardson(; abstol=atol/10), GGR(npt=1000))
-        alg isa GGR && !(h isa FourierSeries) && continue
-        sol = AutoBZCore.solve(prob, alg; abstol=atol)
-        @test only(sol.u)/det(bz.B) ≈ dos_integer_1d_exact(E) atol=1e-3
-    end
-end
-
 
 # test caching behavior
 let h = FourierSeries(SMatrix{1,1,Float64,1}.([0.5, 0.0, 0.5]), period=1.0, offset=-2)

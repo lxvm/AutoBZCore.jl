@@ -436,4 +436,4 @@ end
 =#
 
 
-include("dos.jl")
+@testset "AutoBZCore - DOS" include("dos.jl")
