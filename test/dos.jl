@@ -56,7 +56,8 @@ tb_integer_2d = tb_integer(2)
 function dos_integer_2d_exact(E::Real, t=oneunit(E))
     x = abs(E/4t)
     if x <= 1
-        1/(pi^2*2t)*Elliptic.K(sqrt(1 - x^2))
+        # note Elliptic and SpecialFunctions accept the elliptic modulus m = k^2
+        1/(pi^2*2t)*Elliptic.K(1 - x^2)
     else
         zero(inv(oneunit(t)))
     end
@@ -67,37 +68,46 @@ tb_integer_3d = tb_integer(3)
 # https://doi.org/10.1143/JPSJ.30.957 (also includes FCC and BCC lattices)
 function dos_integer_3d_exact(E::Real, t=oneunit(E))
     x = abs(E/6t)
-    f = u -> Elliptic.K(sqrt(1 - ((3x-cos(u))/2)^2))
+    # note Elliptic and SpecialFunctions accept the elliptic modulus m = k^2
+    f = u -> Elliptic.K(1 - ((3x-cos(u))/2)^2)
     if 3x < 1
         n, w = generalizedquadrature(30) # quadrature designed for logarithmic singularity
         u′ = acos(3x)   # breakpoint for logarithmic singularity in the interval (0, pi)
         I1 = sum(w .* f.(u′ .+ n .* -u′)) * u′ # (0, u′)
         I2 = sum(w .* f.(u′ .+ n .* (pi - u′))) * (pi - u′) # (u′, pi)
-        oftype(zero(inv(oneunit(t))), 1/pi^3 * (I1+I2))
+        oftype(zero(inv(oneunit(t))), 1/(pi^3*2t) * (I1+I2))
         # since we may loose precision when the breakpoint is near the boundary, consider
-        # ((isfinite(I1) ? I1 : zero(I1)) + (isfinite(I2) ? I2 : zero(I2))))
+        # oftype(zero(inv(oneunit(t))), 1/(pi^3*2t) * ((isfinite(I1) ? I1 : zero(I1)) + (isfinite(I2) ? I2 : zero(I2))))
     elseif x < 1
-        1/pi^3*quadgk(f, 0, acos(3x-2))[1]
+        1/(pi^3*2t)*quadgk(f, 0, acos(3x-2))[1]
     else
         zero(inv(oneunit(t)))
     end
 end
 
-for (model, solution, bandwidth) in (
-    (tb_graphene,   dos_graphene_exact,   4),
-    (tb_integer_1d, dos_integer_1d_exact, 2),
-    (tb_integer_2d, dos_integer_2d_exact, 4),
-    (tb_integer_3d, dos_integer_3d_exact, 6),
+for (model, solution, bandwidth, bzkind) in (
+    (tb_graphene,   dos_graphene_exact,   4, FBZ()),
+    (tb_integer_1d, dos_integer_1d_exact, 2, FBZ()),
+    (tb_integer_2d, dos_integer_2d_exact, 4, FBZ()),
+    (tb_integer_3d, dos_integer_3d_exact, 6, FBZ()),
+    (tb_integer_1d, dos_integer_1d_exact, 2, InversionSymIBZ()),
+    (tb_integer_2d, dos_integer_2d_exact, 4, InversionSymIBZ()),
+    (tb_integer_3d, dos_integer_3d_exact, 6, InversionSymIBZ()),
+    (tb_integer_1d, dos_integer_1d_exact, 2, CubicSymIBZ()),
+    (tb_integer_2d, dos_integer_2d_exact, 4, CubicSymIBZ()),
+    (tb_integer_3d, dos_integer_3d_exact, 6, CubicSymIBZ()),
 )
     B = bandwidth
-    bz = load_bz(FBZ(), I(ndims(model)))
+    bz = load_bz(bzkind, I(ndims(model)))
     prob = DOSProblem(model, float(zero(B)), bz)
     E = Float64[-B - 1, -0.8B, -0.6B, -0.2B, 0.1B, 0.3B, 0.5B, 0.7B, 0.9B, B + 2]
+    @info "time" model
     for alg in (GGR(; npt=200),)
         cache = AutoBZCore.init(prob, alg)
         for e in E
+            @show e
             cache.domain = e
-            @test (2pi)^ndims(model)\AutoBZCore.solve!(cache).u ≈ solution(e) atol=1e-1
+            @test AutoBZCore.solve!(cache).u ≈ solution(e) atol=1e-2
         end
     end
 end

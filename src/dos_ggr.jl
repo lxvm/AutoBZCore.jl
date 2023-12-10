@@ -50,11 +50,9 @@ function dos_solve(h, domain, p, alg::GGR, cacheval;
     E = domain
     bz = p
 
-    j = abs(det(bz.B))
     A = sum_ggr(ndims(bz.lims), alg.npt, E, cacheval...)
-    A′ = j*symmetrize_(TrivialRep(), bz, A)
 
-    return DOSSolution(A′, nothing, true, -1)
+    return DOSSolution(A, nothing, true, -1)
 end
 
 function sum_ggr(ndim, npt, E, weights, energies, velocities)
