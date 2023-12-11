@@ -201,7 +201,7 @@ function Base.iterate(p::FourierPTR, state)
     return (w, FourierValue(x, s)), (state1, state2)
 end
 
-function (rule::FourierPTR)(f, B::Basis, buffer=nothing)
+function (rule::FourierPTR)(f::F, B::Basis, buffer=nothing) where {F}
     arule = AutoSymPTR.AffineQuad(rule, B)
     return AutoSymPTR.quadsum(arule, f, arule.vol / length(rule), buffer)
 end
@@ -286,7 +286,7 @@ Base.iterate(rule::FourierMonkhorstPack, args...) = iterate(rule.wxs, args...)
 
 rule_type(::FourierMonkhorstPack{d,W,T,S}) where {d,W,T,S} = FourierValue{SVector{d,T},S}
 
-function (rule::FourierMonkhorstPack{d})(f, B::Basis, buffer=nothing) where d
+function (rule::FourierMonkhorstPack{d})(f::F, B::Basis, buffer=nothing) where {d,F}
     arule = AutoSymPTR.AffineQuad(rule, B)
     return AutoSymPTR.quadsum(arule, f, arule.vol / (rule.npt^d * rule.nsyms), buffer)
 end
