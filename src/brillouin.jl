@@ -333,7 +333,7 @@ function bz_to_standard(bz::SymmetricBZ, alg::IAI)
 end
 
 """
-    PTR(; npt=50, parallel=nothing)
+    PTR(; npt=50, nthreads=1)
 
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
 using the routine `ptr` from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
@@ -343,7 +343,7 @@ struct PTR <: AutoBZAlgorithm
     npt::Int
     nthreads::Int
 end
-PTR(; npt=50, nthreads=Threads.nthreads()) = PTR(npt, nthreads)
+PTR(; npt=50, nthreads=1) = PTR(npt, nthreads)
 
 function bz_to_standard(bz::SymmetricBZ, alg::PTR)
      return bz, canonical_ptr_basis(bz.B), MonkhorstPack(npt=alg.npt, syms=bz.syms, nthreads=alg.nthreads)
@@ -351,7 +351,7 @@ end
 
 
 """
-    AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2, parallel=nothing)
+    AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2, nthreads=1)
 
 Periodic trapezoidal rule with automatic convergence to tolerances passed to the
 solver with respect to `norm` using the routine `autosymptr` from
@@ -368,7 +368,7 @@ struct AutoPTR{F} <: AutoBZAlgorithm
     keepmost::Int
     nthreads::Int
 end
-function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2, nthreads=Threads.nthreads())
+function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2, nthreads=1)
     return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost, nthreads)
 end
 function bz_to_standard(bz::SymmetricBZ, alg::AutoPTR)
