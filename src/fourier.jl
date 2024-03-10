@@ -351,7 +351,13 @@ function init_cacheval(f::FourierIntegrand, dom::Basis, p, alg::AutoSymPTRJL)
     buffer = init_buffer(f, alg.nthreads)
     return (rule=rule, cache=cache, buffer=buffer)
 end
-
+function init_cacheval(f::FourierIntegrand, bz::SymmetricBZ, p, bzalg::AutoPTR)
+    bz_, dom, alg = bz_to_standard(bz, bzalg)
+    rule = SymmetricRuleDef(init_fourier_rule(f.w, dom, alg), SymRep(f), bz_)
+    cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
+    buffer = init_buffer(f, alg.nthreads)
+    return (rule=rule, cache=cache, buffer=buffer)
+end
 function init_fourier_rule(s::AbstractFourierSeries, bz::SymmetricBZ, alg::PTR)
     dom = Basis(bz.B)
     return FourierMonkhorstPack(s, eltype(dom), Val(ndims(dom)), alg.npt, bz.syms)
@@ -520,5 +526,5 @@ end
 
 # method needed to resolve ambiguities
 function do_solve(f::FourierIntegrand, bz::SymmetricBZ, p, alg::EvalCounter{<:AutoBZAlgorithm}, cacheval; kws...)
-    return do_solve(f, bz, p, AutoBZEvalCounter(bz_to_standard(bz, alg.alg)...), cacheval; kws...)
+    return do_solve_autobz(count_bz_to_standard, f, bz, p, alg.alg, cacheval; kws...)
 end
