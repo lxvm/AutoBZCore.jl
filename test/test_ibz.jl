@@ -2,8 +2,10 @@ import SymmetryReduceBZ.Lattices: genlat_CUB, genlat_FCC, genlat_BCC,
   genlat_TET, genlat_BCT, genlat_ORC, genlat_ORCF, genlat_ORCI, genlat_ORCC,
   genlat_HEX, genlat_RHL, genlat_MCL, genlat_MCLC, genlat_TRI
 import SymmetryReduceBZ.Symmetry: calc_bz, calc_ibz
+import SymmetryReduceBZ.Utilities: volume, vertices, get_uniquefacets
 using Polyhedra: Polyhedron
-
+using AutoBZCore
+using LinearAlgebra
 using Test
 
 """
@@ -22,14 +24,15 @@ of the ith triangle.
 # Returns
 - `vol::Float64`: Estimated volume of polyhedron
 """
-function ph_vol(n::Int64, tri_idx::Matrix{Int32}, ph_vert::Matrix{Float64})
+function ph_vol(n::Int64, face_coord, ph_vert::Matrix{Float64})
+# function ph_vol(n::Int64, tri_idx::Matrix{Int32}, ph_vert::Matrix{Float64})
   SymmetryReduceBZExt = Base.get_extension(AutoBZCore, :SymmetryReduceBZExt)
 
   # Vertices of faces of polyhedron, given by their indices
-  face_idx = SymmetryReduceBZExt.faces_from_triangles(tri_idx, ph_vert)
+#   face_idx = SymmetryReduceBZExt.faces_from_triangles(tri_idx, ph_vert)
 
   # Vertices of faces of polyhedron, given by their ordered coordinates
-  face_coord = SymmetryReduceBZExt.face_coord_from_idx(face_idx, ph_vert)
+#   face_coord = SymmetryReduceBZExt.face_coord_from_idx(face_idx, ph_vert)
 
   # Estimate volume of polyhedron by equispaced integration
   nz = n # Number of integration points in z dimension
@@ -68,34 +71,36 @@ function test_vol(latvec::Matrix{Float64}, n::Int64)
   # Generate IBZ
   atom_types = [0]
   atom_pos = Array([0 0 0]')
-  ibzformat = "convex hull"
   coordinates = "Cartesian"
   makeprim = false
   convention = "ordinary"
-  ibz = calc_ibz(latvec, atom_types, atom_pos, coordinates, ibzformat,
+  ibz = calc_ibz(latvec, atom_types, atom_pos, coordinates,
     makeprim, convention)
 
   # Get triangles and vertices of IBZ
-  tri_idx = ibz.simplices
-  ph_vert = ibz.points
+#   tri_idx = ibz.simplices
+#   ph_vert = ibz.points
 
-  vol = ph_vol(n, tri_idx, ph_vert) # Estimate volume of IBZ
+  ph_vert = permutedims(reduce(hcat, vertices(ibz)))
+  face_coord = map(x -> permutedims(reduce(hcat, x)), get_uniquefacets(ibz))
+
+  vol = ph_vol(n, face_coord, ph_vert) # Estimate volume of IBZ
+#   vol = ph_vol(n, tri_idx, ph_vert) # Estimate volume of IBZ
 
 #   println("Estimated volume: ", vol)
 #   println("Actual volume: ", ibz.volume)
 
-  return abs(vol - ibz.volume) / ibz.volume # Return relative error
+  return abs(vol - volume(ibz)) / volume(ibz) # Return relative error
 
 end
 
 function test_vol2(latvec::Matrix{Float64}, n::Int64)
     atom_types = [0]
     atom_pos = Array([0 0 0]')
-    ibzformat = "convex hull"
     coordinates = "Cartesian"
     makeprim = false
     convention = "ordinary"
-    ibz = calc_ibz(latvec, atom_types, atom_pos, coordinates, ibzformat,
+    ibz = calc_ibz(latvec, atom_types, atom_pos, coordinates,
       makeprim, convention)
 
     fbz = load_bz(FBZ(), latvec)
@@ -109,7 +114,7 @@ function test_vol2(latvec::Matrix{Float64}, n::Int64)
     # println("Estimated volume: ", vol_hull)
     # println("Actual volume: ", ibz.volume)
 
-    return abs(ibz.volume - vol_hull) / ibz.volume # Return relative error
+    return abs(volume(ibz) - vol_hull) / volume(ibz) # Return relative error
     # return max(abs(ibz.volume - vol_hull) / ibz.volume, abs(ibz.volume - vol_poly) / ibz.volume) # Return relative error
 end
 

@@ -57,21 +57,22 @@ function fixandeliminate(pg::Polygon2, y, ::Val{2})
     return CubicLimits(xlim_from_yslice(y, pg.vert)...)
 end
 
-function (::IBZ{n,Polyhedron})(real_latvecs, atom_types, atom_pos, coordinates; ibzformat="half-space", makeprim=false, convention="ordinary") where {n}
-    hull_cart = calc_ibz(real_latvecs, atom_types, atom_pos, coordinates, ibzformat, makeprim, convention)
-    hull = real_latvecs' * polyhedron(doubledescription(hull_cart)) # rotate Cartesian basis to lattice basis in reciprocal coordinates
-    hrepiscomputed(hull) || hrep(hull) # precompute hrep if it isn't already
-    return load_limits(hull)
+function (::IBZ{n,Polyhedron})(real_latvecs, atom_types, atom_pos, coordinates; makeprim=false, convention="ordinary") where {n}
+    ibz_cart = calc_ibz(real_latvecs, atom_types, atom_pos, coordinates, makeprim, convention)
+    ibz_lat = real_latvecs' * ibz_cart # rotate Cartesian basis to lattice basis in reciprocal coordinates
+    hrepiscomputed(ibz_lat) || hrep(ibz_lat) # precompute hrep if it isn't already
+    return load_limits(ibz_lat)
 end
 
-function (::IBZ{3,DefaultPolyhedron})(real_latvecs, atom_types, atom_pos, coordinates; ibzformat="convex hull", makeprim=false, convention="ordinary", digits=12)
-    hull = calc_ibz(real_latvecs, atom_types, atom_pos, coordinates, ibzformat, makeprim, convention)
-    tri_idx = hull.simplices
-    ph_vert = hull.points * real_latvecs
-    # tidy_vertices!(ph_vert, digits) # this should take care of rounding errors
-    face_idx = faces_from_triangles(tri_idx, ph_vert)
-    # face_idx = SymmetryReduceBZ.Utilities.get_uniquefacets(hull)
-    face_coord = face_coord_from_idx(face_idx, ph_vert)
+function (::IBZ{3,DefaultPolyhedron})(real_latvecs, atom_types, atom_pos, coordinates; makeprim=false, convention="ordinary")
+    ibz_cart = calc_ibz(real_latvecs, atom_types, atom_pos, coordinates, makeprim, convention)
+    # tri_idx = hull.simplices
+    # ph_vert = hull.points * real_latvecs
+    # face_idx = faces_from_triangles(tri_idx, ph_vert)
+    # face_coord = face_coord_from_idx(face_idx, ph_vert)
+    ibz_lat = real_latvecs' * ibz_cart
+    ph_vert = permutedims(reduce(hcat, SymmetryReduceBZ.Utilities.vertices(ibz_lat)))
+    face_coord = map(x -> permutedims(reduce(hcat, x)), SymmetryReduceBZ.Utilities.get_uniquefacets(ibz_lat))
     segs = get_segs(ph_vert)
     return Polyhedron3(face_coord, segs)
 end
