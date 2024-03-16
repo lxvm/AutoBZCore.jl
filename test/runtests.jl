@@ -434,3 +434,6 @@ end
     ibz = load_bz(IBZ(), "svo.wout")
 end
 =#
+
+
+@testset "AutoBZCore - DOS" include("dos.jl")

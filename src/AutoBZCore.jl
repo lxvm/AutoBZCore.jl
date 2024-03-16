@@ -47,7 +47,7 @@ page](https://github.com/lxvm/AutoBZCore.jl) to contact the developers.
 """
 module AutoBZCore
 
-using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal
+using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr, diag, eigen, Hermitian
 
 using StaticArrays: SVector, SMatrix, pushfirst, sacollect
 using FunctionWrappers: FunctionWrapper
@@ -62,7 +62,6 @@ using Reexport
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
 using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature
-
 
 export PuncturedInterval, HyperCube
 include("domains.jl")
@@ -95,5 +94,11 @@ include("parameters.jl")
 export FourierIntegrand, FourierValue
 include("fourier.jl")
 
+export DOSProblem
+include("dos_interfaces.jl")
+
+export GGR
+include("dos_algorithms.jl")
+include("dos_ggr.jl")
 
 end
