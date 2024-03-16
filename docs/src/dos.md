@@ -15,7 +15,7 @@ AutoBZCore.DOSProblem
 Currently the available algorithms are experimental and we would like to include
 the following reference algorithms that are more common in the literature in a future release:
 - (Linear) Tetrahedron Method
-- Adaptive Gaussian briadening
+- Adaptive Gaussian broadening
 
 ```@docs
 AutoBZCore.DOSAlgorithm
