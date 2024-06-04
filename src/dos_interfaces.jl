@@ -30,12 +30,15 @@ where ``E \\in \\text{domain}`` and ``\\delta`` is the Dirac Delta distribution.
   of freedom) or continuous (e.g. for `H` a Hamiltonian parameterized by crystal
   momentum).
 """
-struct DOSProblem{H,D,P}
+struct DOSProblem{H,D,P,K<:NamedTuple}
     H::H
     domain::D
     p::P
+    kwargs::K
 end
-DOSProblem(H, domain) = DOSProblem(H, domain, NullParameters())
+function DOSProblem(H, domain, p=NullParameters(); kws...)
+    return DOSProblem(H, domain, p, NamedTuple(kws))
+end
 
 struct DOSSolution{U,E}
     u::U
@@ -47,13 +50,13 @@ end
 # store the data in a mutable cache so that the user can update the cache and
 # compute the result again without setting up new problems.
 mutable struct DOSCache{H,D,P,A,C,K}
-  H::H
-  domain::D
-  p::P
-  alg::A
-  cacheval::C
-  isfresh::Bool # true if H has been replaced/modified, otherwise false
-  kwargs::K
+    H::H
+    domain::D
+    p::P
+    alg::A
+    cacheval::C
+    isfresh::Bool # true if H has been replaced/modified, otherwise false
+    kwargs::K
 end
 
 function Base.setproperty!(cache::DOSCache, name::Symbol, item)
@@ -66,11 +69,6 @@ end
 # by default, algorithms won't have anything in the cache
 init_cacheval(h, dom, p, ::DOSAlgorithm) = nothing
 
-function make_cache(h, dom, p, alg::DOSAlgorithm; kwargs...)
-  cacheval = init_cacheval(h, dom, p, alg)
-  return DOSCache(h, dom, p, alg, cacheval, false, NamedTuple(kwargs))
-end
-
 # check same keywords as for integral problems: abstol, reltol, maxiters
 checkkwargs_dos(kws) = checkkwargs(kws)
 
@@ -81,19 +79,10 @@ Create a cache of the data used by an algorithm to solve the given problem.
 """
 function init(prob::DOSProblem, alg::DOSAlgorithm; kwargs...)
     h = prob.H; dom = prob.domain; p = prob.p
-    checkkwargs_dos(NamedTuple(kwargs))
-    return make_cache(h, dom, p, alg; kwargs...)
-end
-
-"""
-    solve(::DOSProblem, ::DOSAlgorithm; kwargs...)::DOSSolution
-
-Compute the solution to a [`DOSProblem`](@ref) using the given algorithm.
-The keyword arguments to the solver can be `abstol`, `reltol`, and `maxiters`.
-"""
-function solve(prob::DOSProblem, alg::DOSAlgorithm; kwargs...)
-    cache = init(prob, alg; kwargs...)
-    return solve!(cache)
+    kws = (; prob.kwargs..., kwargs...)
+    checkkwargs_dos(kws)
+    cacheval = init_cacheval(h, dom, p, alg)
+    return DOSCache(h, dom, p, alg, cacheval, false, kws)
 end
 
 """
@@ -112,3 +101,8 @@ function solve!(c::DOSCache)
 end
 
 function dos_solve end
+
+"""
+    solve(::DOSProblem, ::DOSAlgorithm; kws...)::DOSSolution
+"""
+solve(prob::DOSProblem, alg::DOSAlgorithm; kwargs...)

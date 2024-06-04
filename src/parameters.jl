@@ -104,12 +104,6 @@ function remake_cache(f::ParameterIntegrand, dom, p, alg, cacheval, kwargs)
     return remake_integrand_cache(new, dom, merge(f.p, p), alg, cacheval, kwargs)
 end
 
-function (s::IntegralSolver{<:ParameterIntegrand})(args...; kwargs...)
-    p = MixedParameters(args...; kwargs...)
-    sol = solve_p(s, p)
-    return sol.u
-end
-
 function do_solve(f::ParameterIntegrand, dom, p, alg::EvalCounter, cacheval; kws...)
     n::Int = 0
     function g(x, args...; kwargs...)

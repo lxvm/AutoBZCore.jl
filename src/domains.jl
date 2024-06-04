@@ -1,3 +1,11 @@
+endpoints(dom) = (first(dom), last(dom))
+breakpoints(dom) = dom[begin+1:end-1] # or Iterators.drop(Iterators.take(dom, length(dom)-1), 1)
+segments(dom) = dom
+function get_prototype(dom)
+    a, b, = dom
+    return (a+b)/2
+end
+
 """
     PuncturedInterval(s)
 
@@ -10,9 +18,14 @@ struct PuncturedInterval{T,S}
     PuncturedInterval(s::S) where {N,S<:NTuple{N}} = new{eltype(s),S}(s)
     PuncturedInterval(s::S) where {T,S<:AbstractVector{T}} = new{T,S}(s)
 end
+PuncturedInterval(s::PuncturedInterval) = s
 Base.eltype(::Type{PuncturedInterval{T,S}}) where {T,S} = T
 segments(p::PuncturedInterval) = p.s
 endpoints(p::PuncturedInterval) = (p.s[begin], p.s[end])
+function get_prototype(p::PuncturedInterval)
+    a, b, = segments(p)
+    return (a + b)/2
+end
 
 """
     HyperCube(a, b)
@@ -31,3 +44,9 @@ HyperCube(a, b) = HyperCube(promote(a...), promote(b...))
 Base.eltype(::Type{HyperCube{d,T}}) where {d,T} = T
 
 endpoints(c::HyperCube) = (c.a, c.b)
+function get_prototype(p::HyperCube)
+    a, b = endpoints(p)
+    return (a + b)/2
+end
+
+get_prototype(l::AbstractIteratedLimits) = interior_point(l)

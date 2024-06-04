@@ -320,6 +320,69 @@ These algorithms also use the symmetries of the Brillouin zone and the integrand
 """
 abstract type AutoBZAlgorithm <: IntegralAlgorithm end
 
+"""
+    AutoBZProblem([rep], f, bz, [p]; kwargs...)
+
+Construct a BZ integration problem.
+
+## Arguments
+- `rep::AbstractSymRep`: The symmetry representation of `f` (default: `UnknownRep()`)
+- `f::AbstractIntegralFunction`: The integrand
+- `bz::SymmetricBZ`: The Brillouin zone to integrate over
+- `p`: parameters for the integrand (default: `NullParameters()`)
+
+## Keywords
+Additional keywords are passed directly to the solver
+"""
+struct AutoBZProblem{R<:AbstractSymRep,F<:AbstractIntegralFunction,BZ<:SymmetricBZ,P,K<:NamedTuple}
+    rep::R
+    f::F
+    bz::BZ
+    p::P
+    kwargs::K
+end
+function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::SymmetricBZ, p=NullParameters(); kws...)
+    return AutoBZProblem(rep, f, bz, p, NamedTuple(kws))
+end
+function AutoBZProblem(rep::AbstractSymRep, f, bz::SymmetricBZ, p=NullParameters(); kws...)
+    return AutoBZProblem(IntegralFunction(f), bz, p; kws...)
+end
+function AutoBZProblem(f, bz::SymmetricBZ, p=NullParameters(); kws...)
+    return AutoBZProblem(UnknownRep(), f, bz, p; kws...)
+end
+
+mutable struct AutoBZCache{R,F,BZ,P,A,C,K}
+    rep::R
+    f::F
+    bz::BZ
+    p::P
+    alg::A
+    cacheval::C
+    kwargs::K
+end
+
+function init(prob::AutoBZProblem, alg::AutoBZAlgorithm; kwargs...)
+    rep = prob.rep; f = prob.f; bz = prob.bz; p = prob.p
+    kws = (; prob.kwargs..., kwargs...)
+    checkkwargs(kws)
+    cacheval = init_cacheval(rep, f, bz, p, alg)
+    return AutoBZCache(rep, f, bz, p, alg, cacheval, kws)
+end
+
+"""
+    solve(::AutoBZProblem, ::AutoBZAlgorithm; kws...)::IntegralSolution
+"""
+solve(prob::AutoBZProblem, alg::AutoBZAlgorithm; kwargs...)
+
+"""
+    solve!(::IntegralCache)::IntegralSolution
+
+Compute the solution to an [`IntegralProblem`](@ref) constructed from [`init`](@ref).
+"""
+function solve!(c::AutoBZCache)
+    return do_solve_autobz(c.rep, c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
+end
+#=
 function init_cacheval(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm)
     _, dom, alg = bz_to_standard(bz, bzalg)
     return init_cacheval(f, dom, p, alg)
@@ -497,3 +560,4 @@ end
 function do_solve(f, bz::SymmetricBZ, p, alg::EvalCounter{<:AutoBZAlgorithm}, cacheval; kws...)
     return do_solve_autobz(count_bz_to_standard, f, bz, p, alg.alg, cacheval; kws...)
 end
+=#

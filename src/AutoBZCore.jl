@@ -1,7 +1,7 @@
 """
 A package providing a common interface to integration algorithms intended for applications
 including Brillouin-zone integration and Wannier interpolation. Its design is influenced by
-high-level libraries like Integrals.jl, and it makes use of Julia's multiple dispatch to
+high-level libraries like Integrals.jl to implement the CommonSolve.jl interface, and it makes use of Julia's multiple dispatch to
 provide the same interface for integrands with optimized inplace, batched, and Fourier
 series evaluation.
 
@@ -11,23 +11,24 @@ As a first example, we integrate sine over [0,1] as a function of its period.
 ```
 julia> using AutoBZCore
 
-julia> f = IntegralSolver((x,p) -> sin(p*x), 0, 1, QuadGKJL());
+julia> prob = IntegralProblem((x,p) -> sin(p*x), (0, 1), 0.3);
 
-julia> f(0.3) # solves the integral of sin(p*x) over [0,1] with p=0.3
+julia> solve(prob, QuadGKJL()).value # solves the integral of sin(p*x) over [0,1] with p=0.3
 0.14887836958131329
 ```
-Notice that we construct an [`IntegralSolver`](@ref) object that we can evaluate at
-different parameters with a function-like interface. For more examples, see the
+Notice that we construct an [`IntegralProblem`](@ref) object that we can [`solve`](@ref) at
+with a choice of algorithm. For more examples, see the
 documentation.
 
 ### Features
 
 Special integrand interfaces
-- [`ParameterIntegrand`](@ref): allows user integrand to use keyword arguments
-- [`InplaceIntegrand`](@ref): allows an integrand to write its result inplace to an array
-- [`BatchIntegrand`](@ref): allows user-side parallelization on e.g. shared memory,
+- [`IntegralFunction`](@ref): generic user integrand of the form `f(x, p)`
+- [`InplaceIntegralFunction`](@ref): allows an integrand to write its result inplace to an array
+- [`InplaceBatchIntegralFunction`](@ref): allows user-side parallelization on e.g. shared memory,
   distributed memory, or the gpu
-- [`FourierIntegrand`](@ref): efficient evaluation of Fourier series for cubatures with
+- [`CommonSolveIntegralFunction`](@ref): define an integrand that also solves a problem
+- [`FourierIntegralFunction`](@ref): efficient evaluation of Fourier series for cubatures with
   hierachical grids
 
 Quadrature algorithms:
@@ -52,44 +53,40 @@ using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr, diag, eige
 using StaticArrays: SVector, SMatrix, pushfirst, sacollect
 using FunctionWrappers: FunctionWrapper
 using ChunkSplitters: chunks, getchunk
-using Reexport
-@reexport using AutoSymPTR
-@reexport using FourierSeriesEvaluators
-@reexport using IteratedIntegration
-@reexport using QuadGK
-@reexport using HCubature
-
+using AutoSymPTR
+using FourierSeriesEvaluators
+using IteratedIntegration
+using QuadGK: quadgk, quadgk!, BatchIntegrand
+using HCubature: hcubature
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
 using IteratedIntegration: limit_iterate, interior_point
-using HCubature: hcubature
+using HCubature: hcubature, hquadrature
+using CommonSolve: solve
+import CommonSolve: init, solve!
+export init, solve!, solve
 
-export PuncturedInterval, HyperCube
 include("domains.jl")
 
-export InplaceIntegrand
-include("inplace.jl")
-
-export BatchIntegrand, NestedBatchIntegrand
-include("batch.jl")
-
-# export IntegralProblem, solve, init, solve! # we don't export the SciML interface
-export IntegralSolver, batchsolve
+export IntegralFunction, InplaceIntegralFunction, InplaceBatchIntegralFunction
+export CommonSolveIntegralFunction
+export IntegralProblem
 include("interfaces.jl")
 
 export QuadGKJL, HCubatureJL, QuadratureFunction
-export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
-export MonkhorstPack, AutoSymPTRJL
-export NestedQuad, AbsoluteEstimate, EvalCounter
 include("algorithms.jl")
+export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
+# include("algorithms_iterated.jl")
+export MonkhorstPack, AutoSymPTRJL
+# include("algorithms_autosymptr.jl")
+export NestedQuad, AbsoluteEstimate, EvalCounter
+include("algorithms_meta.jl")
 
 export SymmetricBZ, nsyms
 export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, SymRep, UnknownRep, TrivialRep
+export AutoBZProblem
 export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
 include("brillouin.jl")
-
-export ParameterIntegrand, paramzip, paramproduct
-include("parameters.jl")
 
 export FourierIntegrand, FourierValue
 include("fourier.jl")
