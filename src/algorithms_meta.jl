@@ -12,13 +12,15 @@ stability of the integrand, so you should always pick the widest integration lim
 that inference works properly. For example, if [`ContQuadGKJL`](@ref) is used as an
 algorithm in the nested scheme, then the limits of integration should be made complex.
 """
-struct NestedQuad{T} <: IntegralAlgorithm
+struct NestedQuad{T,S} <: IntegralAlgorithm
     algs::T
-    NestedQuad(alg::IntegralAlgorithm) = new{typeof(alg)}(alg)
-    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}) = new{typeof(algs)}(algs)
+    specialize::S
+    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization=FunctionWrapperSpecialize()) = new{typeof(alg),typeof(specialize)}(alg, specialize)
+    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->FunctionWrapperSpecialize(), length(algs))) = new{typeof(algs),typeof(specialize)}(algs, specialize)
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 
+#=
 # this function helps create a tree of the cachevals used by each quadrature
 function nested_cacheval(f::F, p::P, algs, segs, lims, state, x, xs...) where {F,P}
     dom = PuncturedInterval(segs)
@@ -67,20 +69,20 @@ function nested_cacheval(f::F, p::P, algs, segs, lims, state, x, xs...) where {F
         end
     end
 end
-#=
 function init_cacheval(f, dom::AbstractIteratedLimits, p, alg::NestedQuad)
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
     return nested_cacheval(f, p, algs, limit_iterate(dom)..., interior_point(dom)...)
 end
 =#
 
-function _update!(cache, x, lims_state)
+function _update!(cache, x, (; p, lims_state))
     segs, lims, state = limit_iterate(lims_state..., x)
     len = segs[end] - segs[begin]
     kws = cache.kwargs
+    cache.p = p
     cache.cacheval.dom = segs
     cache.cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-    cache.cacheval.p = (lims, state)
+    cache.cacheval.p = (; cache.cacheval.p..., lims_state=(lims, state))
     return
 end
 _postsolve(sol, x, p) = sol.value
@@ -91,11 +93,10 @@ function init_cacheval(f::IntegralFunction, nextdom, p, alg::NestedQuad; kws...)
         nothing, nextdom
     end
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(lims))) : alg.algs
+    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(lims))) : alg.specialize
     proto = get_prototype(f, x0, p)
     func = if ndims(lims) == 1
-        IntegralFunction(proto) do x, lims_state
-            f.f(limit_iterate(lims_state..., x), p)
-        end
+        inner_integralfunction(f, proto)
     else
         len = segs[end] - segs[begin]
         a, b, = segs
@@ -103,15 +104,28 @@ function init_cacheval(f::IntegralFunction, nextdom, p, alg::NestedQuad; kws...)
         next = limit_iterate(lims, state, x)
         kws = NamedTuple(kws)
         kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-        subprob = IntegralProblem(IntegralFunction(f.f, proto), next, p; kwargs...)
-        CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1]), _update!, _postsolve, proto*x^(ndims(lims)-1), FunctionWrapperSpecialize())
+        integrand = outer_integralfunction(f, proto)
+        subprob = IntegralProblem(integrand, next, p; kwargs...)
+        CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1], spec[1:ndims(lims)-1]), _update!, _postsolve, proto*x^(ndims(lims)-1), spec[ndims(lims)])
     end
-    prob = IntegralProblem(func, segs, (lims, state); kws...)
+    prob = IntegralProblem(func, segs, (; p, lims_state=(lims, state)); kws...)
     return init(prob, algs[ndims(lims)])
+    # the order of updates is somewhat tricky. I think some could be simplified if instead
+    # we use an IntegralProblem modified to contain lims_state, instead of passing the
+    # parameter as well
 end
 
 function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
+    cacheval.p = (; cacheval.p..., p)
     return solve!(cacheval)
+end
+function inner_integralfunction(f::IntegralFunction, proto)
+    IntegralFunction(proto) do x, (; p, lims_state)
+        f.f(limit_iterate(lims_state..., x), p)
+    end
+end
+function outer_integralfunction(f::IntegralFunction, proto)
+    return IntegralFunction(f.f, proto)
 end
 #=
 function init_nest(f::F, fxx, dom, p,lims, state, algs, cacheval; kws_...) where {F}
@@ -243,7 +257,7 @@ function AbsoluteEstimate(est_alg, abs_alg; norm=norm, kwargs...)
     checkkwargs(kws)
     return AbsoluteEstimate(est_alg, abs_alg, norm, kws)
 end
-
+#=
 function init_cacheval(f, dom, p, alg::AbsoluteEstimate)
     return (est=init_cacheval(f, dom, p, alg.est_alg),
             abs=init_cacheval(f, dom, p, alg.abs_alg))
@@ -258,7 +272,7 @@ function do_solve(f, dom, p, alg::AbsoluteEstimate, cacheval;
     return do_solve(f, dom, p, alg.abs_alg, cacheval.abs;
                     abstol=atol, reltol=zero(rtol), maxiters=maxiters)
 end
-
+=#
 
 """
     EvalCounter(::IntegralAlgorithm)
@@ -269,7 +283,7 @@ The count is stored in the `sol.numevals` field.
 struct EvalCounter{T<:IntegralAlgorithm} <: IntegralAlgorithm
     alg::T
 end
-
+#=
 function init_cacheval(f, dom, p, alg::EvalCounter)
     return init_cacheval(f, dom, p, alg.alg)
 end
@@ -296,3 +310,4 @@ function do_solve(f, dom, p, alg::EvalCounter, cacheval; kws...)
         return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
     end
 end
+=#

@@ -71,19 +71,6 @@ Symmetry representation of objects with trivial transformation under the group.
 """
 struct TrivialRep <: AbstractSymRep end
 
-
-"""
-    SymRep(f)
-
-`SymRep` specifies the symmetry representation of the integral of the function
-`f`. When you define a new integrand, you can choose to implement this trait to
-specify how the integral is transformed under the symmetries of the lattice in
-order to map the integral of `f` on the IBZ to the result for the FBZ.
-
-New types for `SymRep` should also extend a corresponding method for
-[`AutoBZCore.symmetrize_`](@ref).
-"""
-SymRep(::Any) = UnknownRep()
 const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
 
 """
@@ -106,6 +93,7 @@ the result of an integral on the FBZ from `x`, which was calculated on the IBZ.
 """
 symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
 symmetrize_(::UnknownRep, ::SymmetricBZ, x) = x
+symmetrize_(::UnknownRep, bz::SymmetricBZ, x::TrivialRepType) = symmetrize_(TrivialRep(), bz, x)
 
 symmetrize(_, ::FullBZ, x) = x
 symmetrize(_, ::FullBZ, x::TrivialRepType) = x
@@ -341,8 +329,23 @@ struct AutoBZProblem{R<:AbstractSymRep,F<:AbstractIntegralFunction,BZ<:Symmetric
     p::P
     kwargs::K
 end
+
+const WARN_UNKNOWN_SYMMETRY = """
+A symmetric BZ was used with an integrand whose symmetry representation is unknown.
+For correctness, the calculation will proceed on the full BZ.
+However, it is better either to integrate without symmetries or to use symmetries by
+implementing an AbstractSymRep for your type.
+"""
+
 function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::SymmetricBZ, p=NullParameters(); kws...)
-    return AutoBZProblem(rep, f, bz, p, NamedTuple(kws))
+    proto = get_prototype(f, interior_point(bz.lims), p)
+    if rep isa UnknownRep && !(bz isa FullBZ) && !(proto isa TrivialRepType)
+        @warn WARN_UNKNOWN_SYMMETRY
+        fbz = SymmetricBZ(bz.A, bz.B, lattice_bz_limits(bz.B), nothing)
+        return AutoBZProblem(rep, f, fbz, p, NamedTuple(kws))
+    else
+        return AutoBZProblem(rep, f, bz, p, NamedTuple(kws))
+    end
 end
 function AutoBZProblem(rep::AbstractSymRep, f, bz::SymmetricBZ, p=NullParameters(); kws...)
     return AutoBZProblem(IntegralFunction(f), bz, p; kws...)
@@ -365,7 +368,7 @@ function init(prob::AutoBZProblem, alg::AutoBZAlgorithm; kwargs...)
     rep = prob.rep; f = prob.f; bz = prob.bz; p = prob.p
     kws = (; prob.kwargs..., kwargs...)
     checkkwargs(kws)
-    cacheval = init_cacheval(rep, f, bz, p, alg)
+    cacheval = init_cacheval(rep, f, bz, p, alg; kws...)
     return AutoBZCache(rep, f, bz, p, alg, cacheval, kws)
 end
 
@@ -380,41 +383,37 @@ solve(prob::AutoBZProblem, alg::AutoBZAlgorithm; kwargs...)
 Compute the solution to an [`IntegralProblem`](@ref) constructed from [`init`](@ref).
 """
 function solve!(c::AutoBZCache)
-    return do_solve_autobz(c.rep, c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
+    return do_solve_autobz(c.rep, c.f, c.bz, c.p, c.alg, c.cacheval; c.kwargs...)
 end
-#=
-function init_cacheval(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm)
-    _, dom, alg = bz_to_standard(bz, bzalg)
-    return init_cacheval(f, dom, p, alg)
+
+function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm; kws...)
+    prob, alg = bz_to_standard(f, bz, p, bzalg; kws...)
+    return init(prob, alg)
 end
 
 function do_solve(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm, cacheval; kws...)
     do_solve_autobz(bz_to_standard, f, bz, p, bzalg, cacheval; kws...)
 end
 
-const WARN_UNKNOWN_SYMMETRY = """
-A symmetric BZ was used with an integrand whose symmetry representation is unknown.
-For correctness, the calculation will be repeated on the full BZ.
-However, it is better either to integrate without symmetries or to use symmetries by extending SymRep for your type.
-"""
-function do_solve_autobz(bz_to_standard, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws...)
-    bz_, dom, alg = bz_to_standard(bz, bzalg)
-
-    j = abs(det(bz_.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
+function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws...)
+    j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
     kws = NamedTuple(_kws)
-    kws_ = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / (j * nsyms(bz_)),)) : kws
+    cacheval.f = f
+    cacheval.p = p
+    cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / (j * nsyms(bz)),)) : kws
 
-    sol = do_solve(f, dom, p, alg, cacheval; kws_...)
+    sol = solve!(cacheval)
     # TODO find a way to throw a warning when constructing the problem instead of after a solve
-    SymRep(f) isa UnknownRep && !(bz_ isa FullBZ) && !(sol.u isa TrivialRepType) && begin
+    rep isa UnknownRep && !(bz isa FullBZ) && !(sol.value isa TrivialRepType) && begin
         @warn WARN_UNKNOWN_SYMMETRY
-        fbz = SymmetricBZ(bz_.A, bz_.B, lattice_bz_limits(bz_.B), nothing)
-        _cacheval = init_cacheval(f, fbz, p, bzalg)
-        return do_solve(f, fbz, p, bzalg, _cacheval; _kws...)
+        error("not implemented")
+        # fbz = SymmetricBZ(bz_.A, bz_.B, lattice_bz_limits(bz_.B), nothing)
+        # _cacheval = init_cacheval(f, fbz, p, bzalg)
+        # return do_solve(f, fbz, p, bzalg, _cacheval; _kws...)
     end
-    val = j*symmetrize(f, bz_, sol.u)
-    err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
-    return IntegralSolution(val, err, sol.retcode, sol.numevals)
+    value = j*symmetrize_(rep, bz, sol.value)
+    # err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
+    return IntegralSolution(value, sol.retcode, sol.stats)
 end
 
 # AutoBZAlgorithms must implement:
@@ -428,17 +427,18 @@ Iterated-adaptive integration using `nested_quad` from
 [IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
 **This algorithm is the most efficient for localized integrands**.
 """
-struct IAI{T} <: AutoBZAlgorithm
+struct IAI{T,S} <: AutoBZAlgorithm
     algs::T
-    IAI(alg::IntegralAlgorithm=AuxQuadGKJL()) = new{typeof(alg)}(alg)
-    IAI(algs::Tuple{Vararg{IntegralAlgorithm}}) = new{typeof(algs)}(algs)
+    specialize::S
+    IAI(alg::IntegralAlgorithm=AuxQuadGKJL(), specialize::AbstractSpecialization=FunctionWrapperSpecialize()) = new{typeof(alg),typeof(specialize)}(alg, specialize)
+    IAI(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->FunctionWrapperSpecialize(),length(algs))) = new{typeof(algs),typeof(specialize)}(algs, specialize)
 end
 IAI(algs::IntegralAlgorithm...) = IAI(algs)
 
-function bz_to_standard(bz::SymmetricBZ, alg::IAI)
-    return bz, bz.lims, NestedQuad(alg.algs)
+function bz_to_standard(f, bz, p, bzalg::IAI; kws...)#(bz::SymmetricBZ, alg::IAI)
+    return IntegralProblem(f, bz.lims, p; kws...), NestedQuad(bzalg.algs, bzalg.specialize)
 end
-
+#=
 """
     PTR(; npt=50, nthreads=1)
 

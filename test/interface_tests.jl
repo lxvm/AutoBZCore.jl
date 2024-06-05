@@ -47,18 +47,22 @@ end
     a = 1.0
     b = 2pi
     abstol=1e-5
-    p=3.0
+    p0=3.0
     # QuadratureFunction QuadGKJL AuxQuadGKJL ContQuadGKJL MeroQuadGKJL
-    update! = (cache, x, p) -> cache.p = x
+    update! = (cache, x, p) -> cache.p = (x, p)
     postsolve = (sol, x, p) -> sol.value
-    f = (x, p) -> p + x
-    ref = (b-a)*(b^2-a^2)
-    subprob = IntegralProblem(f, (a, b), (a+b)/2; abstol)
+    f = (x, (y, p)) -> p*(y + x)
+    subprob = IntegralProblem(f, (a, b), ((a+b)/2, p0); abstol)
     integrand = CommonSolveIntegralFunction(subprob, QuadGKJL(), update!, postsolve)
-    prob = IntegralProblem(integrand, (a, b), p; abstol)
+    prob = IntegralProblem(integrand, (a, b), p0; abstol)
     for alg in (QuadratureFunction(), QuadGKJL(), HCubatureJL()) #(QuadratureFunction(), QuadGKJL(), AuxQuadGKJL(), ContQuadGKJL(), MeroQuadGKJL())
-        sol = solve(prob, alg)
-        @test ref ≈ sol.value atol=abstol
+        cache = init(prob, alg)
+        for p in [3.0, 4.0]
+            ref = p*(b-a)*(b^2-a^2)
+            cache.p = p
+            sol = solve!(cache)
+            @test ref ≈ sol.value atol=abstol
+        end
     end
 end
 
@@ -136,18 +140,21 @@ end
         =#
     end
 end
-
 @testset "multi-algorithms" begin
     # NestedQuad
-    f(x, p) = 1.0 + p*sum(cos, x)
-    p = 7.0
+    f(x, p) = 1.0 + p*sum(abs2 ∘ cos, x)
     abstol=1e-3
+    p0 = 0.0
     for dim in 1:3, alg in (QuadratureFunction(), QuadGKJL())# AuxQuadGKJL())
-        ref = (2pi)^dim
         dom = CubicLimits(zeros(dim), 2pi*ones(dim))
-        prob = IntegralProblem(f, dom, p; abstol)
+        prob = IntegralProblem(f, dom, p0; abstol)
         ndalg = NestedQuad(alg)
-        @test ref ≈ solve(prob, ndalg).value atol=abstol
+        cache = init(prob, ndalg)
+        for p in [5.0, 7.0]
+            cache.p = p
+            ref = (2pi)^dim + dim*p*pi*(2pi)^(dim-1)
+            @test ref ≈ solve!(cache).value atol=abstol
+        end
         # inplaceprob = IntegralProblem(InplaceIntegrand((y,x,p) -> y .= f(x,p), [0.0]), dom, p)
         # @test [ref] ≈ solve(inplaceprob, ndalg, abstol=abstol).value atol=abstol
         # batchprob = IntegralProblem(BatchIntegrand((y,x,p) -> y .= f.(x,Ref(p)), Float64), dom, p)

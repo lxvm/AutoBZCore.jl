@@ -83,12 +83,12 @@ include("algorithms_meta.jl")
 
 export SymmetricBZ, nsyms
 export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
-export AbstractSymRep, SymRep, UnknownRep, TrivialRep
+export AbstractSymRep, UnknownRep, TrivialRep
 export AutoBZProblem
 export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
 include("brillouin.jl")
 
-export FourierIntegrand, FourierValue
+export FourierIntegralFunction
 include("fourier.jl")
 
 export DOSProblem

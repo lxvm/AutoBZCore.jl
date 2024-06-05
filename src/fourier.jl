@@ -22,20 +22,97 @@
 # parallelization
 
 """
-    FourierIntegralFunction(f, s)
+    FourierIntegralFunction(f, s, [prototype])
 
 ## Arguments
-- `f::AbstractIntegralFunction`: The integrand, accepting inputs `f(x, s(x), p)`
+- `f`: The integrand, accepting inputs `f(x, s(x), p)`
 - `s::AbstractFourierSeries`: The Fourier series to evaluate
 """
-struct FourierIntegralFunction{F<:AbstractIntegralFunction,S<:AbstractFourierSeries} <: AbstractIntegralFunction
+struct FourierIntegralFunction{F,S,P} <: AbstractIntegralFunction
     f::F
     s::S
+    prototype::P
+end
+FourierIntegralFunction(f, s::AbstractFourierSeries) = FourierIntegralFunction(f, s, nothing)
+
+
+function get_prototype(f::FourierIntegralFunction, x, ws, p)
+    f.prototype === nothing ? f.f(x, ws(x), p) : f.prototype
+end
+get_prototype(f::FourierIntegralFunction, x, p) = get_prototype(f, x, f.s, p)
+
+function init_cacheval(f::FourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    ws = FourierSeriesEvaluators.workspace_allocate(f.s, FourierSeriesEvaluators.period(f.s))
+    prototype = get_prototype(f, get_prototype(segs), ws, p)
+    return init_segbuf(prototype, segs, alg), ws
+end
+function call_quadgk(f::FourierIntegralFunction, p, u, usegs, cacheval; kws...)
+    segbuf, ws = cacheval
+    quadgk(x -> (ux = u*x; f.f(ux, ws(ux), p)), usegs...; kws..., segbuf)
 end
 
-function get_prototype(f::FourierIntegralFunction, x, p)
-    return get_prototype(f.f, x, p)
+function init_cacheval(f::FourierIntegralFunction, dom, p, ::HCubatureJL; kws...)
+    # TODO utilize hcubature_buffer
+    ws = FourierSeriesEvaluators.workspace_allocate(f.s, FourierSeriesEvaluators.period(f.s))
+    return ws
 end
+function hcubature_integrand(f::FourierIntegralFunction, p, a, b, ws)
+    x -> f.f(x, ws(x), p)
+end
+
+function init_cacheval(f::FourierIntegralFunction, dom, p, alg::QuadratureFunction; kws...)
+    x, w = alg.fun(alg.npt)
+    ws = FourierSeriesEvaluators.workspace_allocate(f.s, FourierSeriesEvaluators.period(f.s))
+    # TODO: pre-allocate, later evaluate the series on the
+    return (rule=[(w, x) for (w,x) in zip(w,x)], buffer=nothing, ws)
+end
+function autosymptr_integrand(f::FourierIntegralFunction, p, segs, cacheval)
+    ws = cacheval.ws
+    x -> f.f(x, ws(x), p)
+end
+
+function _fourier_update!(cache, x, (; p, ws, lims_state))
+    segs, lims, state = limit_iterate(lims_state..., x)
+    s = workspace_contract!(ws, x)
+    len = segs[end] - segs[begin]
+    kws = cache.kwargs
+    cache.p = p
+    cache.cacheval.dom = segs
+    cache.cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+    cache.cacheval.p = (; cache.cacheval.p..., ws=s, lims_state=(lims, state))
+    return
+end
+function init_cacheval(f::FourierIntegralFunction, nextdom, p, alg::NestedQuad; kws...)
+    x0, (segs, lims, state) = if nextdom isa AbstractIteratedLimits
+        interior_point(nextdom), limit_iterate(nextdom)
+    else
+        nothing, nextdom
+    end
+    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(lims))) : alg.algs
+    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(lims))) : alg.specialize
+    ws = f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.s, FourierSeriesEvaluators.period(f.s))
+    proto = get_prototype(f, x0, ws, p)
+    func = if ndims(lims) == 1
+        IntegralFunction(proto) do x, (; p, ws, lims_state)
+            f.f(limit_iterate(lims_state..., x), workspace_evaluate!(ws, x), p)
+        end
+    else
+        len = segs[end] - segs[begin]
+        a, b, = segs
+        x = (a+b)/2
+        next = limit_iterate(lims, state, x)
+        s = workspace_contract!(ws, x)
+        kws = NamedTuple(kws)
+        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+        integrand = FourierIntegralFunction(f.f, s, proto)
+        subprob = IntegralProblem(integrand, next, p; kwargs...)
+        CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1], spec[1:ndims(lims)-1]), _fourier_update!, _postsolve, proto*x^(ndims(lims)-1), spec[ndims(lims)])
+    end
+    prob = IntegralProblem(func, segs, (; p, ws, lims_state=(lims, state)); kws...)
+    return init(prob, algs[ndims(lims)])
+end
+
 #=
 """
     FourierIntegrand(f, s::AbstractFourierSeries, args...; kws...)

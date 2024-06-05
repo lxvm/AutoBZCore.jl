@@ -1,11 +1,64 @@
 using Test
 using LinearAlgebra
 using StaticArrays
+using FourierSeriesEvaluators
 using AutoBZCore
-using AutoBZCore: IntegralProblem, solve, MixedParameters
+using AutoBZCore: CubicLimits
 using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
 
+@testset "FourierIntegralFunction" begin
+    @testset "quadrature" begin
+        a = 0
+        b = 1
+        p = 0.0
+        t = 1.0
+        s = FourierSeries([1, 0, 1]/2; period=t, offset=-2)
+        int(x, s, p) = x * s + p
+        ref = (b-a)*p + t*(b*sin(b/t*2pi) + t*cos(b/t*2pi) - (a*sin(a/t*2pi) + t*cos(a/t*2pi)))
+        abstol = 1e-5
+        prob = IntegralProblem(FourierIntegralFunction(int, s), (a, b), p; abstol)
+        for alg in (QuadGKJL(), QuadratureFunction())
+            @test solve(prob, alg).value ≈ ref atol=abstol
+        end
+    end
+    @testset "cubature" for dim in 2:3
+        a = zeros(dim)
+        b = ones(dim)
+        p = 0.0
+        t = 1.0
+        s = FourierSeries([prod(x) for x in Iterators.product([(0.1, 0.5, 0.3) for i in 1:dim]...)]; period=t, offset=-2)
+        int(x, s, p) = prod(x) * s + p
+        abstol = 1e-4
+        prob = IntegralProblem(FourierIntegralFunction(int, s), (a, b), p; abstol)
+        refprob = IntegralProblem(IntegralFunction((x, p) -> int(x, s(x), p)), (a, b), p; abstol)
+        for alg in (HCubatureJL(),)
+            @test solve(prob, alg).value ≈ solve(refprob, alg).value atol=abstol
+        end
+    end
+    @testset "meta-algorithms" for dim in 2:3
+        # NestedQuad
+        a = zeros(dim)
+        b = ones(dim)
+        p0 = 0.0
+        t = 1.0
+        s = FourierSeries([prod(x) for x in Iterators.product([(0.1, 0.5, 0.3) for i in 1:dim]...)]; period=t, offset=-2)
+        int(x, s, p) = prod(x) * s + p
+        abstol = 1e-4
+        prob = IntegralProblem(FourierIntegralFunction(int, s), CubicLimits(a, b), p0; abstol)
+        refprob = IntegralProblem(FourierIntegralFunction(int, s), (a, b), p0; abstol)
+        for alg in (QuadGKJL(),)
+            cache = init(prob, NestedQuad(alg))
+            refcache = init(refprob, HCubatureJL())
+            for p in [5.0, 6.0]
+                cache.p = p
+                refcache.p = p
+                @test solve!(cache).value ≈ solve!(refcache).value atol=abstol
+            end
+        end
+    end
+end
 
+#=
 @testset "FourierIntegrand" begin
     for dims in 1:3
         s = FourierSeries(integer_lattice(dims), period=1)
@@ -54,3 +107,4 @@ end
         end
     end
 end
+=#
