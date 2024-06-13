@@ -403,17 +403,10 @@ function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws..
     cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / (j * nsyms(bz)),)) : kws
 
     sol = solve!(cacheval)
-    # TODO find a way to throw a warning when constructing the problem instead of after a solve
-    rep isa UnknownRep && !(bz isa FullBZ) && !(sol.value isa TrivialRepType) && begin
-        @warn WARN_UNKNOWN_SYMMETRY
-        error("not implemented")
-        # fbz = SymmetricBZ(bz_.A, bz_.B, lattice_bz_limits(bz_.B), nothing)
-        # _cacheval = init_cacheval(f, fbz, p, bzalg)
-        # return do_solve(f, fbz, p, bzalg, _cacheval; _kws...)
-    end
     value = j*symmetrize_(rep, bz, sol.value)
+    stats = (; sol.stats...)
     # err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
-    return IntegralSolution(value, sol.retcode, sol.stats)
+    return IntegralSolution(value, sol.retcode, stats)
 end
 
 # AutoBZAlgorithms must implement:
@@ -435,10 +428,10 @@ struct IAI{T,S} <: AutoBZAlgorithm
 end
 IAI(algs::IntegralAlgorithm...) = IAI(algs)
 
-function bz_to_standard(f, bz, p, bzalg::IAI; kws...)#(bz::SymmetricBZ, alg::IAI)
+function bz_to_standard(f, bz, p, bzalg::IAI; kws...)
     return IntegralProblem(f, bz.lims, p; kws...), NestedQuad(bzalg.algs, bzalg.specialize)
 end
-#=
+
 """
     PTR(; npt=50, nthreads=1)
 
@@ -452,8 +445,8 @@ struct PTR <: AutoBZAlgorithm
 end
 PTR(; npt=50, nthreads=1) = PTR(npt, nthreads)
 
-function bz_to_standard(bz::SymmetricBZ, alg::PTR)
-     return bz, canonical_ptr_basis(bz.B), MonkhorstPack(npt=alg.npt, syms=bz.syms, nthreads=alg.nthreads)
+function bz_to_standard(f, bz, p, alg::PTR; kws...)
+    return IntegralProblem(f, canonical_ptr_basis(bz.B), p; kws...), MonkhorstPack(npt=alg.npt, syms=bz.syms, nthreads=alg.nthreads)
 end
 
 
@@ -478,9 +471,11 @@ end
 function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2, nthreads=1)
     return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost, nthreads)
 end
-function bz_to_standard(bz::SymmetricBZ, alg::AutoPTR)
-    return bz, canonical_ptr_basis(bz.B), AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms, nthreads=alg.nthreads)
+
+function bz_to_standard(f, bz, p, alg::AutoPTR; kws...)
+    return IntegralProblem(f, canonical_ptr_basis(bz.B), p; kws...), AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms, nthreads=alg.nthreads)
 end
+
 function init_cacheval(f, bz::SymmetricBZ, p, bzalg::AutoPTR)
     bz_, dom, alg = bz_to_standard(bz, bzalg)
     f isa NestedBatchIntegrand && throw(ArgumentError("AutoSymPTRJL doesn't support nested batching"))
@@ -490,20 +485,17 @@ function init_cacheval(f, bz::SymmetricBZ, p, bzalg::AutoPTR)
     return (rule=rule, cache=cache, buffer=buffer)
 end
 function do_solve_autobz(bz_to_standard, f, bz, p, bzalg::AutoPTR, cacheval; _kws...)
-    bz_, dom, alg = bz_to_standard(bz, bzalg)
-    j = abs(det(bz_.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
+    j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
     kws = NamedTuple(_kws)
-    kws_ = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / j,)) : kws
+    cacheval.f = f
+    cacheval.p = p
+    cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / j,)) : kws
 
-    sol = do_solve(f, dom, p, alg, cacheval; kws_...)
-    # TODO find a way to throw a warning when constructing the problem instead of after a solve
-    SymRep(f) isa UnknownRep && !(bz_ isa FullBZ) && !(sol.u isa TrivialRepType) && begin
-        @warn WARN_UNKNOWN_SYMMETRY
-        fbz = SymmetricBZ(bz_.A, bz_.B, lattice_bz_limits(bz_.B), nothing)
-        _cacheval = init_cacheval(f, fbz, p, bzalg)
-        return do_solve(f, fbz, p, bzalg, _cacheval; _kws...)
-    end
-    return IntegralSolution(sol.u * j, sol.resid * j, sol.retcode, sol.numevals)
+    sol = solve!(cacheval)
+    value = j*sol.value
+    error = j*sol.stats.error
+    stats = (; sol.stats..., error)
+    return IntegralSolution(value, sol.retcode, stats)
 end
 
 """
@@ -519,13 +511,13 @@ struct TAI{N} <: AutoBZAlgorithm
 end
 TAI(; norm=norm, initdiv=1) = TAI(norm, initdiv)
 
-function bz_to_standard(bz::SymmetricBZ, alg::TAI)
-    bz_ = bz.lims isa CubicLimits ? bz : SymmetricBZ(bz.A, bz.B, lattice_bz_limits(bz.B), nothing)
-    l = bz_.lims
-    return bz_, HyperCube(l.a, l.b), HCubatureJL(norm=alg.norm, initdiv = alg.initdiv)
+function bz_to_standard(f, bz, p, alg::TAI; kws...)
+    @assert bz.lims isa CubicLimits "TAI can only integrate rectangular regions"
+    return IntegralProblem(f, HyperCube(bz.lims.a, bz.lims.b), p; kws...), HCubatureJL(norm=alg.norm, initdiv = alg.initdiv)
 end
 
 
+#=
 """
     PTR_IAI(; ptr=PTR(), iai=IAI())
 

@@ -115,8 +115,10 @@ function init_cacheval(f::IntegralFunction, nextdom, p, alg::NestedQuad; kws...)
     # parameter as well
 end
 
+
 function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
     cacheval.p = (; cacheval.p..., p)
+    cacheval.kwargs = (; cacheval.kwargs..., kws...)
     return solve!(cacheval)
 end
 function inner_integralfunction(f::IntegralFunction, proto)

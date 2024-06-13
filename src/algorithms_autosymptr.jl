@@ -18,7 +18,7 @@ struct MonkhorstPack{S} <: IntegralAlgorithm
     nthreads::Int
 end
 MonkhorstPack(; npt=50, syms=nothing, nthreads=1) = MonkhorstPack(npt, syms, nthreads)
-function init_rule(dom::Basis, alg::MonkhorstPack)
+function init_rule(dom, alg::MonkhorstPack)
     # rule = AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
     # return rule(eltype(dom), Val(ndims(dom)))
     if alg.syms === nothing
@@ -31,25 +31,20 @@ end
 rule_type(::AutoSymPTR.PTR{N,T}) where {N,T} = SVector{N,T}
 rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
 
-function init_cacheval(f, dom::Basis, p, alg::MonkhorstPack)
-    f isa NestedBatchIntegrand && throw(ArgumentError("MonkhorstPack doesn't support nested batching"))
+function init_cacheval(f::IntegralFunction, dom, p, alg::MonkhorstPack; kws...)
     rule = init_rule(dom, alg)
     buf = init_buffer(f, alg.nthreads)
     return (rule=rule, buffer=buf)
 end
 
-function do_solve(f, dom, p, alg::MonkhorstPack, cacheval;
+function do_integral(f, dom, p, alg::MonkhorstPack, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
-    g = if f isa BatchIntegrand
-        xx = eltype(f.x) === Nothing ? typeof(dom*zero(rule_type(cacheval.rule)))[] : f.x
-        AutoSymPTR.BatchIntegrand((y,x) -> f.f!(y,x,p), f.y, xx, max_batch=f.max_batch)
-    elseif f isa InplaceIntegrand
-        AutoSymPTR.InplaceIntegrand((y,x) -> f.f!(y,x,p), f.I)
-    else
-        x -> f(x, p)
-    end
-    I = cacheval.rule(g, dom, cacheval.buffer)
-    return IntegralSolution(I, nothing, true, -1)
+    g = autosymptr_integrand(f, p, dom, cacheval)
+    # TODO convert the domain to a Basis
+    value = cacheval.rule(g, dom, cacheval.buffer)
+    retcode = Success
+    stats = (; numevals=length(cacheval.rule))
+    return IntegralSolution(value, retcode, stats)
 end
 
 """
@@ -77,11 +72,10 @@ end
 function AutoSymPTRJL(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2, syms=nothing, nthreads=1)
     return AutoSymPTRJL(norm, a, nmin, nmax, n₀, Δn, keepmost, syms, nthreads)
 end
-function init_rule(dom::Basis, alg::AutoSymPTRJL)
+function init_rule(dom, alg::AutoSymPTRJL)
     return AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
 end
-function init_cacheval(f, dom::Basis, p, alg::AutoSymPTRJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("AutoSymPTRJL doesn't support nested batching"))
+function init_cacheval(f::IntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
     rule = init_rule(dom, alg)
     cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
     buffer = init_buffer(f, alg.nthreads)
@@ -91,15 +85,10 @@ end
 function do_solve(f, dom, p, alg::AutoSymPTRJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
-    g = if f isa BatchIntegrand
-        xx = eltype(f.x) === Nothing ? typeof(dom*zero(rule_type(cacheval.cache[1])))[] : f.x
-        AutoSymPTR.BatchIntegrand((y,x) -> f.f!(y,x,p), f.y, xx, max_batch=f.max_batch)
-    elseif f isa InplaceIntegrand
-        AutoSymPTR.InplaceIntegrand((y,x) -> f.f!(y,x,p), f.I)
-    else
-        x -> f(x, p)
-    end
-    val, err = autosymptr(g, dom; syms = alg.syms, rule = cacheval.rule, cache = cacheval.cache, keepmost = alg.keepmost,
+    g = autosymptr_integrand(f, p, dom, cacheval)
+    value, error = autosymptr(g, dom; syms = alg.syms, rule = cacheval.rule, cache = cacheval.cache, keepmost = alg.keepmost,
         abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm, buffer=cacheval.buffer)
-    return IntegralSolution(val, err, true, -1)
+    retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(a))) : abstol)) ? Success : Failure
+    stats = (; error)
+    return IntegralSolution(value, retcode, stats)
 end

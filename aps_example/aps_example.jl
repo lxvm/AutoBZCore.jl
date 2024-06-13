@@ -24,11 +24,11 @@ using FourierSeriesEvaluators, LinearAlgebra
 
 h = FourierSeries(H_R, period=1.0)
 
-η = 1e-2                    # 10 meV (scattering amplitude)
+η = 5e-2                    # 10 meV (scattering amplitude)
 ω_min = 10
 ω_max = 15
 p0 = (; η, ω=(ω_min + ω_max)/2) # initial parameters
-# BUG cannot redefine this function without breaking functionwrappers
+# BUG cannot redefine this function without breaking functionwrappers in v1.10
 # https://github.com/JuliaLang/julia/issues/52635#issuecomment-2150808569
 greens_function(k, h_k, (; η, ω)) = tr(inv((ω+im*η)*I - h_k))
 prototype = let k = FourierSeriesEvaluators.period(h)
@@ -45,14 +45,15 @@ prob_dos = AutoBZProblem(integrand, bz, p0; abstol=1e-3)
 using HChebInterp
 
 cheb_order = 15
-#=
-batch_iai = let prob = prob_dos, alg = IAI(QuadGKJL()), nthreads=min(cheb_order+1, Threads.nthreads())
+
+function dos_solver(prob, alg)
     cache = init(prob, alg)
     ω -> begin
         cache.p = (; cache.p..., ω)
         solve!(cache).value
     end
-    #=
+end
+function threaded_dos_solver(prob, alg; nthreads=min(cheb_order, Threads.nthreads()))
     caches = [init(prob, alg) for _ in 1:nthreads]
     BatchFunction() do ωs
         out = Vector{typeof(prototype)}(undef, length(ωs))
@@ -66,22 +67,14 @@ batch_iai = let prob = prob_dos, alg = IAI(QuadGKJL()), nthreads=min(cheb_order+
         end
         return out
     end
-    =#
 end
-=#
-batch_iai = let cache = init(prob_dos, IAI((QuadGKJL(), QuadGKJL(), QuadGKJL()), (AutoBZCore.FullSpecialize(), AutoBZCore.FunctionWrapperSpecialize(), AutoBZCore.FullSpecialize())))
-    ω -> begin
-        cache.p = (; cache.p..., ω)
-        solve!(cache).value
-    end
-end
-@time greens_iai = hchebinterp(batch_iai, ω_min, ω_max; atol=1e-2)
-#=
-batch_ptr = let prob = prob_dos, nthreads=cheb_order+1
-    ω -> batchsolve(prob, PTR(; nthreads), ω; nthreads=1)
-end
-greens_ptr = hchebinterp(dos_solver_ptr, 10, 15; atol=1e-2)
-=#
+
+dos_solver_iai = dos_solver(prob_dos, IAI(QuadGKJL()))
+@time greens_iai = hchebinterp(dos_solver_iai, ω_min, ω_max; atol=1e-2, order=cheb_order)
+
+# dos_solver_ptr = dos_solver(prob_dos, PTR(; npt=100))
+# @time greens_ptr = hchebinterp(dos_solver_ptr, ω_min, ω_max; atol=1e-2, order=cheb_order)
+
 using CairoMakie
 
 set_theme!(fontsize=24, linewidth=4)

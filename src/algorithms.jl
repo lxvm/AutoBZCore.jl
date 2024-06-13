@@ -174,6 +174,7 @@ struct QuadratureFunction{F} <: IntegralAlgorithm
     nthreads::Int
 end
 QuadratureFunction(; fun=trapz, npt=50, nthreads=1) = QuadratureFunction(fun, npt, nthreads)
+
 function init_cacheval(f::IntegralFunction, dom, p, alg::QuadratureFunction; kws...)
     x, w = alg.fun(alg.npt)
     return (; rule=[(w,x) for (w,x) in zip(w,x)], buffer=nothing)
@@ -188,7 +189,6 @@ function init_cacheval(f::InplaceIntegralFunction, dom, p, alg::QuadratureFuncti
     return (; rule=[(w,x) for (w,x) in zip(w,x)], buffer=nothing, I, Itmp, y, ytmp)
 end
 function init_cacheval(f::InplaceBatchIntegralFunction, dom, p, alg::QuadratureFunction; kws...)
-    buf = init_buffer(f, alg.nthreads)
     x, w = alg.fun(alg.npt)
     proto=get_prototype(f, first(x), p)
     return (rule=[(w,x) for (w,x) in zip(w,x)], buffer=similar(proto, len), y=similar(proto, len), x=Vector{float(eltype(dom))}(undef, len))
