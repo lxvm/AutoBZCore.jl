@@ -72,8 +72,8 @@ end
 dos_solver_iai = dos_solver(prob_dos, IAI(QuadGKJL()))
 @time greens_iai = hchebinterp(dos_solver_iai, ω_min, ω_max; atol=1e-2, order=cheb_order)
 
-# dos_solver_ptr = dos_solver(prob_dos, PTR(; npt=100))
-# @time greens_ptr = hchebinterp(dos_solver_ptr, ω_min, ω_max; atol=1e-2, order=cheb_order)
+dos_solver_ptr = dos_solver(prob_dos, PTR(; npt=100))
+@time greens_ptr = hchebinterp(dos_solver_ptr, ω_min, ω_max; atol=1e-2, order=cheb_order)
 
 using CairoMakie
 
@@ -84,10 +84,9 @@ ax1 = Axis(fig1[1,1], limits=((10,15), (0,6)), xlabel="ω (eV)", ylabel="SVO DOS
 p1 = lines!(ax1, 10:η/100:15, ω -> -imag(greens_iai(ω))/pi/det(bz.B); label="IAI, η=$η")
 axislegend(ax1)
 save("iai_svo_dos.pdf", fig1)
-#=
+
 fig2 = Figure()
-ax2 = Axis(fig2[1,1], limits=((10,15), (0,det(bz.B)*6)), xlabel="ω (eV)", ylabel="SVO DOS (eV⁻¹ Å⁻³)")
-p2 = lines!(ax2, 10:η/100:15, ω -> -imag(greens_ptr(ω))/pi; label="PTR, η=$η")
+ax2 = Axis(fig2[1,1], limits=((10,15), (0,6)), xlabel="ω (eV)", ylabel="SVO DOS (eV⁻¹)")
+p2 = lines!(ax2, 10:η/100:15, ω -> -imag(greens_ptr(ω))/pi/det(bz.B); label="PTR, η=$η")
 axislegend(ax2)
 save("ptr_svo_dos.pdf", fig2)
-=#

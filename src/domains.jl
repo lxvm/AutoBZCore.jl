@@ -6,6 +6,8 @@ function get_prototype(dom)
     return (a+b)/2
 end
 
+get_basis(B::Basis) = B
+
 """
     PuncturedInterval(s)
 

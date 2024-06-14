@@ -82,11 +82,12 @@ function init_cacheval(f::IntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
     return (rule=rule, cache=cache, buffer=buffer)
 end
 
-function do_solve(f, dom, p, alg::AutoSymPTRJL, cacheval;
+function do_integral(f, dom, p, alg::AutoSymPTRJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
     g = autosymptr_integrand(f, p, dom, cacheval)
-    value, error = autosymptr(g, dom; syms = alg.syms, rule = cacheval.rule, cache = cacheval.cache, keepmost = alg.keepmost,
+    bas = get_basis(dom)
+    value, error = autosymptr(g, bas; syms = alg.syms, rule = cacheval.rule, cache = cacheval.cache, keepmost = alg.keepmost,
         abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm, buffer=cacheval.buffer)
     retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(a))) : abstol)) ? Success : Failure
     stats = (; error)

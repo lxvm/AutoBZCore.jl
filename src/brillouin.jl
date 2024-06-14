@@ -47,6 +47,8 @@ nsyms(::FullBZ) = 1
 
 Base.summary(bz::SymmetricBZ) = string(checksquare(bz.A), "-dimensional Brillouin zone with ", bz isa FullBZ ? "trivial" : nsyms(bz), " symmetries")
 Base.show(io::IO, bz::SymmetricBZ) = print(io, summary(bz))
+Base.ndims(::SymmetricBZ{S,L,d}) where {S,L,d} = d
+Base.eltype(::Type{<:SymmetricBZ{S,L,d,TA,TB}}) where {S,L,d,TA,TB} = TB
 
 # Define traits for symmetrization based on symmetry representations
 
@@ -391,10 +393,6 @@ function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm; kws..
     return init(prob, alg)
 end
 
-function do_solve(f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm, cacheval; kws...)
-    do_solve_autobz(bz_to_standard, f, bz, p, bzalg, cacheval; kws...)
-end
-
 function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws...)
     j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
     kws = NamedTuple(_kws)
@@ -472,19 +470,28 @@ function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), 
     return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost, nthreads)
 end
 
-function bz_to_standard(f, bz, p, alg::AutoPTR; kws...)
-    return IntegralProblem(f, canonical_ptr_basis(bz.B), p; kws...), AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms, nthreads=alg.nthreads)
-end
 
-function init_cacheval(f, bz::SymmetricBZ, p, bzalg::AutoPTR)
-    bz_, dom, alg = bz_to_standard(bz, bzalg)
-    f isa NestedBatchIntegrand && throw(ArgumentError("AutoSymPTRJL doesn't support nested batching"))
-    rule = SymmetricRuleDef(init_rule(dom, alg), SymRep(f), bz_)
-    cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
-    buffer = init_buffer(f, alg.nthreads)
-    return (rule=rule, cache=cache, buffer=buffer)
+struct RepBZ{R,B}
+    rep::R
+    bz::B
 end
-function do_solve_autobz(bz_to_standard, f, bz, p, bzalg::AutoPTR, cacheval; _kws...)
+Base.ndims(dom::RepBZ) = ndims(dom.bz)
+Base.eltype(::Type{RepBZ{R,B}}) where {R,B} = eltype(B)
+
+function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoPTR; kws...)
+    prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
+    alg = AutoSymPTRJL(norm=bzalg.norm, a=bzalg.a, nmin=bzalg.nmin, nmax=bzalg.nmax, n₀=bzalg.n₀, Δn=bzalg.Δn, keepmost=bzalg.keepmost, syms=bz.syms, nthreads=bzalg.nthreads)
+    return init(prob, alg)
+end
+get_basis(dom::RepBZ) = canonical_ptr_basis(dom.bz.B)
+function init_rule(dom::RepBZ, alg::AutoSymPTRJL)
+    B = get_basis(dom)
+    rule = init_rule(B, alg)
+    return SymmetricRuleDef(rule, dom.rep, dom.bz)
+end
+# The spectral convergence of the PTR for integrands with non-trivial symmetry action
+# requires symmetrizing inside the quadrature
+function do_solve_autobz(rep, f, bz, p, bzalg::AutoPTR, cacheval; _kws...)
     j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
     kws = NamedTuple(_kws)
     cacheval.f = f
@@ -493,10 +500,10 @@ function do_solve_autobz(bz_to_standard, f, bz, p, bzalg::AutoPTR, cacheval; _kw
 
     sol = solve!(cacheval)
     value = j*sol.value
-    error = j*sol.stats.error
-    stats = (; sol.stats..., error)
+    stats = (; sol.stats..., error=sol.stats.error*j)
     return IntegralSolution(value, sol.retcode, stats)
 end
+
 
 """
     TAI(; norm=norm, initdivs=1)
@@ -515,7 +522,6 @@ function bz_to_standard(f, bz, p, alg::TAI; kws...)
     @assert bz.lims isa CubicLimits "TAI can only integrate rectangular regions"
     return IntegralProblem(f, HyperCube(bz.lims.a, bz.lims.b), p; kws...), HCubatureJL(norm=alg.norm, initdiv = alg.initdiv)
 end
-
 
 #=
 """

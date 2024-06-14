@@ -411,9 +411,14 @@ function init_cacheval(f::FourierIntegralFunction, dom , p, alg::MonkhorstPack; 
     return (; rule, buffer=nothing, ws)
 end
 
-function init_fourier_rule(w::FourierWorkspace, dom::Basis, alg::AutoSymPTRJL)
+function init_fourier_rule(w::FourierWorkspace, dom, alg::AutoSymPTRJL)
     @assert ndims(w.series) == ndims(dom)
     return FourierMonkhorstPackRule(w, alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
+end
+function init_fourier_rule(w::FourierWorkspace, dom::RepBZ, alg::AutoSymPTRJL)
+    B = get_basis(dom)
+    rule = init_fourier_rule(w, B, alg)
+    return SymmetricRuleDef(rule, dom.rep, dom.bz)
 end
 function init_cacheval(f::FourierIntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
     ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
