@@ -1,6 +1,6 @@
-# import Pkg
-# Pkg.activate(".")           # reproducible environment included
-# Pkg.instantiate()           # install dependencies
+import Pkg
+Pkg.activate(".")           # reproducible environment included
+Pkg.instantiate()           # install dependencies
 
 using WannierIO
 
@@ -24,7 +24,7 @@ using FourierSeriesEvaluators, LinearAlgebra
 
 h = FourierSeries(H_R, period=1.0)
 
-η = 5e-2                    # 10 meV (scattering amplitude)
+η = 1e-2                    # 10 meV (scattering amplitude)
 ω_min = 10
 ω_max = 15
 p0 = (; η, ω=(ω_min + ω_max)/2) # initial parameters

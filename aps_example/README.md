@@ -1,4 +1,6 @@
-[Scripts updated for AutoBZCore v0.3]
+[Scripts in development for AutoBZCore v0.4]
+
+Warning: this example may not work well using Julia 1.10. 
 
 Hello, to reproduce the code example in these
 [slides](https://web.mit.edu/lxvm/www/slides/autobz_aps.pdf) follow these steps:
