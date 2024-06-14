@@ -89,7 +89,7 @@ function CommonSolveIntegralFunction(prob, alg, update!, postsolve, prototype=no
     return CommonSolveIntegralFunction(prob, alg, NamedTuple(kws), update!, postsolve, prototype, specialize)
 end
 
-function do_solve!(cache, f, x, p)
+function do_solve!(cache, f::CommonSolveIntegralFunction, x, p)
     f.update!(cache, x, p)
     sol = solve!(cache)
     return f.postsolve(sol, x, p)

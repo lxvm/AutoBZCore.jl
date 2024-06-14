@@ -43,6 +43,66 @@ function get_prototype(f::FourierIntegralFunction, x, ws, p)
 end
 get_prototype(f::FourierIntegralFunction, x, p) = get_prototype(f, x, f.s, p)
 
+"""
+    FourierCommonSolveIntegralFunction(prob, alg, update!, postsolve, s, [prototype, specialize]; alias=false, kws...)
+
+Constructor for an integrand that solves a problem defined with the CommonSolve.jl
+interface, `prob`, which is instantiated using `init(prob, alg; kws...)`. Helper functions
+include: `update!(cache, x, s(x), p)` is called before
+`solve!(cache)`, followed by `postsolve(sol, x, s(x), p)`, which should return the value of the solution.
+The `prototype` argument can help control how much to `specialize` on the type of the
+problem, which defaults to `FullSpecialize()` so that run times are improved. However
+`FunctionWrapperSpecialize()` may help reduce compile times.
+"""
+struct FourierCommonSolveIntegralFunction{P,A,S,K,U,PS,T,M<:AbstractSpecialization} <: AbstractIntegralFunction
+    prob::P
+    alg::A
+    s::S
+    kwargs::K
+    update!::U
+    postsolve::PS
+    prototype::T
+    specialize::M
+    alias::Bool
+end
+function FourierCommonSolveIntegralFunction(prob, alg, update!, postsolve, s, prototype=nothing, specialize=FullSpecialize(); alias=false, kws...)
+    return FourierCommonSolveIntegralFunction(prob, alg, s, NamedTuple(kws), update!, postsolve, prototype, specialize, alias)
+end
+
+function do_solve!(cache, f::FourierCommonSolveIntegralFunction, x, s, p)
+    f.update!(cache, x, s, p)
+    sol = solve!(cache)
+    return f.postsolve(sol, x, s, p)
+end
+function get_prototype(f::FourierCommonSolveIntegralFunction, x, ws, p)
+    if isnothing(f.prototype)
+        cache = init(f.prob, f.alg; f.kwargs...)
+        do_solve!(cache, f, x, ws(x), p)
+    else
+        f.prototype
+    end
+end
+get_prototype(f::FourierCommonSolveIntegralFunction, x, p) = get_prototype(f, x, f.s, p)
+
+function init_specialized_fourierintegrand(cache, f, dom, p; x=get_prototype(dom), s = f.s(x), prototype=f.prototype)
+    proto = prototype === nothing ? do_solve!(cache, f, x, s, p) : prototype
+    func = (x, s, p) -> do_solve!(cache, f, x, s, p)
+    integrand = if f.specialize isa FullSpecialize
+        func
+    elseif f.specialize isa FunctionWrapperSpecialize
+        FunctionWrapper{typeof(prototype), typeof((x, s, p))}(func)
+    else
+        throw(ArgumentError("$(f.specialize) is not implemented"))
+    end
+    return integrand, proto
+end
+function _init_fouriercommonsolvefunction(f, dom, p; kws...)
+    cache = init(f.prob, f.alg; f.kwargs...)
+    integrand, prototype = init_specialized_fourierintegrand(cache, f, dom, p; kws...)
+    return cache, integrand, prototype
+end
+
+
 # similar to workspace_allocate, but more type-stable because of loop unrolling and vector types
 function workspace_allocate_vec(s::AbstractFourierSeries{N}, x::NTuple{N,Any}, len::NTuple{N,Integer}=ntuple(one,Val(N))) where {N}
     # Only the top-level workspace has an AbstractFourierSeries in the series field
@@ -108,46 +168,28 @@ function autosymptr_integrand(f::FourierIntegralFunction, p, segs, cacheval)
     x -> x isa FourierValue ? f.f(x.x, x.s, p) : f.f(x, ws(x), p)
 end
 
-function _fourier_update!(cache, x, (; p, ws, lims_state))
-    segs, lims, state = limit_iterate(lims_state..., x)
-    s = workspace_contract!(ws, x)
-    len = segs[end] - segs[begin]
-    kws = cache.kwargs
-    cache.p = p
-    cache.cacheval.dom = segs
-    cache.cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-    cache.cacheval.p = (; cache.cacheval.p..., ws=s, lims_state=(lims, state))
+function _fourier_update!(cache, x, p)
+    _update!(cache, x, p)
+    s = workspace_contract!(p.ws, x)
+    cache.cacheval.p = (; cache.cacheval.p..., ws=s)
     return
 end
-function init_cacheval(f::FourierIntegralFunction, nextdom, p, alg::NestedQuad; kws...)
-    x0, (segs, lims, state) = if nextdom isa AbstractIteratedLimits
-        interior_point(nextdom), limit_iterate(nextdom)
-    else
-        nothing, nextdom
-    end
-    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(lims))) : alg.algs
-    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(lims))) : alg.specialize
+function inner_integralfunction(f::FourierIntegralFunction, x0, p)
     ws = f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
     proto = get_prototype(f, x0, ws, p)
-    func = if ndims(lims) == 1
-        IntegralFunction(proto) do x, (; p, ws, lims_state)
-            f.f(limit_iterate(lims_state..., x), workspace_evaluate!(ws, x), p)
-        end
-    else
-        len = segs[end] - segs[begin]
-        a, b, = segs
-        x = (a+b)/2
-        next = limit_iterate(lims, state, x)
-        s = workspace_contract!(ws, x)
-        kws = NamedTuple(kws)
-        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-        integrand = FourierIntegralFunction(f.f, s, proto; alias=true)
-        subprob = IntegralProblem(integrand, next, p; kwargs...)
-        CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1], spec[1:ndims(lims)-1]), _fourier_update!, _postsolve, proto*x^(ndims(lims)-1), spec[ndims(lims)])
+    func = IntegralFunction(proto) do x, (; p, ws, lims_state)
+        f.f(limit_iterate(lims_state..., x), workspace_evaluate!(ws, x), p)
     end
-    prob = IntegralProblem(func, segs, (; p, ws, lims_state=(lims, state)); kws...)
-    return init(prob, algs[ndims(lims)])
+    return func, ws
 end
+function outer_integralfunction(f::FourierIntegralFunction, x0, p)
+    ws = f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    proto = get_prototype(f, x0, ws, p)
+    s = workspace_contract!(ws, x0[end])
+    func = FourierIntegralFunction(f.f, s, proto; alias=true)
+    return func, ws, _fourier_update!, _postsolve
+end
+# TODO implement FourierCommonSolveIntegralFunction
 
 # PTR rules
 
