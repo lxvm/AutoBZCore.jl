@@ -120,8 +120,7 @@ function _init_commonsolvefunction(f, dom, p; kws...)
     return cache, integrand, prototype
 end
 
-# TODO reimplement CommonSolveIntegralFunction as a CommonSolveIntegralProblem OR
-# (why? so that FunctionWrappers can be used more systematically)
+# TODO add InplaceCommonSolveIntegralFunction and InplaceBatchCommonSolveIntegralFunction
 # TODO add ThreadedCommonSolveIntegralFunction and DistributedCommonSolveIntegralFunction
 
 """
@@ -162,7 +161,7 @@ function IntegralProblem(f, dom, p=NullParameters(); kws...)
     return IntegralProblem(IntegralFunction(f), dom, p; kws...)
 end
 
-mutable struct IntegralCache{F,D,P,A,C,K}
+mutable struct IntegralSolver{F,D,P,A,C,K}
     f::F
     dom::D
     p::P
@@ -179,7 +178,7 @@ function checkkwargs(kwargs)
 end
 
 """
-    init(::IntegralProblem, ::IntegralAlgorithm; kws...)::IntegralCache
+    init(::IntegralProblem, ::IntegralAlgorithm; kws...)::IntegralSolver
 
 Construct a cache for an [`IntegralProblem`](@ref), [`IntegralAlgorithm`](@ref), and the
 keyword arguments to the solver (i.e. `abstol`, `reltol`, or `maxiters`) that can be reused
@@ -190,7 +189,7 @@ function init(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
     kws = (; prob.kwargs..., kwargs...)
     checkkwargs(kws)
     cacheval = init_cacheval(f, dom, p, alg; kws...)
-    return IntegralCache(f, dom, p, alg, cacheval, kws)
+    return IntegralSolver(f, dom, p, alg, cacheval, kws)
 end
 
 """
@@ -218,11 +217,11 @@ smaller than the absolute tolerance.
 solve(prob::IntegralProblem, alg::IntegralAlgorithm; kwargs...)
 
 """
-    solve!(::IntegralCache)::IntegralSolution
+    solve!(::IntegralSolver)::IntegralSolution
 
 Compute the solution to an [`IntegralProblem`](@ref) constructed from [`init`](@ref).
 """
-function solve!(c::IntegralCache)
+function solve!(c::IntegralSolver)
     return do_integral(c.f, c.dom, c.p, c.alg, c.cacheval; c.kwargs...)
 end
 

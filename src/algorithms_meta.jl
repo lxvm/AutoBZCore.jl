@@ -81,7 +81,6 @@ function outer_integralfunction(f::IntegralFunction, x0, p)
     ws = nothing
     return func, ws, _update!, _postsolve
 end
-# TODO implement for InplaceIntegralFunction, InplaceBatchIntegralFunction, CommonSolveIntegralFunction
 
 """
     AbsoluteEstimate(est_alg, abs_alg; kws...)

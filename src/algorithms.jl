@@ -97,7 +97,7 @@ end
 function call_quadgk(f::CommonSolveIntegralFunction, p, u, usegs, cacheval; kws...)
     # cache = cacheval[2] could call do_solve!(cache, f, x, p) to fully specialize
     integrand = cacheval[3]
-    quadgk(x -> integrand(x, p), usegs...; kws..., segbuf=cacheval[1])
+    quadgk(x -> integrand(u * x, p), usegs...; kws..., segbuf=cacheval[1])
 end
 
 
@@ -175,28 +175,35 @@ struct QuadratureFunction{F} <: IntegralAlgorithm
 end
 QuadratureFunction(; fun=trapz, npt=50, nthreads=1) = QuadratureFunction(fun, npt, nthreads)
 
-function init_cacheval(f::IntegralFunction, dom, p, alg::QuadratureFunction; kws...)
+function init_rule(dom, alg::QuadratureFunction)
     x, w = alg.fun(alg.npt)
-    return (; rule=[(w,x) for (w,x) in zip(w,x)], buffer=nothing)
+    return [(w,x) for (w,x) in zip(w,x)]
 end
-function init_cacheval(f::InplaceIntegralFunction, dom, p, alg::QuadratureFunction; kws...)
-    x, w = alg.fun(alg.npt)
-    proto = get_prototype(f, first(x), p)
+function init_autosymptr_cache(f::IntegralFunction, dom, p, bufsize; kws...)
+    return (; buffer=nothing)
+end
+function init_autosymptr_cache(f::InplaceIntegralFunction, dom, p, bufsize; kws...)
+    x = get_prototype(dom)
+    proto = get_prototype(f, x, p)
     y = similar(proto)
     ytmp = similar(proto)
-    I = y * first(w)
+    I = y * prod(x)
     Itmp = similar(I)
-    return (; rule=[(w,x) for (w,x) in zip(w,x)], buffer=nothing, I, Itmp, y, ytmp)
+    return (; buffer=nothing, I, Itmp, y, ytmp)
 end
-function init_cacheval(f::InplaceBatchIntegralFunction, dom, p, alg::QuadratureFunction; kws...)
-    x, w = alg.fun(alg.npt)
-    proto=get_prototype(f, first(x), p)
-    return (rule=[(w,x) for (w,x) in zip(w,x)], buffer=similar(proto, len), y=similar(proto, len), x=Vector{float(eltype(dom))}(undef, len))
+function init_autosymptr_cache(f::InplaceBatchIntegralFunction, dom, p, bufsize; kws...)
+    x0 = get_prototype(dom)
+    proto=get_prototype(f, x0, p)
+    return (; buffer=similar(proto, bufsize), y=similar(proto, bufsize), x=Vector{typeof(x0)}(undef, bufsize))
 end
-function init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::QuadratureFunction; kws...)
-    x, w = alg.fun(alg.npt)
+function init_autosymptr_cache(f::CommonSolveIntegralFunction, dom, p, bufsize; kws...)
     cache, integrand, = _init_commonsolvefunction(f, dom, p)
-    return (; rule=[(w,x) for (w,x) in zip(w,x)], buffer=nothing, cache, integrand)
+    return (; buffer=nothing, cache, integrand)
+end
+function init_cacheval(f, dom, p, alg::QuadratureFunction; kws...)
+    rule = init_rule(dom, alg)
+    cache = init_autosymptr_cache(f, dom, p, alg.npt; kws...)
+    return (; rule, cache...)
 end
 
 function do_integral(f, dom, p, alg::QuadratureFunction, cacheval;

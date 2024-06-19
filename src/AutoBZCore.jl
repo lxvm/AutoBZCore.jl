@@ -75,7 +75,7 @@ include("interfaces.jl")
 export QuadGKJL, HCubatureJL, QuadratureFunction
 include("algorithms.jl")
 export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
-# include("algorithms_iterated.jl")
+include("algorithms_iterated.jl")
 export MonkhorstPack, AutoSymPTRJL
 include("algorithms_autosymptr.jl")
 export NestedQuad, AbsoluteEstimate, EvalCounter
@@ -88,7 +88,7 @@ export AutoBZProblem
 export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
 include("brillouin.jl")
 
-export FourierIntegralFunction
+export FourierIntegralFunction, CommonSolveFourierIntegralFunction
 include("fourier.jl")
 
 export DOSProblem

@@ -6,7 +6,12 @@ function get_prototype(dom)
     return (a+b)/2
 end
 
+function get_prototype(B::Basis)
+    return B * zero(SVector{ndims(B),float(eltype(B))})
+end
+
 get_basis(B::Basis) = B
+get_basis(B::AbstractMatrix) = Basis(B)
 
 """
     PuncturedInterval(s)

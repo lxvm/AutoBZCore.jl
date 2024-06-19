@@ -1,5 +1,3 @@
-# TODO move these to an extension if SymmetricBZ can be simplified
-
 """
     AuxQuadGKJL(; order = 7, norm = norm)
 
@@ -15,36 +13,60 @@ function AuxQuadGKJL(; order = 7, norm = norm)
     return AuxQuadGKJL(order, norm)
 end
 
-function init_cacheval(f, dom, p, alg::AuxQuadGKJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("AuxQuadGKJL doesn't support nested batching"))
-    return init_segbuf(f, dom, p, alg.norm)
+function init_cacheval(f::IntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    prototype = get_prototype(f, get_prototype(segs), p)
+    return init_segbuf(prototype, segs, alg)
 end
-
-function do_solve(f, dom, p, alg::AuxQuadGKJL, cacheval;
+function init_cacheval(f::InplaceIntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    prototype = get_prototype(f, get_prototype(segs), p)
+    return init_segbuf(prototype, segs, alg), similar(prototype)
+end
+function init_cacheval(f::InplaceBatchIntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    pt = get_prototype(segs)
+    prototype = get_prototype(f, pt, p)
+    prototype isa AbstractVector || throw(ArgumentError("QuadGKJL only supports batch integrands with vector outputs"))
+    pts = zeros(typeof(pt), 2*alg.order+1)
+    upts = pts / pt
+    return init_segbuf(first(prototype), segs, alg), similar(prototype), pts, upts
+end
+function init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    x = get_prototype(segs)
+    cache, integrand, prototype = _init_commonsolvefunction(f, dom, p; x)
+    return init_segbuf(prototype, segs, alg), cache, integrand
+end
+function do_integral(f, dom, p, alg::AuxQuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
-
-    segs = segments(dom)
+    # we need to strip units from the limits since infinity transformations change the units
+    # of the limits, which can break the segbuf
     u = oneunit(eltype(dom))
-    usegs = map(x -> x/u, segs)
-    if f isa InplaceIntegrand
-        g! = (y, x) -> f.f!(y, u*x, p)
-        result = f.I / u
-        val, err = auxquadgk!(g!, result, usegs, maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(f.I .= u .* val, u*err, true, -1)
-    elseif f isa BatchIntegrand
-        xx = eltype(f.x) === Nothing ? typeof((segs[1]+segs[end])/2)[] : f.x
-        g_ = (y, x) -> (resize!(xx, length(x)); f.f!(y, xx .= u .* x, p))
-        g = IteratedIntegration.AuxQuadGK.BatchIntegrand(g_, f.y, xx/u, max_batch=f.max_batch)
-        val, err = auxquadgk(g, usegs, maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(u*val, u*err, true, -1)
-    else
-        g = x -> f(u*x, p)
-        val, err = auxquadgk(g, usegs, maxevals = maxiters,
-                        rtol = reltol, atol = isnothing(abstol) ? abstol : abstol/u, order = alg.order, norm = alg.norm, segbuf=cacheval)
-        return IntegralSolution(u*val, u*err, true, -1)
-    end
+    usegs = map(x -> x/u, dom)
+    atol = isnothing(abstol) ? abstol : abstol/u
+    val, err = call_auxquadgk(f, p, u, usegs, cacheval; maxevals = maxiters, rtol = reltol, atol, order = alg.order, norm = alg.norm)
+    value = u*val
+    retcode = err < max(something(atol, zero(err)), alg.norm(val)*something(reltol, isnothing(atol) ? sqrt(eps(one(eltype(usegs)))) : 0)) ? Success : Failure
+    stats = (; error=u*err)
+    return IntegralSolution(value, retcode, stats)
+end
+function call_auxquadgk(f::IntegralFunction, p, u, usegs, cacheval; kws...)
+    auxquadgk(x -> f.f(u*x, p), usegs...; kws..., segbuf=cacheval)
+end
+function call_auxquadgk(f::InplaceIntegralFunction, p, u, usegs, cacheval; kws...)
+    # TODO allocate everything in the AuxQuadGK.InplaceIntegrand in the cacheval
+    auxquadgk!((y, x) -> f.f!(y, u*x, p), cacheval[2], usegs...; kws..., segbuf=cacheval[1])
+end
+function call_auxquadgk(f::InplaceBatchIntegralFunction, p, u, usegs, cacheval; kws...)
+    pts = cacheval[3]
+    g = IteratedIntegration.AuxQuadGK.BatchIntegrand((y, x) -> f.f!(y, resize!(pts, length(x)) .= u .* x, p), cacheval[2], cacheval[4]; max_batch=f.max_batch)
+    auxquadgk(g, usegs...; kws..., segbuf=cacheval[1])
+end
+function call_auxquadgk(f::CommonSolveIntegralFunction, p, u, usegs, cacheval; kws...)
+    # cache = cacheval[2] could call do_solve!(cache, f, x, p) to fully specialize
+    integrand = cacheval[3]
+    auxquadgk(x -> integrand(u*x, p), usegs...; kws..., segbuf=cacheval[1])
 end
 
 """
@@ -66,34 +88,50 @@ function ContQuadGKJL(; order = 7, norm = norm, rho = 1.0, rootmeth = IteratedIn
     return ContQuadGKJL(order, norm, rho, rootmeth)
 end
 
-function init_cacheval(f, dom, p, alg::ContQuadGKJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("ContQuadGK doesn't support nested batching"))
-    f isa BatchIntegrand && throw(ArgumentError("ContQuadGK doesn't support batching"))
-    f isa InplaceIntegrand && throw(ArgumentError("ContQuadGK doesn't support inplace integrands"))
-
-    a, b = endpoints(dom)
+function init_csegbuf(prototype, dom, alg::ContQuadGKJL)
+    segs = PuncturedInterval(dom)
+    a, b = endpoints(segs)
     x, s = (a+b)/2, (b-a)/2
     TX = typeof(x)
+    convert(ComplexF64, prototype)
     fx_s = one(ComplexF64) * s # currently the integrand is forcibly written to a ComplexF64 buffer
     TI = typeof(fx_s)
     TE = typeof(alg.norm(fx_s))
     r_segbuf = IteratedIntegration.ContQuadGK.PoleSegment{TX,TI,TE}[]
-    fc_s = f(complex(x), p) * complex(s) # the regular evalrule is used on complex segments
+    fc_s = prototype * complex(s) # the regular evalrule is used on complex segments
     TCX = typeof(complex(x))
     TCI = typeof(fc_s)
     TCE = typeof(alg.norm(fc_s))
     c_segbuf = IteratedIntegration.ContQuadGK.Segment{TCX,TCI,TCE}[]
     return (r=r_segbuf, c=c_segbuf)
 end
+function init_cacheval(f::IntegralFunction, dom, p, alg::ContQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    prototype = get_prototype(f, get_prototype(segs), p)
+    init_csegbuf(prototype, dom, alg)
+end
+function init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::ContQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    cache, integrand, prototype = _init_commonsolvefunction(f, dom, p; x=get_prototype(segs))
+    segbufs = init_csegbuf(prototype, dom, alg)
+    return (; segbufs..., cache, integrand)
+end
 
-function do_solve(f, dom, p, alg::ContQuadGKJL, cacheval;
+function do_integral(f, dom, p, alg::ContQuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
 
-    segs = segments(dom)
-    g = x -> f(x, p)
-    val, err = contquadgk(g, segs, maxevals = maxiters, rho = alg.rho, rootmeth = alg.rootmeth,
+    value, err = call_contquadgk(f, p, dom, cacheval;  maxevals = maxiters, rho = alg.rho, rootmeth = alg.rootmeth,
                     rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, r_segbuf=cacheval.r, c_segbuf=cacheval.c)
-    return IntegralSolution(val, err, true, -1)
+    retcode = err < max(something(abstol, zero(err)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(one(eltype(dom)))) : 0)) ? Success : Failure
+    stats = (; error=err)
+    return IntegralSolution(value, retcode, stats)
+end
+function call_contquadgk(f::IntegralFunction, p, segs, cacheval; kws...)
+    contquadgk(x -> f.f(x, p), segs; kws...)
+end
+function call_contquadgk(f::CommonSolveIntegralFunction, p, segs, cacheval; kws...)
+    integrand = cacheval.integrand
+    contquadgk(x -> integrand(x, p), segs...; kws...)
 end
 
 """
@@ -114,23 +152,40 @@ function MeroQuadGKJL(; order = 7, norm = norm, rho = 1.0, rootmeth = IteratedIn
     return MeroQuadGKJL(order, norm, rho, rootmeth)
 end
 
-function init_cacheval(f, dom, p, alg::MeroQuadGKJL)
-    f isa NestedBatchIntegrand && throw(ArgumentError("MeroQuadGK doesn't support nested batching"))
-    f isa BatchIntegrand && throw(ArgumentError("MeroQuadGK doesn't support batching"))
-    f isa InplaceIntegrand && throw(ArgumentError("MeroQuadGK doesn't support inplace integrands"))
-    a, b = endpoints(dom)
+function init_msegbuf(prototype, dom, alg::MeroQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    a, b = endpoints(segs)
     x, s = (a + b)/2, (b-a)/2
+    convert(ComplexF64, prototype)
     fx_s = one(ComplexF64) * s # ignore the actual integrand since it is written to CF64 array
     err = alg.norm(fx_s)
     return IteratedIntegration.alloc_segbuf(typeof(x), typeof(fx_s), typeof(err))
 end
+function init_cacheval(f::IntegralFunction, dom, p, alg::MeroQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    prototype = get_prototype(f, get_prototype(segs), p)
+    segbuf = init_msegbuf(prototype, dom, alg)
+    return (; segbuf)
+end
+function init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::MeroQuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    cache, integrand, prototype = _init_commonsolvefunction(f, dom, p; x=get_prototype(segs))
+    segbuf = init_msegbuf(prototype, dom, alg)
+    return (; segbuf, cache, integrand)
+end
 
-function do_solve(f, dom, p, alg::MeroQuadGKJL, cacheval;
+function do_integral(f, dom, p, alg::MeroQuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
-
-    segs = segments(dom)
-    g = x -> f(x, p)
-    val, err = meroquadgk(g, segs, maxevals = maxiters, rho = alg.rho, rootmeth = alg.rootmeth,
-                    rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval)
-    return IntegralSolution(val, err, true, -1)
+    value, err = call_meroquadgk(f, p, dom, cacheval;  maxevals = maxiters, rho = alg.rho, rootmeth = alg.rootmeth,
+            rtol = reltol, atol = abstol, order = alg.order, norm = alg.norm, segbuf=cacheval.segbuf)
+    retcode = err < max(something(abstol, zero(err)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(one(eltype(dom)))) : 0)) ? Success : Failure
+    stats = (; error=err)
+    return IntegralSolution(value, retcode, stats)
+end
+function call_meroquadgk(f::IntegralFunction, p, segs, cacheval; kws...)
+    meroquadgk(x -> f.f(x, p), segs; kws...)
+end
+function call_meroquadgk(f::CommonSolveIntegralFunction, p, segs, cacheval; kws...)
+    integrand = cacheval.integrand
+    meroquadgk(x -> integrand(x, p), segs...; kws...)
 end

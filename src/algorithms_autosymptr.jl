@@ -31,17 +31,17 @@ end
 rule_type(::AutoSymPTR.PTR{N,T}) where {N,T} = SVector{N,T}
 rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
 
-function init_cacheval(f::IntegralFunction, dom, p, alg::MonkhorstPack; kws...)
-    rule = init_rule(dom, alg)
-    buf = init_buffer(f, alg.nthreads)
-    return (rule=rule, buffer=buf)
+function init_cacheval(f, dom, p, alg::MonkhorstPack; kws...)
+    b = get_basis(dom)
+    rule = init_rule(b, alg)
+    cache = init_autosymptr_cache(f, b, p, alg.nthreads; kws...)
+    return (; rule, cache...)
 end
-
 function do_integral(f, dom, p, alg::MonkhorstPack, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
-    g = autosymptr_integrand(f, p, dom, cacheval)
-    # TODO convert the domain to a Basis
-    value = cacheval.rule(g, dom, cacheval.buffer)
+    b = get_basis(dom)
+    g = autosymptr_integrand(f, p, b, cacheval)
+    value = cacheval.rule(g, b, cacheval.buffer)
     retcode = Success
     stats = (; numevals=length(cacheval.rule))
     return IntegralSolution(value, retcode, stats)
@@ -75,11 +75,14 @@ end
 function init_rule(dom, alg::AutoSymPTRJL)
     return AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
 end
-function init_cacheval(f::IntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
-    rule = init_rule(dom, alg)
-    cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
-    buffer = init_buffer(f, alg.nthreads)
-    return (rule=rule, cache=cache, buffer=buffer)
+
+
+function init_cacheval(f, dom, p, alg::AutoSymPTRJL; kws...)
+    b = get_basis(dom)
+    rule = init_rule(b, alg)
+    rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
+    cache = init_autosymptr_cache(f, b, p, alg.nthreads; kws...)
+    return (; rule, rule_cache, cache...)
 end
 
 function do_integral(f, dom, p, alg::AutoSymPTRJL, cacheval;
@@ -87,7 +90,7 @@ function do_integral(f, dom, p, alg::AutoSymPTRJL, cacheval;
 
     g = autosymptr_integrand(f, p, dom, cacheval)
     bas = get_basis(dom)
-    value, error = autosymptr(g, bas; syms = alg.syms, rule = cacheval.rule, cache = cacheval.cache, keepmost = alg.keepmost,
+    value, error = autosymptr(g, bas; syms = alg.syms, rule = cacheval.rule, cache = cacheval.rule_cache, keepmost = alg.keepmost,
         abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm, buffer=cacheval.buffer)
     retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(a))) : abstol)) ? Success : Failure
     stats = (; error)
