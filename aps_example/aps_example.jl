@@ -47,22 +47,22 @@ using HChebInterp
 cheb_order = 15
 
 function dos_solver(prob, alg)
-    cache = init(prob, alg)
+    solver = init(prob, alg)
     ω -> begin
-        cache.p = (; cache.p..., ω)
-        solve!(cache).value
+        solver.p = (; solver.p..., ω)
+        solve!(solver).value
     end
 end
 function threaded_dos_solver(prob, alg; nthreads=min(cheb_order, Threads.nthreads()))
-    caches = [init(prob, alg) for _ in 1:nthreads]
+    solvers = [init(prob, alg) for _ in 1:nthreads]
     BatchFunction() do ωs
         out = Vector{typeof(prototype)}(undef, length(ωs))
         Threads.@threads for i in 1:nthreads
-            cache = caches[i]
+            solver = solvers[i]
             for j in i:nthreads:length(ωs)
                 ω = ωs[j]
-                cache.p = (; cache.p..., ω)
-                out[j] = solve!(cache).value
+                solver.p = (; solver.p..., ω)
+                out[j] = solve!(solver).value
             end
         end
         return out
