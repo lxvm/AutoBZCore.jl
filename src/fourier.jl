@@ -452,8 +452,6 @@ Base.eltype(::Type{FourierMonkhorstPack{d,W,T,S}}) where {d,W,T,S} = Tuple{W,Fou
 Base.length(r::FourierMonkhorstPack) = length(r.wxs)
 Base.iterate(rule::FourierMonkhorstPack, args...) = iterate(rule.wxs, args...)
 
-rule_type(::FourierMonkhorstPack{d,W,T,S}) where {d,W,T,S} = FourierValue{SVector{d,T},S}
-
 function (rule::FourierMonkhorstPack{d})(f::F, B::Basis, buffer=nothing) where {d,F}
     arule = AutoSymPTR.AffineQuad(rule, B)
     return AutoSymPTR.quadsum(arule, f, arule.vol / (rule.npt^d * rule.nsyms), buffer)
@@ -494,7 +492,6 @@ end
 #     return f.nest isa NestedBatchIntegrand ? Vector{eltype(f.nest.y)}(undef, len) : nothing
 # end
 
-rule_type(::FourierPTR{N,T,S}) where {N,T,S} = FourierValue{SVector{N,T},S}
 function init_fourier_rule(w::FourierWorkspace, dom, alg::MonkhorstPack)
     @assert ndims(w.series) == ndims(dom)
     if alg.syms === nothing
@@ -503,10 +500,11 @@ function init_fourier_rule(w::FourierWorkspace, dom, alg::MonkhorstPack)
         return FourierMonkhorstPack(w, eltype(dom), Val(ndims(dom)), alg.npt, alg.syms)
     end
 end
-function init_cacheval(f::FourierIntegralFunction, dom , p, alg::MonkhorstPack; kws...)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+function init_cacheval(f::AbstractFourierIntegralFunction, dom , p, alg::MonkhorstPack; kws...)
+    cache = init_autosymptr_cache(f, dom, p, alg.nthreads; kws...)
+    ws = cache.ws
     rule = init_fourier_rule(ws, dom, alg)
-    return (; rule, buffer=nothing, ws)
+    return (; rule, buffer=nothing, ws, cache...)
 end
 
 function init_fourier_rule(w::FourierWorkspace, dom, alg::AutoSymPTRJL)

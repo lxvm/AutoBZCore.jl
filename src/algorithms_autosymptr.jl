@@ -28,9 +28,6 @@ function init_rule(dom, alg::MonkhorstPack)
     end
 end
 
-rule_type(::AutoSymPTR.PTR{N,T}) where {N,T} = SVector{N,T}
-rule_type(::AutoSymPTR.MonkhorstPack{N,T}) where {N,T} = SVector{N,T}
-
 function init_cacheval(f, dom, p, alg::MonkhorstPack; kws...)
     b = get_basis(dom)
     rule = init_rule(b, alg)

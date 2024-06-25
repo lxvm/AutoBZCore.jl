@@ -49,6 +49,7 @@ Base.summary(bz::SymmetricBZ) = string(checksquare(bz.A), "-dimensional Brilloui
 Base.show(io::IO, bz::SymmetricBZ) = print(io, summary(bz))
 Base.ndims(::SymmetricBZ{S,L,d}) where {S,L,d} = d
 Base.eltype(::Type{<:SymmetricBZ{S,L,d,TA,TB}}) where {S,L,d,TA,TB} = TB
+get_prototype(bz::SymmetricBZ) = interior_point(bz.lims)
 
 # Define traits for symmetrization based on symmetry representations
 
@@ -113,7 +114,6 @@ Base.getindex(r::SymmetricRule, i) = getindex(r.rule, i)
 Base.eltype(::Type{SymmetricRule{R,U,B}}) where {R,U,B} = eltype(R)
 Base.length(r::SymmetricRule) = length(r.rule)
 Base.iterate(r::SymmetricRule, args...) = iterate(r.rule, args...)
-rule_type(r::SymmetricRule) = rule_type(r.rule)
 function (r::SymmetricRule)(f::F, args...) where {F}
     out = r.rule(f, args...)
     return symmetrize(r.rep, r.bz, out)
@@ -340,7 +340,7 @@ implementing an AbstractSymRep for your type.
 """
 
 function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::SymmetricBZ, p=NullParameters(); kws...)
-    proto = get_prototype(f, interior_point(bz.lims), p)
+    proto = get_prototype(f, get_prototype(bz), p)
     if rep isa UnknownRep && !(bz isa FullBZ) && !(proto isa TrivialRepType)
         @warn WARN_UNKNOWN_SYMMETRY
         fbz = SymmetricBZ(bz.A, bz.B, lattice_bz_limits(bz.B), nothing)
@@ -477,6 +477,8 @@ struct RepBZ{R,B}
 end
 Base.ndims(dom::RepBZ) = ndims(dom.bz)
 Base.eltype(::Type{RepBZ{R,B}}) where {R,B} = eltype(B)
+get_prototype(dom::RepBZ) = get_prototype(dom.bz)
+
 
 function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoPTR; kws...)
     prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
