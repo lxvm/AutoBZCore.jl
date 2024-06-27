@@ -45,6 +45,10 @@ function get_prototype(f::FourierIntegralFunction, x, ws, p)
 end
 get_prototype(f::FourierIntegralFunction, x, p) = get_prototype(f, x, f.s, p)
 
+function get_fourierworkspace(f::AbstractFourierIntegralFunction)
+    f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+end
+
 # TODO implement FourierInplaceIntegrand FourierInplaceBatchIntegrand
 
 """
@@ -144,14 +148,14 @@ end
 
 function init_cacheval(f::FourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     prototype = get_prototype(f, get_prototype(segs), ws, p)
     return init_segbuf(prototype, segs, alg), ws
 end
 function init_cacheval(f::CommonSolveFourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
     segs = PuncturedInterval(dom)
     x = get_prototype(segs)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     cache, integrand, prototype = _init_commonsolvefourierfunction(f, dom, p; x, ws)
     return init_segbuf(prototype, segs, alg), ws, cache, integrand
 end
@@ -167,7 +171,7 @@ end
 
 function init_cacheval(f::FourierIntegralFunction, dom, p, ::HCubatureJL; kws...)
     # TODO utilize hcubature_buffer
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     return ws
 end
 function hcubature_integrand(f::FourierIntegralFunction, p, a, b, ws)
@@ -175,11 +179,11 @@ function hcubature_integrand(f::FourierIntegralFunction, p, a, b, ws)
 end
 
 function init_autosymptr_cache(f::FourierIntegralFunction, dom, p, bufsize; kws...)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     return (; buffer=nothing, ws)
 end
 function init_autosymptr_cache(f::CommonSolveFourierIntegralFunction, dom, p, bufsize; kws...)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     cache, integrand, = _init_commonsolvefourierfunction(f, dom, p; ws)
     return (; buffer=nothing, ws, cache, integrand)
 end
@@ -196,13 +200,13 @@ end
 
 function init_cacheval(f::FourierIntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     prototype = get_prototype(f, get_prototype(segs), ws, p)
     return init_segbuf(prototype, segs, alg), ws
 end
 function init_cacheval(f::CommonSolveFourierIntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     x = get_prototype(segs)
     cache, integrand, prototype = _init_commonsolvefourierfunction(f, dom, p; x, ws)
     return init_segbuf(prototype, segs, alg), ws, cache, integrand
@@ -220,14 +224,14 @@ end
 
 function init_cacheval(f::FourierIntegralFunction, dom, p, alg::ContQuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     prototype = get_prototype(f, get_prototype(segs), ws, p)
     segbufs = init_csegbuf(prototype, dom, alg)
     return (; segbufs..., ws)
 end
 function init_cacheval(f::CommonSolveFourierIntegralFunction, dom, p, alg::ContQuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     cache, integrand, prototype = _init_commonsolvefourierfunction(f, dom, p; ws, x=get_prototype(segs))
     segbufs = init_csegbuf(prototype, dom, alg)
     return (; segbufs..., ws, cache, integrand)
@@ -244,14 +248,14 @@ end
 
 function init_cacheval(f::FourierIntegralFunction, dom, p, alg::MeroQuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     prototype = get_prototype(f, get_prototype(segs), ws, p)
     segbuf = init_msegbuf(prototype, dom, alg)
     return (; segbuf, ws)
 end
 function init_cacheval(f::CommonSolveFourierIntegralFunction, dom, p, alg::MeroQuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    ws = FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     cache, integrand, prototype = _init_commonsolvefourierfunction(f, dom, p; ws, x=get_prototype(segs))
     segbuf = init_msegbuf(prototype, dom, alg)
     return (; segbuf, ws, cache, integrand)
@@ -273,7 +277,7 @@ function _fourier_update!(cache, x, p)
     return
 end
 function inner_integralfunction(f::FourierIntegralFunction, x0, p)
-    ws = f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     proto = get_prototype(f, x0, ws, p)
     func = IntegralFunction(proto) do x, (; p, ws, lims_state)
         f.f(limit_iterate(lims_state..., x), workspace_evaluate!(ws, x), p)
@@ -281,13 +285,33 @@ function inner_integralfunction(f::FourierIntegralFunction, x0, p)
     return func, ws
 end
 function outer_integralfunction(f::FourierIntegralFunction, x0, p)
-    ws = f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
+    ws = get_fourierworkspace(f)
     proto = get_prototype(f, x0, ws, p)
     s = workspace_contract!(ws, x0[end])
     func = FourierIntegralFunction(f.f, s, proto; alias=true)
     return func, ws, _fourier_update!, _postsolve
 end
-# TODO implement CommonSolveFourierIntegralFunction
+# TODO it would be desirable to allow the inner integralfunction to be of the
+# same type as f, which requires moving workspace out of the parameters into
+# some kind of mutable storage
+function inner_integralfunction(f::CommonSolveFourierIntegralFunction, x0, p)
+    ws = get_fourierworkspace(f)
+    proto = get_prototype(f, x0, ws, p)
+    cache = init(f.prob, f.alg; f.kwargs...)
+    func = IntegralFunction(proto) do x, (; p, ws, lims_state)
+        y = limit_iterate(lims_state..., x)
+        s = workspace_evaluate!(ws, x)
+        do_solve!(cache, f, y, s, p)
+    end
+    return func, ws
+end
+function outer_integralfunction(f::CommonSolveFourierIntegralFunction, x0, p)
+    ws = get_fourierworkspace(f)
+    proto = get_prototype(f, x0, ws, p)
+    s = workspace_contract!(ws, x0[end])
+    func = CommonSolveFourierIntegralFunction(f.prob, f.alg, f.update!, f.postsolve, s, proto, f.specialize; alias=true, f.kwargs...)
+    return func, ws, _fourier_update!, _postsolve
+end
 
 # PTR rules
 
