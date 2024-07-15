@@ -145,6 +145,7 @@ struct FourierValue{X,S}
     s::S
 end
 @inline AutoSymPTR.mymul(w, x::FourierValue) = FourierValue(AutoSymPTR.mymul(w, x.x), x.s)
+@inline AutoSymPTR.mymul(::AutoSymPTR.One, x::FourierValue) = x
 
 function init_cacheval(f::FourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
     segs = PuncturedInterval(dom)

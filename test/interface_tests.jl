@@ -41,6 +41,7 @@ end
             @test ref ≈ sol.value atol=abstol
         end
     end
+    @test @inferred(solve(IntegralProblem((x, p) -> exp(-x^2), (-Inf, Inf)), QuadGKJL())).value ≈ sqrt(pi)
 end
 
 @testset "commonproblem" begin

@@ -1,5 +1,6 @@
 using Test, AutoBZCore, LinearAlgebra, StaticArrays, OffsetArrays, Elliptic
 using GeneralizedGaussianQuadrature: generalizedquadrature
+using FourierSeriesEvaluators, QuadGK
 
 # test set of known DOS examples
 

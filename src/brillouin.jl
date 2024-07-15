@@ -116,7 +116,8 @@ Base.length(r::SymmetricRule) = length(r.rule)
 Base.iterate(r::SymmetricRule, args...) = iterate(r.rule, args...)
 function (r::SymmetricRule)(f::F, args...) where {F}
     out = r.rule(f, args...)
-    return symmetrize(r.rep, r.bz, out)
+    val = symmetrize(r.rep, r.bz, out)
+    return val
 end
 
 struct SymmetricRuleDef{R,U,B}
@@ -349,11 +350,11 @@ function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::Sym
         return AutoBZProblem(rep, f, bz, p, NamedTuple(kws))
     end
 end
-function AutoBZProblem(rep::AbstractSymRep, f, bz::SymmetricBZ, p=NullParameters(); kws...)
-    return AutoBZProblem(IntegralFunction(f), bz, p; kws...)
+function AutoBZProblem(f::AbstractIntegralFunction, bz::SymmetricBZ, p=NullParameters(); kws...)
+    return AutoBZProblem(UnknownRep(), f, bz, p; kws...)
 end
 function AutoBZProblem(f, bz::SymmetricBZ, p=NullParameters(); kws...)
-    return AutoBZProblem(UnknownRep(), f, bz, p; kws...)
+    return AutoBZProblem(IntegralFunction(f), bz, p; kws...)
 end
 
 mutable struct AutoBZCache{R,F,BZ,P,A,C,K}
@@ -401,7 +402,7 @@ function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws..
     cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / (j * nsyms(bz)),)) : kws
 
     sol = solve!(cacheval)
-    value = j*symmetrize_(rep, bz, sol.value)
+    value = j*symmetrize(rep, bz, sol.value)
     stats = (; sol.stats...)
     # err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
     return IntegralSolution(value, sol.retcode, stats)

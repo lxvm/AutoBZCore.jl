@@ -76,7 +76,7 @@ end
 
 function init_cacheval(f, dom, p, alg::AutoSymPTRJL; kws...)
     b = get_basis(dom)
-    rule = init_rule(b, alg)
+    rule = init_rule(dom, alg)
     rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
     cache = init_autosymptr_cache(f, b, p, alg.nthreads; kws...)
     return (; rule, rule_cache, cache...)
@@ -89,7 +89,7 @@ function do_integral(f, dom, p, alg::AutoSymPTRJL, cacheval;
     bas = get_basis(dom)
     value, error = autosymptr(g, bas; syms = alg.syms, rule = cacheval.rule, cache = cacheval.rule_cache, keepmost = alg.keepmost,
         abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm, buffer=cacheval.buffer)
-    retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(a))) : abstol)) ? Success : Failure
+    retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(bas))) : abstol)) ? Success : Failure
     stats = (; error)
     return IntegralSolution(value, retcode, stats)
 end
