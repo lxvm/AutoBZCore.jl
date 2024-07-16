@@ -77,7 +77,7 @@ export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
 include("algorithms_iterated.jl")
 export MonkhorstPack, AutoSymPTRJL
 include("algorithms_autosymptr.jl")
-export NestedQuad, AbsoluteEstimate, EvalCounter
+export NestedQuad#, AbsoluteEstimate, EvalCounter
 include("algorithms_meta.jl")
 
 export SymmetricBZ, nsyms
