@@ -64,6 +64,7 @@ abstract type AbstractSymRep end
     UnknownRep()
 
 Fallback symmetry representation for array types without a user-defined `SymRep`.
+Will perform FBZ integration regardless of available BZ symmetries.
 """
 struct UnknownRep <: AbstractSymRep end
 
@@ -74,35 +75,20 @@ Symmetry representation of objects with trivial transformation under the group.
 """
 struct TrivialRep <: AbstractSymRep end
 
-const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
-
 """
-    symmetrize(f, ::SymmetricBZ, xs...)
-    symmetrize(f, ::SymmetricBZ, x::Union{Number,AbstractArray{<:Any,0}})
+    symmetrize(rep::AbstractSymRep, ::SymmetricBZ, x)
 
-Transform `x` by the symmetries of the parametrization used to reduce the
-domain, thus mapping the value of `x` on the parametrization to the full domain.
+Transform `x` by the representation of the symmetries of the point group used to reduce the
+domain, thus mapping the value of `x` on to the full Brillouin zone.
 """
-symmetrize(f, bz, xs...) = map(x -> symmetrize(f, bz, x), xs)
-symmetrize(f, bz, x) = symmetrize_(f isa AbstractSymRep ? f : SymRep(f), bz, x)
-symmetrize(f, bz, x::TrivialRepType) =
-    symmetrize_(TrivialRep(), bz, x)
-
-"""
-    symmetrize_(rep::AbstractSymRep, bz::SymmetricBZ, x)
-
-Transform `x` under representation `rep` using the symmetries in `bz` to obtain
-the result of an integral on the FBZ from `x`, which was calculated on the IBZ.
-"""
-symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
-symmetrize_(::UnknownRep, ::SymmetricBZ, x) = x
-symmetrize_(::UnknownRep, bz::SymmetricBZ, x::TrivialRepType) = symmetrize_(TrivialRep(), bz, x)
-
+symmetrize(rep, bz::SymmetricBZ, x) = symmetrize_(rep, bz, x)
 symmetrize(_, ::FullBZ, x) = x
-symmetrize(_, ::FullBZ, x::TrivialRepType) = x
 
-symmetrize(f, bz, x::AuxValue) = AuxValue(symmetrize(f, bz, x.val, x.aux)...)
-symmetrize(_, ::FullBZ, x::AuxValue) = x
+symmetrize_(rep, bz, x) = symmetrize__(rep, bz, x)
+symmetrize_(rep, bz, x::AuxValue) = AuxValue(symmetrize__(rep, bz, x.val), symmetrize__(rep, bz, x.aux))
+
+symmetrize__(::TrivialRep, bz, x) = nsyms(bz)*x
+symmetrize__(::UnknownRep, bz, x) = error("unknown representation cannot be symmetrized")
 
 struct SymmetricRule{R,U,B}
     rule::R
@@ -158,7 +144,8 @@ Interface to loading Brillouin zones.
 - `B::AbstractMatrix`: a ``d \\times d`` matrix whose columns are the reciprocal-space
   lattice vectors of a ``d``-dimensional Brillouin zone (default: `A' \\ 2πI`)
 
-!!! note "Assumptions" `AutoBZCore` assumes that all calculations occur in the reciprocal
+!!! note "Assumptions"
+    `AutoBZCore` assumes that all calculations occur in the reciprocal
     lattice basis, since that is the basis in which Wannier interpolants are most
     efficiently described. See [`SymmetricBZ`](@ref) for details. We also assume that the
     integrands are cheap to evaluate, which is why we provide adaptive methods in the first

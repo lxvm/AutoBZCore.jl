@@ -52,7 +52,7 @@ function dos_solve(h, domain, p, alg::GGR, cacheval;
 
     A = sum_ggr(ndims(bz.lims), alg.npt, E, cacheval...)
 
-    return DOSSolution(A, nothing, true, -1)
+    return DOSSolution(A, Success, (;))
 end
 
 function sum_ggr(ndim, npt, E, weights, energies, velocities)

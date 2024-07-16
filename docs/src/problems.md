@@ -1,64 +1,71 @@
 # Problem definitions
 
-The design of AutoBZCore.jl is heavily influenced by the
-[SciML](https://sciml.ai/) package
-[Integrals.jl](https://github.com/SciML/Integrals.jl)
-and may eventually become implemented in it.
+The design of AutoBZCore.jl is heavily influenced by
+[SciML](https://sciml.ai/) packages and uses the 
+[CommonSolve.jl](https://github.com/SciML/CommonSolve.jl)
+interface. Eventually, this package may contribute to
+[Integrals.jl](https://github.com/SciML/Integrals.jl).
 
-## SciML interface
+## Problem interface
 
-AutoBZCore.jl replicates the Integrals.jl interface, but does not export it in
-order to avoid name conflicts with other SciML packages.
+AutoBZCore.jl replicates the Integrals.jl interface, using an
+[`IntegralProblem`](@ref) type to setup an integral from an
+integrand, a domain, and parameters.
 
-### Quickstart
+```@example prob
+using AutoBZCore
 
-```julia
-using AutoBZCore: IntegralProblem, init, solve!
-
-prob = IntegralProblem((x,p) -> sin(p*x), 0, 1, 0.3)
-cache = init(prob, QuadGKJL())
-solve!(cache)   # 0.14887836958131329
-
-# solve again at a new parameter
-cache.p = 0.4
-solve!(cache)   # 0.1973475149927873
+f = (x,p) -> sin(p*x)
+dom = (0, 1)
+p = 0.3
+prob = IntegralProblem(f, dom, p)
 ```
-
-### Reference
 
 ```@docs
 AutoBZCore.IntegralProblem
-AutoBZCore.solve
-AutoBZCore.init
-AutoBZCore.solve!
 AutoBZCore.NullParameters
 ```
 
-## Functor interface
+## `solve`
 
-As shown in the quickstart of the [`AutoBZCore`](@ref) page, AutoBZCore.jl also defines
-a functor interface to solving integrals
+To solve an integral problem, pick an algorithm and call [`solve`](@ref)
 
-```@docs
-AutoBZCore.IntegralSolver
+```@example prob
+alg = QuadGKJL()
+solve(prob, alg)
 ```
 
-The functor interface is also extended by [`ParameterIntegrand`](@ref) and
-[`FourierIntegrand`](@ref) to
-allow a more flexible interface for passing (partial) positional and keyword
-arguments to user-defined integrands.
-
 ```@docs
-AutoBZCore.MixedParameters
-AutoBZCore.paramzip
-AutoBZCore.paramproduct
+AutoBZCore.solve
 ```
 
-## Batched evaluation
+## `init` and `solve!`
 
-The routine [`batchsolve`](@ref) allows multi-threaded evaluation of an
-[`IntegralSolver`](@ref) at many parameter points.
+To solve many problems with the same integrand but different domains or
+parameters, use [`init`](@ref) to allocate a solver and
+[`solve!`](@ref) to get the solution
+
+```@example prob
+solver = init(prob, alg)
+solve!(solver).value
+```
+
+To solve again, update the parameters of the solver in place and `solve!` again
+```@example prob
+# solve again at a new parameter
+solver.p = 0.4
+solve!(solver).value
+```
+
 
 ```@docs
-AutoBZCore.batchsolve
+AutoBZCore.init
+AutoBZCore.solve!
+```
+
+## Additional problems
+
+```@docs
+AutoBZCore.AutoBZProblem
+AutoBZCore.DOSProblem
 ```

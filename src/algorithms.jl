@@ -165,7 +165,7 @@ The default quadrature rule is [`trapz`](@ref), although other packages provide 
     alg = QuadratureFunction(fun=gausslegendre, npt=100)
 
 `nthreads` sets the numbers of threads used to parallelize the quadrature only when the
-integrand is a [`BatchIntegrand`](@ref), in which case the user must parallelize the
+integrand is a , in which case the user must parallelize the
 integrand evaluations. For no threading set `nthreads=1`.
 """
 struct QuadratureFunction{F} <: IntegralAlgorithm

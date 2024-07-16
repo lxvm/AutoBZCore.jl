@@ -40,11 +40,10 @@ function DOSProblem(H, domain, p=NullParameters(); kws...)
     return DOSProblem(H, domain, p, NamedTuple(kws))
 end
 
-struct DOSSolution{U,E}
-    u::U
-    err::E
-    retcode::Bool
-    numevals::Int
+struct DOSSolution{V,S}
+    value::V
+    retcode::ReturnCode
+    stats::S
 end
 
 # store the data in a mutable cache so that the user can update the cache and

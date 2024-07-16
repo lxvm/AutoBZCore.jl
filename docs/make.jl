@@ -23,7 +23,6 @@ makedocs(
         "Algorithms" => "algorithms.md",
         "Reference" => "reference.md",
         "Extensions" => "extensions.md",
-        "Density of States" => "dos.md",
     ],
 )
 

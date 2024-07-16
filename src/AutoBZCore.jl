@@ -39,7 +39,6 @@ Quadrature algorithms:
 
 Meta-Algorithms:
 - Iterated integration: [`NestedQuad`](@ref)
-- Integrand evaluation counter: [`EvalCounter`](@ref)
 
 # Extended help
 
@@ -85,7 +84,7 @@ export SymmetricBZ, nsyms
 export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, UnknownRep, TrivialRep
 export AutoBZProblem
-export IAI, PTR, AutoPTR, TAI#, PTR_IAI, AutoPTR_IAI
+export IAI, PTR, AutoPTR, TAI
 include("brillouin.jl")
 
 export FourierIntegralFunction, CommonSolveFourierIntegralFunction
