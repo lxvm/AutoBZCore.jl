@@ -322,14 +322,13 @@ end
 
 const WARN_UNKNOWN_SYMMETRY = """
 A symmetric BZ was used with an integrand whose symmetry representation is unknown.
-For correctness, the calculation will proceed on the full BZ.
-However, it is better either to integrate without symmetries or to use symmetries by
-implementing an AbstractSymRep for your type.
+For correctness, the calculation will proceed on the full BZ, i.e. without symmetry.
+To integrate with symmetry, define an AbstractSymRep for your integrand.
 """
 
 function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::SymmetricBZ, p=NullParameters(); kws...)
     proto = get_prototype(f, get_prototype(bz), p)
-    if rep isa UnknownRep && !(bz isa FullBZ) && !(proto isa TrivialRepType)
+    if rep isa UnknownRep && !(bz isa FullBZ)
         @warn WARN_UNKNOWN_SYMMETRY
         fbz = SymmetricBZ(bz.A, bz.B, lattice_bz_limits(bz.B), nothing)
         return AutoBZProblem(rep, f, fbz, p, NamedTuple(kws))
