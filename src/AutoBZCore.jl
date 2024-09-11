@@ -39,7 +39,6 @@ Quadrature algorithms:
 
 Meta-Algorithms:
 - Iterated integration: [`NestedQuad`](@ref)
-- Integrand evaluation counter: [`EvalCounter`](@ref)
 
 # Extended help
 
@@ -50,7 +49,7 @@ module AutoBZCore
 
 using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr, diag, eigen, Hermitian
 
-using StaticArrays: SVector, SMatrix, pushfirst, sacollect
+using StaticArrays: SVector, SMatrix, sacollect
 using FunctionWrappers: FunctionWrapper
 using ChunkSplitters: chunks, getchunk
 using AutoSymPTR
@@ -78,14 +77,14 @@ export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
 include("algorithms_iterated.jl")
 export MonkhorstPack, AutoSymPTRJL
 include("algorithms_autosymptr.jl")
-export NestedQuad, AbsoluteEstimate, EvalCounter
+export NestedQuad#, AbsoluteEstimate, EvalCounter
 include("algorithms_meta.jl")
 
 export SymmetricBZ, nsyms
 export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, UnknownRep, TrivialRep
 export AutoBZProblem
-export IAI, PTR, AutoPTR, TAI, PTR_IAI, AutoPTR_IAI
+export IAI, PTR, AutoPTR, TAI
 include("brillouin.jl")
 
 export FourierIntegralFunction, CommonSolveFourierIntegralFunction

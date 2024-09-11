@@ -64,6 +64,7 @@ abstract type AbstractSymRep end
     UnknownRep()
 
 Fallback symmetry representation for array types without a user-defined `SymRep`.
+Will perform FBZ integration regardless of available BZ symmetries.
 """
 struct UnknownRep <: AbstractSymRep end
 
@@ -74,35 +75,20 @@ Symmetry representation of objects with trivial transformation under the group.
 """
 struct TrivialRep <: AbstractSymRep end
 
-const TrivialRepType = Union{Number,AbstractArray{<:Any,0}}
-
 """
-    symmetrize(f, ::SymmetricBZ, xs...)
-    symmetrize(f, ::SymmetricBZ, x::Union{Number,AbstractArray{<:Any,0}})
+    symmetrize(rep::AbstractSymRep, ::SymmetricBZ, x)
 
-Transform `x` by the symmetries of the parametrization used to reduce the
-domain, thus mapping the value of `x` on the parametrization to the full domain.
+Transform `x` by the representation of the symmetries of the point group used to reduce the
+domain, thus mapping the value of `x` on to the full Brillouin zone.
 """
-symmetrize(f, bz, xs...) = map(x -> symmetrize(f, bz, x), xs)
-symmetrize(f, bz, x) = symmetrize_(f isa AbstractSymRep ? f : SymRep(f), bz, x)
-symmetrize(f, bz, x::TrivialRepType) =
-    symmetrize_(TrivialRep(), bz, x)
-
-"""
-    symmetrize_(rep::AbstractSymRep, bz::SymmetricBZ, x)
-
-Transform `x` under representation `rep` using the symmetries in `bz` to obtain
-the result of an integral on the FBZ from `x`, which was calculated on the IBZ.
-"""
-symmetrize_(::TrivialRep, bz::SymmetricBZ, x) = nsyms(bz)*x
-symmetrize_(::UnknownRep, ::SymmetricBZ, x) = x
-symmetrize_(::UnknownRep, bz::SymmetricBZ, x::TrivialRepType) = symmetrize_(TrivialRep(), bz, x)
-
+symmetrize(rep, bz::SymmetricBZ, x) = symmetrize_(rep, bz, x)
 symmetrize(_, ::FullBZ, x) = x
-symmetrize(_, ::FullBZ, x::TrivialRepType) = x
 
-symmetrize(f, bz, x::AuxValue) = AuxValue(symmetrize(f, bz, x.val, x.aux)...)
-symmetrize(_, ::FullBZ, x::AuxValue) = x
+symmetrize_(rep, bz, x) = symmetrize__(rep, bz, x)
+symmetrize_(rep, bz, x::AuxValue) = AuxValue(symmetrize__(rep, bz, x.val), symmetrize__(rep, bz, x.aux))
+
+symmetrize__(::TrivialRep, bz, x) = nsyms(bz)*x
+symmetrize__(::UnknownRep, bz, x) = error("unknown representation cannot be symmetrized")
 
 struct SymmetricRule{R,U,B}
     rule::R
@@ -116,7 +102,8 @@ Base.length(r::SymmetricRule) = length(r.rule)
 Base.iterate(r::SymmetricRule, args...) = iterate(r.rule, args...)
 function (r::SymmetricRule)(f::F, args...) where {F}
     out = r.rule(f, args...)
-    return symmetrize(r.rep, r.bz, out)
+    val = symmetrize(r.rep, r.bz, out)
+    return val
 end
 
 struct SymmetricRuleDef{R,U,B}
@@ -157,7 +144,8 @@ Interface to loading Brillouin zones.
 - `B::AbstractMatrix`: a ``d \\times d`` matrix whose columns are the reciprocal-space
   lattice vectors of a ``d``-dimensional Brillouin zone (default: `A' \\ 2πI`)
 
-!!! note "Assumptions" `AutoBZCore` assumes that all calculations occur in the reciprocal
+!!! note "Assumptions"
+    `AutoBZCore` assumes that all calculations occur in the reciprocal
     lattice basis, since that is the basis in which Wannier interpolants are most
     efficiently described. See [`SymmetricBZ`](@ref) for details. We also assume that the
     integrands are cheap to evaluate, which is why we provide adaptive methods in the first
@@ -334,14 +322,13 @@ end
 
 const WARN_UNKNOWN_SYMMETRY = """
 A symmetric BZ was used with an integrand whose symmetry representation is unknown.
-For correctness, the calculation will proceed on the full BZ.
-However, it is better either to integrate without symmetries or to use symmetries by
-implementing an AbstractSymRep for your type.
+For correctness, the calculation will proceed on the full BZ, i.e. without symmetry.
+To integrate with symmetry, define an AbstractSymRep for your integrand.
 """
 
 function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::SymmetricBZ, p=NullParameters(); kws...)
     proto = get_prototype(f, get_prototype(bz), p)
-    if rep isa UnknownRep && !(bz isa FullBZ) && !(proto isa TrivialRepType)
+    if rep isa UnknownRep && !(bz isa FullBZ)
         @warn WARN_UNKNOWN_SYMMETRY
         fbz = SymmetricBZ(bz.A, bz.B, lattice_bz_limits(bz.B), nothing)
         return AutoBZProblem(rep, f, fbz, p, NamedTuple(kws))
@@ -349,11 +336,11 @@ function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::Sym
         return AutoBZProblem(rep, f, bz, p, NamedTuple(kws))
     end
 end
-function AutoBZProblem(rep::AbstractSymRep, f, bz::SymmetricBZ, p=NullParameters(); kws...)
-    return AutoBZProblem(IntegralFunction(f), bz, p; kws...)
+function AutoBZProblem(f::AbstractIntegralFunction, bz::SymmetricBZ, p=NullParameters(); kws...)
+    return AutoBZProblem(UnknownRep(), f, bz, p; kws...)
 end
 function AutoBZProblem(f, bz::SymmetricBZ, p=NullParameters(); kws...)
-    return AutoBZProblem(UnknownRep(), f, bz, p; kws...)
+    return AutoBZProblem(IntegralFunction(f), bz, p; kws...)
 end
 
 mutable struct AutoBZCache{R,F,BZ,P,A,C,K}
@@ -401,7 +388,7 @@ function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws..
     cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol / (j * nsyms(bz)),)) : kws
 
     sol = solve!(cacheval)
-    value = j*symmetrize_(rep, bz, sol.value)
+    value = j*symmetrize(rep, bz, sol.value)
     stats = (; sol.stats...)
     # err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
     return IntegralSolution(value, sol.retcode, stats)

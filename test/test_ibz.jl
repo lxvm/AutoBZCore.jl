@@ -5,6 +5,7 @@ import SymmetryReduceBZ.Symmetry: calc_bz, calc_ibz
 import SymmetryReduceBZ.Utilities: volume, vertices, get_uniquefacets
 using Polyhedra: Polyhedron
 using AutoBZCore
+using IteratedIntegration: nested_quad
 using LinearAlgebra
 using Test
 

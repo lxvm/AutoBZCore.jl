@@ -2,9 +2,9 @@
 
 The following are several examples of how to use the algorithms and integrands
 provided by AutoBZCore.jl.
-For background on defining integrals see the [Problem definitions](@ref) page
+For background on the essential interface see the [Problem definitions](@ref) page
 
-## Green's function
+## Green's function integration
 
 A common integral appearing in [Dynamical mean-field
 theory](https://en.wikipedia.org/wiki/Dynamical_mean-field_theory) is that of
@@ -14,11 +14,13 @@ G(\omega) = \int d^d \vec{k}\ \operatorname{Tr} \left[ \left( \omega - H \left( 
 ```
 
 For simplicity, we take ``\Sigma(\omega) = -i\eta``. We can define the integrand
-as a function of ``\vec{k}`` and ``H`` and (required) parameters ``\eta, \omega``.
-```julia
+as a function of ``\vec{k}`` and ``H`` and parameters ``\eta, \omega``.
+```@example gloc
 using LinearAlgebra
-gloc_integrand(k, h; η, ω) = inv(complex(ω,η)*I-h(k))
+gloc_integrand(k, (; h, η, ω)) = tr(inv(complex(ω,η)*I-h(k)))
 ```
+Here we use named tuple destructuring syntax to unpack a named tuple of
+parameters in the function definition.
 
 Commonly, ``H(\vec{k})`` is evaluated using Wannier interpolation, i.e. as a
 Fourier series. For a simple tight-binding model, the integer lattice, the
@@ -31,33 +33,44 @@ complex Fourier series it becomes easier to use the representation in terms of
 Fourier coefficients. Using the package
 [FourierSeriesEvaluators.jl](https://github.com/lxvm/FourierSeriesEvaluators.jl),
 we can define ``H(k) = \cos(2\pi k)`` by the following:
-```julia
+```@example gloc
 using FourierSeriesEvaluators
 h = FourierSeries([0.5, 0.0, 0.5]; period=1, offset=-2)
 ```
 The coefficient values of ``1/2`` can be determined from Euler's formula, as
-used in the expansion of ``cos`` above, and the value of `offset` is chosen to
+used in the expansion of ``\cos`` above, and the value of `offset` is chosen to
 offset the coefficient array indices, `1:3` since Julia has 1-based indexing, to
 correspond to values of ``n`` in the phase factors ``e^{2\pi i n k}`` used in
-the Fourier series above, i.e. `-1:1`. Now we proceed to the define the integral problem
-```julia
+the Fourier series above, i.e. `-1:1`. Now we proceed to the define the
+[`IntegralProblem`](@ref) and solve it with a generic adaptive
+integration scheme, [`QuadGKJL`](@ref)
+```@example gloc
 using AutoBZCore
-using AutoBZCore: IntegralProblem
-integrand = ParameterIntegrand(gloc_integrand, h, η=0.1)
-prob = IntegralProblem(integrand, 0, 1)
-```
-Here we wrapped our function with two of its arguments, `h, η` as a
-[`ParameterIntegrand`](@ref) that allows us to provide partial arguments so that
-we can solve the integral as a function of the remaining parameters, in this
-case `ω`. We also created an [`AutoBZCore.IntegralProblem`](@ref) to integrate our function
-over its period ``[0,1]``. To solve this problem, we pick any of the package's
-[Integral algorithms](@ref) and the
-tolerance to which we would like the solution. Then we make an
-[`IntegralSolver`](@ref) to evaluate ``G(\omega)`` as a function.
-```julia
+dom = (0, 1)
+p = (; h, η=0.1, ω=0.0)
+prob = IntegralProblem(gloc_integrand, dom, p)
 alg = QuadGKJL()
-gloc = IntegralSolver(prob, alg; abstol=1e-3)
-gloc(ω=0.0) # -2.7755575615628914e-17 - 0.9950375451895513im
+solve(prob, alg; abstol=1e-3).value
+```
+
+## BZ integration
+
+To perform integration over a Brillouin zone, we can load one using the
+[`load_bz`](@ref) function and then construct an [`AutoBZProblem`](@ref) to
+solve. Since the Brillouin zone may be reduced using point group symmetries, a
+common optimization, it is also required to specify the symmetry representation
+of the integrand. Continuing the previous example, the trace of the Green's
+function has no band/orbital degrees of freedom and transforms trivially under
+the point group, so it is a [`TrivialRep`](@ref). The previous calculation can
+be replicated as:
+
+```@example gloc
+using AutoBZCore
+bz = load_bz(FBZ(), 2pi*I(1))
+p = (; h, η=0.1, ω=0.0)
+prob = AutoBZProblem(TrivialRep(), IntegralFunction(gloc_integrand), bz, p)
+alg = TAI()
+solve(prob, alg; abstol=1e-3).value
 ```
 
 Now we proceed to multi-dimensional integrals. In this case, Wannier
@@ -76,37 +89,73 @@ which is comparable to the computational complexity of a [multi-dimensional
 FFT](https://en.wikipedia.org/wiki/Fast_Fourier_transform#Multidimensional_FFTs).
 Since the constants of a FFT may not be trivial, this scheme is competitive.
 
-This capability is provided by [`FourierIntegrand`](@ref).
 Let's use this with a Fourier series corresponding to
 ``H(\vec{k}) = \cos(2\pi k_{x}) + \cos(2\pi k_{y})``
-```julia
+and define a new method of `gloc_integrand` that accepts the (efficiently)
+evaluated Fourier series in the second argument
+```@example gloc
 h = FourierSeries([0.0; 0.5; 0.0;; 0.5; 0.0; 0.5;; 0.0; 0.5; 0.0]; period=1, offset=-2)
-integrand = FourierIntegrand(gloc_integrand, h, η=0.1)
-```
-However, since [`FourierIntegrand`](@ref) evaluates ``H(k)`` for us and gives it
-as a `FourierValue` together with ``k``, we need to define another method for
-our integrand to comply with the interface
-```julia
-gloc_integrand(h_k::FourierValue; η, ω) = inv(complex(ω,η)*I-h_k.s)
+gloc_integrand(k, h_k, (; η, ω)) = tr(inv(complex(ω,η)*I-h_k))
 ```
 Similar to before, we construct an [`AutoBZCore.IntegralProblem`](@ref) and this time we
 take the integration domain to correspond to the full Brillouin zone of a square
-lattice with lattice vectors `2pi*I(2)`. (See the
-[Reference](@ref) for more details on constructing BZs.)
-```julia
+lattice with lattice vectors `2pi*I(2)`.
+```@example gloc
+integrand = FourierIntegralFunction(gloc_integrand, h)
 bz = load_bz(FBZ(2), 2pi*I(2))
-prob = IntegralProblem(integrand, bz)
-```
-This package provides several [BZ-specific integral algorithms](@ref) that we
-can use to solve the multidimensional integral.
-```julia
+p = (; η=0.1, ω=0.0)
+prob = AutoBZProblem(TrivialRep(), integrand, bz, p)
 alg = IAI()
-gloc = IntegralSolver(prob, alg; abstol=1e-3)
-gloc(ω=0.0) # 1.5265566588595902e-16 - 1.3941704019631334im
+solve(prob, alg).value
 ```
-
-## Density of states
+This package provides several [`AutoBZProblem` algorithms](@ref) that we
+can use to solve the multidimensional integral.
 
 The [repo's demo](https://github.com/lxvm/AutoBZCore.jl/tree/main/aps_example)
 on density of states provides a complete example of how to compute and
-interpolate an integral as a function of its parameters.
+interpolate an integral as a function of its parameters using the [`init` and
+`solve!`](@ref) interface
+
+
+## Density of States
+
+Computing the density of states (DOS) of a self-adjoint, or Hermitian, operator is a
+related, but distinct problem to the integrals also presented in this package.
+In fact, many DOS algorithms will compute integrals to approximate the DOS of an
+operator by introducing an artificial broadening.
+To handle the ``T=0^{+}`` limit of the broadening, we implement the well-known
+[Gilat-Raubenheimer method](https://arxiv.org/abs/1711.07993) as an algorithm
+for the [`AutoBZCore.DOSProblem`](@ref)
+
+Using the [`AutoBZCore.init`](@ref) and [`AutoBZCore.solve!`](@ref) functions, it is possible to
+construct a cache to solve a [`DOSProblem`](@ref) for several energies or
+several Hamiltonians. As an example of solving for several energies,
+```@example dos
+using AutoBZCore, FourierSeriesEvaluators, StaticArrays
+h = FourierSeries(SMatrix{1,1,Float64,1}.([0.5, 0.0, 0.5]), period=1.0, offset=-2)
+E = 0.3
+bz = load_bz(FBZ(), [2pi;;])
+prob = DOSProblem(h, E, bz)
+alg = GGR(; npt=100)
+cache = init(prob, alg)
+Es = range(-1, 1, length=10) * 1.1
+data = map(Es) do E
+    cache.domain = E
+    solve!(cache).value
+end
+```
+
+As an example of interchanging Hamiltonians, which must remain the same type, we
+can double the energies, which will halve the DOS
+```@example dos
+cache.domain = E
+sol1 = AutoBZCore.solve!(cache)
+
+h.c .*= 2
+cache.isfresh = true
+cache.domain = 2E
+
+sol2 = AutoBZCore.solve!(cache)
+
+sol1.value ≈ 2sol2.value
+```

@@ -8,7 +8,7 @@
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
 using the `PTR` rule from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
 `nthreads` sets the numbers of threads used to parallelize the quadrature only when the
-integrand is a [`BatchIntegrand`](@ref), in which case the user must parallelize the
+integrand is a , in which case the user must parallelize the
 integrand evaluations. For no threading set `nthreads=1`.
 **The caller should check that the integral is converged w.r.t. `npt`**.
 """
@@ -51,7 +51,7 @@ Periodic trapezoidal rule with automatic convergence to tolerances passed to the
 solver with respect to `norm` using the routine `autosymptr` from
 [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
 `nthreads` sets the numbers of threads used to parallelize the quadrature only when the
-integrand is a [`BatchIntegrand`](@ref), in which case the user must parallelize the
+integrand is a  in which case the user must parallelize the
 integrand evaluations. For no threading set `nthreads=1`.
 **This algorithm is the most efficient for smooth integrands**.
 """
@@ -76,7 +76,7 @@ end
 
 function init_cacheval(f, dom, p, alg::AutoSymPTRJL; kws...)
     b = get_basis(dom)
-    rule = init_rule(b, alg)
+    rule = init_rule(dom, alg)
     rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
     cache = init_autosymptr_cache(f, b, p, alg.nthreads; kws...)
     return (; rule, rule_cache, cache...)
@@ -89,7 +89,7 @@ function do_integral(f, dom, p, alg::AutoSymPTRJL, cacheval;
     bas = get_basis(dom)
     value, error = autosymptr(g, bas; syms = alg.syms, rule = cacheval.rule, cache = cacheval.rule_cache, keepmost = alg.keepmost,
         abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm, buffer=cacheval.buffer)
-    retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(a))) : abstol)) ? Success : Failure
+    retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(bas))) : abstol)) ? Success : Failure
     stats = (; error)
     return IntegralSolution(value, retcode, stats)
 end

@@ -81,7 +81,7 @@ function outer_integralfunction(f::IntegralFunction, x0, p)
     ws = nothing
     return func, ws, _update!, _postsolve
 end
-
+#=
 """
     AbsoluteEstimate(est_alg, abs_alg; kws...)
 
@@ -107,7 +107,7 @@ function AbsoluteEstimate(est_alg, abs_alg; norm=norm, kwargs...)
     checkkwargs(kws)
     return AbsoluteEstimate(est_alg, abs_alg, norm, kws)
 end
-#=
+
 function init_cacheval(f, dom, p, alg::AbsoluteEstimate)
     return (est=init_cacheval(f, dom, p, alg.est_alg),
             abs=init_cacheval(f, dom, p, alg.abs_alg))
@@ -122,7 +122,7 @@ function do_solve(f, dom, p, alg::AbsoluteEstimate, cacheval;
     return do_solve(f, dom, p, alg.abs_alg, cacheval.abs;
                     abstol=atol, reltol=zero(rtol), maxiters=maxiters)
 end
-=#
+
 
 """
     EvalCounter(::IntegralAlgorithm)
@@ -133,7 +133,7 @@ The count is stored in the `sol.numevals` field.
 struct EvalCounter{T<:IntegralAlgorithm} <: IntegralAlgorithm
     alg::T
 end
-#=
+
 function init_cacheval(f, dom, p, alg::EvalCounter)
     return init_cacheval(f, dom, p, alg.alg)
 end

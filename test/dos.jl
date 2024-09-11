@@ -1,5 +1,6 @@
 using Test, AutoBZCore, LinearAlgebra, StaticArrays, OffsetArrays, Elliptic
 using GeneralizedGaussianQuadrature: generalizedquadrature
+using FourierSeriesEvaluators, QuadGK
 
 # test set of known DOS examples
 
@@ -105,15 +106,15 @@ for (model, solution, bandwidth, bzkind) in (
         cache = AutoBZCore.init(prob, alg)
         for e in E
             cache.domain = e
-            @test AutoBZCore.solve!(cache).u ≈ solution(e) atol=1e-2
+            @test AutoBZCore.solve!(cache).value ≈ solution(e) atol=1e-2
         end
     end
 end
 
 # test caching behavior
-let h = FourierSeries(SMatrix{1,1,Float64,1}.([0.5, 0.0, 0.5]), period=1.0, offset=-2)
+let h = FourierSeries(SMatrix{1,1,Float64,1}.([0.5, 0.0, 0.5]), period=1.0, offset=-2), E = 0.1
     bz = load_bz(FBZ(), [2pi;;])
-    prob = DOSProblem(h, 0.0, bz)
+    prob = DOSProblem(h, E, bz)
     alg = GGR()
 
     cache = AutoBZCore.init(prob, alg)
@@ -121,12 +122,14 @@ let h = FourierSeries(SMatrix{1,1,Float64,1}.([0.5, 0.0, 0.5]), period=1.0, offs
 
     h.c .*= 2
     cache.isfresh = true
+    cache.domain = 2E
 
     sol2 = AutoBZCore.solve!(cache)
 
-    @test sol1.u*2 ≈ sol2.u
+    @test sol1.value ≈ 2sol2.value
 
     cache.H = FourierSeries(2*h.c, period=h.t, offset=h.o)
+    cache.domain = 4E
     sol3 = AutoBZCore.solve!(cache)
-    @test sol2.u*2 ≈ sol3.u
+    @test sol2.value ≈ 2sol3.value
 end

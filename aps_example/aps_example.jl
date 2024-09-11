@@ -22,14 +22,12 @@ end
 
 using FourierSeriesEvaluators, LinearAlgebra
 
-h = FourierSeries(H_R, period=1.0)
+h = HermitianFourierSeries(FourierSeries(H_R, period=1.0))
 
 η = 1e-2                    # 10 meV (scattering amplitude)
 ω_min = 10
 ω_max = 15
 p0 = (; η, ω=(ω_min + ω_max)/2) # initial parameters
-# BUG cannot redefine this function without breaking functionwrappers in v1.10
-# https://github.com/JuliaLang/julia/issues/52635#issuecomment-2150808569
 greens_function(k, h_k, (; η, ω)) = tr(inv((ω+im*η)*I - h_k))
 prototype = let k = FourierSeriesEvaluators.period(h)
     greens_function(k, h(k), p0)
@@ -40,7 +38,7 @@ bz = load_bz(CubicSymIBZ(), "svo.wout")
 # bz = load_bz(IBZ(), "svo.wout") # works with SymmetryReduceBZ.jl installed
 
 integrand = FourierIntegralFunction(greens_function, h, prototype)
-prob_dos = AutoBZProblem(integrand, bz, p0; abstol=1e-3)
+prob_dos = AutoBZProblem(TrivialRep(), integrand, bz, p0; abstol=1e-3)
 
 using HChebInterp
 
