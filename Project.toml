@@ -29,7 +29,7 @@ UnitfulExt = "Unitful"
 WannierIOExt = "WannierIO"
 
 [compat]
-Aqua = "0.7"
+Aqua = "0.8"
 AtomsBase = "0.3"
 AutoSymPTR = "0.4"
 ChunkSplitters = "2"
@@ -41,9 +41,13 @@ GeneralizedGaussianQuadrature = "0.1"
 HCubature = "1.4"
 IteratedIntegration = "0.5"
 LinearAlgebra = "1.9"
+OffsetArrays = "1"
+Polyhedra = "0.6,0.7"
 QuadGK = "2.6"
 StaticArrays = "1"
 SymmetryReduceBZ = "0.2"
+Test = "1.9"
+Unitful = "1"
 WannierIO = "0.1,0.2"
 julia = "1.9"
 
@@ -62,4 +66,4 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [targets]
-test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra"]
+test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase"]
