@@ -48,6 +48,7 @@ StaticArrays = "1"
 SymmetryReduceBZ = "0.2"
 Test = "1.9"
 Unitful = "1"
+UnitfulAtomic = "1"
 WannierIO = "0.1,0.2"
 julia = "1.9"
 
@@ -63,7 +64,8 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 SymmetryReduceBZ = "49a35663-c880-4242-bebb-1ec8c0fa8046"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+UnitfulAtomic = "a7773ee8-282e-5fa2-be4e-bd808c38a91a"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [targets]
-test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase"]
+test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase", "Unitful", "UnitfulAtomic"]
