@@ -33,7 +33,7 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
         subprob = IntegralProblem(f, (a, b), ((a+b)/2, s((a+b)/2), 1.0))
         abstol = 1e-5
         prob = IntegralProblem(CommonSolveFourierIntegralFunction(subprob, QuadGKJL(), update!, postsolve, s), (a, b), p; abstol)
-        for alg in (QuadGKJL(), QuadratureFunction(), AuxQuadGKJL(), ContQuadGKJL(), MeroQuadGKJL())
+        for alg in (QuadGKJL(), HCubatureJL(), QuadratureFunction(), AuxQuadGKJL(), ContQuadGKJL(), MeroQuadGKJL())
             cache = init(prob, alg)
             for p in [3.0, 4.0]
                 ref = (b-a)*(t*p + (b-a)^2/2) + (b-a)^2/2*t*(b*sin(b/t*2pi) + t*cos(b/t*2pi) - (a*sin(a/t*2pi) + t*cos(a/t*2pi)))
