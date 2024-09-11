@@ -175,8 +175,19 @@ function init_cacheval(f::FourierIntegralFunction, dom, p, ::HCubatureJL; kws...
     ws = get_fourierworkspace(f)
     return ws
 end
+function init_cacheval(f::CommonSolveFourierIntegralFunction, dom, p, ::HCubatureJL; kws...)
+    # TODO utilize hcubature_buffer
+    ws = get_fourierworkspace(f)
+    cache, integrand, = _init_commonsolvefourierfunction(f, dom, p; ws)
+    return (; ws, cache, integrand)
+end
 function hcubature_integrand(f::FourierIntegralFunction, p, a, b, ws)
     x -> f.f(x, ws(x), p)
+end
+function hcubature_integrand(f::CommonSolveFourierIntegralFunction, p, a, b, cacheval)
+    integrand = cacheval.integrand
+    ws = cacheval.ws
+    x -> integrand(x, ws(x), p)
 end
 
 function init_autosymptr_cache(f::FourierIntegralFunction, dom, p, bufsize; kws...)
