@@ -24,3 +24,12 @@ struct GGR <: DOSAlgorithm
     npt::Int
 end
 GGR(; npt=50) = GGR(npt)
+
+
+"""
+    ImplicitIntegrationJL(; kws...)
+"""
+struct ImplicitIntegrationJL{K} <: DOSAlgorithm
+    kws::K
+end
+ImplicitIntegrationJL(; kws...) = ImplicitIntegrationJL(kws)

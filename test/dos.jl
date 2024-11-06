@@ -1,6 +1,7 @@
 using Test, AutoBZCore, LinearAlgebra, StaticArrays, OffsetArrays, Elliptic
 using GeneralizedGaussianQuadrature: generalizedquadrature
 using FourierSeriesEvaluators, QuadGK
+using ImplicitIntegration
 
 # test set of known DOS examples
 
@@ -9,8 +10,8 @@ using FourierSeriesEvaluators, QuadGK
 tb_graphene = let t=1.0
     ax = CartesianIndices((-2:2, -2:2))
     hm = OffsetMatrix([zero(MMatrix{2,2,typeof(t),4}) for i in ax], ax)
-    hm[1,1][1,2]   = hm[1,-2][1,2] = hm[-2,1][1,2] = t
-    hm[-1,-1][2,1] = hm[-1,2][2,1] = hm[2,-1][2,1] = t
+    hm[0,0][1,2] = hm[0,-1][1,2] = hm[-1,0][1,2] = t
+    hm[0,0][2,1] = hm[0,1][2,1]  = hm[1,0][2,1]  = t
     FourierSeries(SMatrix{2,2,typeof(t),4}.(hm), period=1.0)
 end
 
@@ -102,9 +103,10 @@ for (model, solution, bandwidth, bzkind) in (
     bz = load_bz(bzkind, I(ndims(model)))
     prob = DOSProblem(model, float(zero(B)), bz)
     E = Float64[-B - 1, -0.8B, -0.6B, -0.2B, 0.1B, 0.3B, 0.5B, 0.7B, 0.9B, B + 2]
-    for alg in (GGR(; npt=200),)
-        cache = AutoBZCore.init(prob, alg)
-        for e in E
+    for alg in (GGR(; npt=200), ImplicitIntegrationJL())
+        cache = AutoBZCore.init(prob, alg; abstol=1e-2)
+        alg isa ImplicitIntegrationJL && !(bzkind isa FBZ) && continue
+        @testset "model=$(nameof(solution)) alg=$alg" for e in E
             cache.domain = e
             @test AutoBZCore.solve!(cache).value ≈ solution(e) atol=1e-2
         end

@@ -17,12 +17,14 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
+ImplicitIntegration = "bc256489-3a69-4a66-afc4-127cc87e6182"
 Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
 SymmetryReduceBZ = "49a35663-c880-4242-bebb-1ec8c0fa8046"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [extensions]
+AutoBZCoreImplicitIntegrationExt = "ImplicitIntegration"
 AtomsBaseExt = "AtomsBase"
 SymmetryReduceBZExt = ["SymmetryReduceBZ", "Polyhedra"]
 UnitfulExt = "Unitful"
@@ -39,6 +41,7 @@ FourierSeriesEvaluators = "1"
 FunctionWrappers = "1"
 GeneralizedGaussianQuadrature = "0.1"
 HCubature = "1.4"
+ImplicitIntegration = "0.1"
 IteratedIntegration = "0.5"
 LinearAlgebra = "1.9"
 OffsetArrays = "1"
@@ -68,4 +71,4 @@ UnitfulAtomic = "a7773ee8-282e-5fa2-be4e-bd808c38a91a"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [targets]
-test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase", "Unitful", "UnitfulAtomic", "WannierIO"]
+test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase", "Unitful", "UnitfulAtomic", "WannierIO", "ImplicitIntegration"]
