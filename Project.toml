@@ -24,8 +24,8 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [extensions]
-AutoBZCoreImplicitIntegrationExt = "ImplicitIntegration"
 AtomsBaseExt = "AtomsBase"
+AutoBZCoreImplicitIntegrationExt = "ImplicitIntegration"
 SymmetryReduceBZExt = ["SymmetryReduceBZ", "Polyhedra"]
 UnitfulExt = "Unitful"
 WannierIOExt = "WannierIO"
@@ -34,7 +34,7 @@ WannierIOExt = "WannierIO"
 Aqua = "0.8"
 AtomsBase = "0.3"
 AutoSymPTR = "0.4"
-ChunkSplitters = "2"
+ChunkSplitters = "2, 3"
 CommonSolve = "0.2"
 Elliptic = "1"
 FourierSeriesEvaluators = "1"
