@@ -103,7 +103,7 @@ for (model, solution, bandwidth, bzkind) in (
     bz = load_bz(bzkind, I(ndims(model)))
     prob = DOSProblem(model, float(zero(B)), bz)
     E = Float64[-B - 1, -0.8B, -0.6B, -0.2B, 0.1B, 0.3B, 0.5B, 0.7B, 0.9B, B + 2]
-    for alg in (GGR(; npt=200), ImplicitIntegrationJL())
+    for alg in (GGR(; npt=200), ImplicitIntegrationJL(), BCD(; npt=50))
         cache = AutoBZCore.init(prob, alg; abstol=1e-2)
         alg isa ImplicitIntegrationJL && !(bzkind isa FBZ) && continue
         @testset "model=$(nameof(solution)) alg=$alg" for e in E

@@ -35,3 +35,19 @@ struct ImplicitIntegrationJL{K} <: DOSAlgorithm
     kws::K
 end
 ImplicitIntegrationJL(; kws...) = ImplicitIntegrationJL(kws)
+
+"""
+    BCD(npt, α, ΔE)
+
+## Arguments
+- `npt`: the number of k-points per dimension
+- `α`: a scaling parameter for the deformation
+- `ΔE`: a parameter for the cut-off function in the deformation
+"""
+struct BCD <: DOSAlgorithm
+    npt::Int
+    α::Float64
+    ΔE::Float64
+    η::Float64
+end
+BCD(; npt=50, α=0.1/(2π), ΔE=0.9, η=0) = BCD(npt, α, ΔE, η)

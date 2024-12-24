@@ -93,8 +93,9 @@ include("fourier.jl")
 export DOSProblem
 include("dos_interfaces.jl")
 
-export GGR, ImplicitIntegrationJL
+export GGR, ImplicitIntegrationJL, BCD
 include("dos_algorithms.jl")
 include("dos_ggr.jl")
+include("dos_bcd.jl")
 
 end
