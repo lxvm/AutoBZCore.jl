@@ -60,23 +60,99 @@ function get_prototype(f::InplaceBatchIntegralFunction, x, p)
     f.prototype
 end
 
+"""
+    AbstractSpecialization
+
+Supertype for compiler specializations of commonsolve functions to control code generation and inference.
+"""
 abstract type AbstractSpecialization end
+
+"""
+    DefaultSpecialize()
+
+Specialize a commonsolve function using default heuristics of Julia's compiler.
+"""
+struct DefaultSpecialize <: AbstractSpecialization end
+
+"""
+    NoSpecialize()
+
+Type-stable specialization of a commonsolve function without code generation or inference based on the solver type.
+Asserts that the returned value is of the same type as the prototype.
+Strikes a good balance of 
+"""
 struct NoSpecialize <: AbstractSpecialization end
-struct FunctionWrapperSpecialize <: AbstractSpecialization end
+
+"""
+    FullSpecialize()
+
+Type-stable specialization of a commonsolve function with most code generation and full inference.
+Asserts that the returned value is of the same type as the prototype.
+This may lead to excessive compile times but will usually give the fastest runtime.
+"""
 struct FullSpecialize <: AbstractSpecialization end
 
 """
-    CommonSolveIntegralFunction(prob, alg, update!, postsolve, [prototype, specialize]; kws...)
+    FunctionWrapperSpecialize()
+
+Type-stable specialization of a commonsolve function behind a C-function points.
+Requires `using FunctionWrappers` as this is implemented in a package extension.
+Asserts that the returned value is of the same type as the prototype.
+This gives both very fast runtimes, compile times, and zero allocations, but may be brittle w.r.t. world age and is not as flexible with types of integration limits.
+"""
+struct FunctionWrapperSpecialize <: AbstractSpecialization end
+
+"""
+    AbstractExecutor
+
+Supertype of policies for how to schedule the execution of commonsolve functions.
+"""
+abstract type AbstractExecutor end
+
+"""
+    SerialExecutor()
+
+Policy that a commonsolve function be executed on a single thread.
+"""
+struct SerialExecutor <: AbstractExecutor end
+
+abstract type AbstractThreadedExecutor <: AbstractExecutor end
+
+"""
+    ThreadedExecutor(ntasks::Int)
+
+Policy that a commonsolve function be executed on multiple threads, scheduling up to `ntasks` tasks at a time which may exceed the number of threads.
+"""
+struct ThreadedExecutor <: AbstractThreadedExecutor
+    ntasks::Int
+end
+
+"""
+    SharedThreadedExecutor(ntasks::Int, channel=Channel(ntasks))
+
+Policy that a commonsolve function be executed on multiple threads, scheduling up to `ntasks` tasks at a time which may exceed the number of threads.
+All solvers are shared in the supplied `channel`.
+"""
+struct SharedThreadedExecutor{T<:Channel} <: AbstractThreadedExecutor
+    ntasks::Int
+    channel::T
+end
+SharedThreadedExecutor(ntasks::Integer) = SharedThreadedExecutor(ntasks, Channel(ntasks))
+
+
+"""
+    CommonSolveIntegralFunction(prob, alg, update!, postsolve, [prototype, specialize, executor]; kws...)
 
 Constructor for an integrand that solves a problem defined with the CommonSolve.jl
 interface, `prob`, which is instantiated using `init(prob, alg; kws...)`. Helper functions
-include: `update!(cache, x, p)` is called before
-`solve!(cache)`, followed by `postsolve(sol, x, p)`, which should return the value of the solution.
-The `prototype` argument can help control how much to `specialize` on the type of the
-problem, which defaults to `FullSpecialize()` so that run times are improved. However
-`FunctionWrapperSpecialize()` may help reduce compile times.
+include: `update!(solver, x, p)` is called before
+`solve!(solver)`, followed by `postsolve(sol, x, p)`, which should return the value of the solution.
+The `prototype` argument can help control how much to `specialize` on the solution type of the
+problem. By default, `specialize=DefaultSpecialize()` uses Julia's default heuristics, which can give up on inference in complicated codes.
+Additionally, `FullSpecialize()` can obtain the fastest run times with the longest compile times, `NoSpecialize()` strikes a good balance of run time, compile time and inference, and `FunctionWrapperSpecialize()` may have the fastest compile time and very good run times (comparable to `FullSpecialize()`) but with possible issues regarding world age.
+The `executor` keyword specifies how to schedule and run the integrand evaluation, defaulting to `SerialExecutor()` with an additional option for `ThreadedExecutor(::Integer)`.
 """
-struct CommonSolveIntegralFunction{P,A,K,U,S,T,M<:AbstractSpecialization} <: AbstractIntegralFunction
+struct CommonSolveIntegralFunction{P,A,K,U,S,T,M<:AbstractSpecialization,E<:AbstractExecutor} <: AbstractIntegralFunction
     prob::P
     alg::A
     kwargs::K
@@ -84,44 +160,85 @@ struct CommonSolveIntegralFunction{P,A,K,U,S,T,M<:AbstractSpecialization} <: Abs
     postsolve::S
     prototype::T
     specialize::M
+    executor::E
 end
-function CommonSolveIntegralFunction(prob, alg, update!, postsolve, prototype=nothing, specialize=FullSpecialize(); kws...)
-    return CommonSolveIntegralFunction(prob, alg, NamedTuple(kws), update!, postsolve, prototype, specialize)
+function CommonSolveIntegralFunction(prob, alg, update!, postsolve, prototype=nothing, specialize=DefaultSpecialize(), executor=SerialExecutor(); kws...)
+    return CommonSolveIntegralFunction(prob, alg, NamedTuple(kws), update!, postsolve, prototype, specialize, executor)
 end
 
-function do_solve!(cache, f::CommonSolveIntegralFunction, x, p)
-    f.update!(cache, x, p)
-    sol = solve!(cache)
+function do_solve!(solver, f::CommonSolveIntegralFunction, x, p)
+    f.update!(solver, x, p)
+    sol = solve!(solver)
     return f.postsolve(sol, x, p)
 end
-function get_prototype(f::CommonSolveIntegralFunction, x, p)
+Base.@nospecializeinfer function do_solve_nsp!(@nospecialize(solver), f::CommonSolveIntegralFunction, x, p)
+    return do_solve!(solver, f, x, p)
+end
+function get_prototype(f::CommonSolveIntegralFunction, x, p, solver=init(f.prob, f.alg; f.kwargs...))
     if isnothing(f.prototype)
-        cache = init(f.prob, f.alg; f.kwargs...)
-        do_solve!(cache, f, x, p)
+        do_solve!(solver, f, x, p)
     else
         f.prototype
     end
 end
-function init_specialized_integrand(cache, f, dom, p; x=get_prototype(dom), prototype=f.prototype)
-    proto = prototype === nothing ? do_solve!(cache, f, x, p) : prototype
-    func = (x, p) -> do_solve!(cache, f, x, p)
-    integrand = if f.specialize isa FullSpecialize
-        func
-    elseif f.specialize isa FunctionWrapperSpecialize
-        FunctionWrapper{typeof(prototype), typeof((x, p))}(func)
-    else
-        throw(ArgumentError("$(f.specialize) is not implemented"))
-    end
-    return integrand, proto
+function init_specialized_integrand(::DefaultSpecialize, solver, f, x, p, prototype)
+    do_solve!
 end
-function _init_commonsolvefunction(f, dom, p; kws...)
-    cache = init(f.prob, f.alg; f.kwargs...)
-    integrand, prototype = init_specialized_integrand(cache, f, dom, p; kws...)
-    return cache, integrand, prototype
+function init_specialized_integrand(::NoSpecialize, solver, f, x, p, prototype)
+    (solver, f, x, p) -> do_solve_nsp!(solver, f, x, p)::typeof(prototype)
+end
+function init_specialized_integrand(::FullSpecialize, solver, f, x, p, prototype)
+    (solver, f, x, p) -> do_solve!(solver, f, x, p)::typeof(prototype)
+end
+
+init_commonsolvefunction(f, dom, p; kws...) = init_commonsolvefunction_(f.executor, f, get_prototype(dom), p; kws...)
+function init_commonsolvefunction_(::SerialExecutor, f, x, p; kws...)
+    solver = init(f.prob, f.alg; f.kwargs...)
+    prototype = get_prototype(f, x, p, solver)
+    integrand = init_specialized_integrand(f.specialize, solver, f, x, p, prototype)
+    return solver, integrand, prototype
+end
+function init_commonsolvefunction_(exec::AbstractThreadedExecutor, f, x, p; kws...)
+    channel = fillchannel(exec) do
+        init(f.prob, f.alg; f.kwargs...)
+    end
+    solver = fetch(channel)
+    prototype = get_prototype(f, x, p, solver)
+    integrand = init_specialized_integrand(f.specialize, solver, f, x, p, prototype)
+    return channel, integrand, prototype
+end
+
+
+function fillchannel(f, exec::ThreadedExecutor)
+    return fillchannel(f, exec.ntasks)
+end
+function fillchannel(f, exec::SharedThreadedExecutor)
+    while length(exec.channel.data) < exec.ntasks
+        put!(exec.channel, f())
+    end
+    return exec.channel
+end
+function fillchannel(f, n::Integer)
+    item = f()
+    ch = Channel{typeof(item)}(n)
+    put!(ch, item)
+    for _ in 2:n
+        put!(ch, f())
+    end
+    return ch
+end
+
+function do_threaded_solve!(integrand, channel, f, y, x, p)
+    @sync for (iy, xi) in zip(eachindex(y), x)
+        solver = take!(channel)
+        Threads.@spawn begin
+            y[iy] = integrand(solver, f, xi, p)
+            put!(channel, solver)
+        end
+    end
 end
 
 # TODO add InplaceCommonSolveIntegralFunction and InplaceBatchCommonSolveIntegralFunction
-# TODO add ThreadedCommonSolveIntegralFunction and DistributedCommonSolveIntegralFunction
 
 """
     IntegralAlgorithm

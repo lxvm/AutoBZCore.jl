@@ -7,16 +7,13 @@ The domain of integration must be an `AbstractIteratedLimits` from the
 IteratedIntegration.jl package. Analogous to `nested_quad` from IteratedIntegration.jl.
 The integrand should expect `SVector` inputs. Do not use this for very high-dimensional
 integrals, since the compilation time scales very poorly with respect to dimensionality.
-In order to improve the compilation time, FunctionWrappers.jl is used to enforce type
-stability of the integrand, so you should always pick the widest integration limit type so
-that inference works properly. For example, if [`ContQuadGKJL`](@ref) is used as an
-algorithm in the nested scheme, then the limits of integration should be made complex.
 """
-struct NestedQuad{T, S} <: IntegralAlgorithm
+struct NestedQuad{T,S,E} <: IntegralAlgorithm
     algs::T
     specialize::S
-    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization = FunctionWrapperSpecialize()) = new{typeof(alg), typeof(specialize)}(alg, specialize)
-    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}} = ntuple(_ -> FunctionWrapperSpecialize(), length(algs))) = new{typeof(algs), typeof(specialize)}(algs, specialize)
+    executor::E
+    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor()) = new{typeof(alg),typeof(specialize),typeof(executor)}(alg, specialize, executor)
+    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->NoSpecialize(), length(algs)), executor::Tuple{Vararg{AbstractExecutor}}=ntuple(_->SerialExecutor(), length(algs))) = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 # TODO add a parallelization option for use when it is safe to do so
@@ -40,6 +37,7 @@ function init_cacheval(f, nextdom, p, alg::NestedQuad; kws...)
     end
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(lims))) : alg.algs
     spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(lims))) : alg.specialize
+    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor isa SharedThreadedExecutor ? SharedThreadedExecutor(alg.executor.ntasks) : alg.executor, Val(ndims(lims))) : alg.executor
     if ndims(lims) == 1
         func, ws = inner_integralfunction(f, x0, p)
     else
@@ -52,7 +50,7 @@ function init_cacheval(f, nextdom, p, alg::NestedQuad; kws...)
         len = segs[end] - segs[begin]
         kwargs = haskey(kws, :abstol) ? merge(kws, (abstol = kws.abstol / len,)) : kws
         subprob = IntegralProblem(integrand, next, p; kwargs...)
-        func = CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1], spec[1:ndims(lims)-1]), update!, postsolve, proto * x^(ndims(lims) - 1), spec[ndims(lims)])
+        func = CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1], spec[1:ndims(lims)-1], exec[1:ndims(lims)-1]), update!, postsolve, proto*x^(ndims(lims)-1), spec[ndims(lims)], exec[ndims(lims)])
     end
     prob = IntegralProblem(func, segs, (; p, lims_state = (lims, state), ws); kws...)
     return init(prob, algs[ndims(lims)])
@@ -60,7 +58,6 @@ function init_cacheval(f, nextdom, p, alg::NestedQuad; kws...)
     # we use an IntegralProblem modified to contain lims_state, instead of passing the
     # parameter as well
 end
-
 
 function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
     cacheval.p = (; cacheval.p..., p)
@@ -78,6 +75,19 @@ end
 function outer_integralfunction(f::IntegralFunction, x0, p)
     proto = get_prototype(f, x0, p)
     func = IntegralFunction(f.f, proto)
+    ws = nothing
+    return func, ws, _update!, _postsolve
+end
+function inner_integralfunction(f::CommonSolveIntegralFunction, x0, p)
+    proto = get_prototype(f, x0, p)
+    up = (cache, x, (; p, lims_state)) -> f.update!(cache, limit_iterate(lims_state..., x), p)
+    func = CommonSolveIntegralFunction(f.prob, f.alg, f.kwargs, up, f.postsolve, proto, f.specialize, f.executor)
+    ws = nothing
+    return func, ws
+end
+function outer_integralfunction(f::CommonSolveIntegralFunction, x0, p)
+    proto = get_prototype(f, x0, p)
+    func = CommonSolveIntegralFunction(f.prob, f.alg, f.kwargs, f.update!, f.postsolve, proto, f.specialize, f.executor)
     ws = nothing
     return func, ws, _update!, _postsolve
 end

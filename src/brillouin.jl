@@ -410,11 +410,12 @@ Iterated-adaptive integration using `nested_quad` from
 [IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
 **This algorithm is the most efficient for localized integrands**.
 """
-struct IAI{T, S} <: AutoBZAlgorithm
+struct IAI{T,S,E} <: AutoBZAlgorithm
     algs::T
     specialize::S
-    IAI(alg::IntegralAlgorithm = AuxQuadGKJL(), specialize::AbstractSpecialization = FunctionWrapperSpecialize()) = new{typeof(alg), typeof(specialize)}(alg, specialize)
-    IAI(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}} = ntuple(_ -> FunctionWrapperSpecialize(), length(algs))) = new{typeof(algs), typeof(specialize)}(algs, specialize)
+    executor::E
+    IAI(alg::IntegralAlgorithm=AuxQuadGKJL(), specialize::AbstractSpecialization=NoSpecialize()) = new{typeof(alg),typeof(specialize),typeof(executor)}(alg, specialize, executor)
+    IAI(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->NoSpecialize(),length(algs)), executor::Tuple{Vararg{AbstractExecutor}}=ntuple(_->SerialExecutor(),length(algs))) = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
 end
 IAI(algs::IntegralAlgorithm...) = IAI(algs)
 

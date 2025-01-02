@@ -63,12 +63,24 @@ function init_cacheval(f::InplaceBatchIntegralFunction, dom, p, alg::QuadGKJL; k
     upts = pts / pt
     return init_segbuf(first(prototype), segs, alg), similar(prototype), pts, upts
 end
-function init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...)
+init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...) = init_cacheval_cs(f.executor, f, dom, p, alg; kws...)
+function init_cacheval_cs(::SerialExecutor, f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...)
     segs = PuncturedInterval(dom)
     x = get_prototype(segs)
-    cache, integrand, prototype = _init_commonsolvefunction(f, dom, p; x)
-    return init_segbuf(prototype, segs, alg), cache, integrand
+    solver, integrand, prototype = init_commonsolvefunction(f, dom, p; x)
+    return init_segbuf(prototype, segs, alg), solver, integrand
 end
+function init_cacheval_cs(exec::AbstractThreadedExecutor, f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...)
+    segs = PuncturedInterval(dom)
+    x = get_prototype(segs)
+    channel, integrand, prototype = init_commonsolvefunction(f, dom, p; x)
+    proto = [prototype]
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, p
+        do_threaded_solve!(integrand, channel, f, y, x, p)
+    end
+    channel, integrand, proto, init_cacheval(func, dom, p, alg; kws...)
+end
+
 function do_integral(f, dom, p, alg::QuadGKJL, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
     # we need to strip units from the limits since infinity transformations change the units
@@ -94,10 +106,17 @@ function call_quadgk(f::InplaceBatchIntegralFunction, p, u, usegs, cacheval; kws
     g = BatchIntegrand((y, x) -> f.f!(y, resize!(pts, length(x)) .= u .* x, p), cacheval[2], cacheval[4]; max_batch=f.max_batch)
     quadgk(g, usegs...; kws..., segbuf=cacheval[1])
 end
-function call_quadgk(f::CommonSolveIntegralFunction, p, u, usegs, cacheval; kws...)
-    # cache = cacheval[2] could call do_solve!(cache, f, x, p) to fully specialize
-    integrand = cacheval[3]
-    quadgk(x -> integrand(u * x, p), usegs...; kws..., segbuf=cacheval[1])
+call_quadgk(f::CommonSolveIntegralFunction, p, u, usegs, cacheval; kws...) = call_quadgk_cs(f.executor, f, p, u, usegs, cacheval; kws...)
+function call_quadgk_cs(::SerialExecutor, f::CommonSolveIntegralFunction, p, u, usegs, cacheval; kws...)
+    segbuf, solver, integrand = cacheval
+    quadgk(x -> integrand(solver, f, u * x, p), usegs...; kws..., segbuf)
+end
+function call_quadgk_cs(exec::AbstractThreadedExecutor, f::CommonSolveIntegralFunction, p, u, usegs, cacheval; kws...)
+    channel, integrand, proto, cache = cacheval
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, p
+        do_threaded_solve!(integrand, channel, f, y, x, p)
+    end
+    call_quadgk(func, p, u, usegs, cache; kws...)
 end
 
 
@@ -155,7 +174,7 @@ function trapz(n::Integer)
 end
 
 """
-    QuadratureFunction(; fun=trapz, npt=50, nthreads=1)
+    QuadratureFunction(; fun=trapz, npt=50)
 
 Quadrature rule for the standard interval [-1,1] computed from a function `x, w = fun(npt)`.
 The nodes and weights should be set so the integral of `f` on [-1,1] is `sum(w .* f.(x))`.
@@ -163,17 +182,12 @@ The default quadrature rule is [`trapz`](@ref), although other packages provide 
 
     using FastGaussQuadrature
     alg = QuadratureFunction(fun=gausslegendre, npt=100)
-
-`nthreads` sets the numbers of threads used to parallelize the quadrature only when the
-integrand is a , in which case the user must parallelize the
-integrand evaluations. For no threading set `nthreads=1`.
 """
 struct QuadratureFunction{F} <: IntegralAlgorithm
     fun::F
     npt::Int
-    nthreads::Int
 end
-QuadratureFunction(; fun=trapz, npt=50, nthreads=1) = QuadratureFunction(fun, npt, nthreads)
+QuadratureFunction(; fun=trapz, npt=50) = QuadratureFunction(fun, npt)
 
 function init_rule(dom, alg::QuadratureFunction)
     x, w = alg.fun(alg.npt)

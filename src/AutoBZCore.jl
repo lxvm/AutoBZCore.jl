@@ -50,7 +50,6 @@ module AutoBZCore
 using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr, diag, eigen, Hermitian
 
 using StaticArrays: SVector, SMatrix, sacollect
-using FunctionWrappers: FunctionWrapper
 using ChunkSplitters: chunks, getchunk
 using AutoSymPTR
 using FourierSeriesEvaluators
@@ -69,6 +68,8 @@ include("domains.jl")
 export IntegralFunction, InplaceIntegralFunction, InplaceBatchIntegralFunction
 export CommonSolveIntegralFunction
 export IntegralProblem
+export AbstractSpecialization, DefaultSpecialize, NoSpecialize, FullSpecialize, FunctionWrapperSpecialize
+export AbstractExecutor, SerialExecutor, ThreadedExecutor
 include("interfaces.jl")
 
 export QuadGKJL, HCubatureJL, QuadratureFunction
