@@ -52,15 +52,16 @@ end
 # TODO implement FourierInplaceIntegrand FourierInplaceBatchIntegrand
 
 """
-    CommonSolveFourierIntegralFunction(prob, alg, update!, postsolve, s, [prototype, specialize]; alias=false, kws...)
+    CommonSolveFourierIntegralFunction(prob, alg, update!, postsolve, s, [prototype, specialize, executor]; alias=false, kws...)
 
 Constructor for an integrand that solves a problem defined with the CommonSolve.jl
 interface, `prob`, which is instantiated using `init(prob, alg; kws...)`. Helper functions
 include: `update!(cache, x, s(x), p)` is called before
 `solve!(cache)`, followed by `postsolve(sol, x, s(x), p)`, which should return the value of the solution.
-The `prototype` argument can help control how much to `specialize` on the type of the
-problem, which defaults to `FullSpecialize()` so that run times are improved. However
-`FunctionWrapperSpecialize()` may help reduce compile times.
+The `prototype` argument can help control how much to `specialize` on the solution type of the
+problem. By default, `specialize=DefaultSpecialize()` uses Julia's default heuristics, which can give up on inference in complicated codes.
+Additionally, `FullSpecialize()` can obtain the fastest run times with the longest compile times, `NoSpecialize()` strikes a good balance of run time, compile time and inference, and `FunctionWrapperSpecialize()` may have the fastest compile time and very good run times (comparable to `FullSpecialize()`) but with possible issues regarding world age.
+The `executor` keyword specifies how to schedule and run the integrand evaluation, defaulting to `SerialExecutor()` with an additional option for `ThreadedExecutor(::Integer)`.
 """
 struct CommonSolveFourierIntegralFunction{P,A,S,K,U,PS,T,M<:AbstractSpecialization,E<:AbstractExecutor} <: AbstractFourierIntegralFunction
     prob::P
