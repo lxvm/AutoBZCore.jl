@@ -159,8 +159,11 @@ end
 
 insert_counter(f::IntegralFunction, numevals) = IntegralFunction(CounterFunction(numevals, f.f), f.prototype)
 insert_counter(f::InplaceIntegralFunction, numevals) = InplaceIntegralFunction(CounterFunction(numevals, f.f!), f.prototype)
-insert_counter(f::InplaceBatchIntegralFunction, numevals) = InplaceBatchIntegralFunction(BatchCounterFunction(numevals, f.f!), f.prototype; max_batch = f.max_batch)
-insert_counter(f::CommonSolveIntegralFunction, numevals) = CommonSolveIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.prototype, f.specialize; f.kwargs...)
+insert_counter(f::InplaceBatchIntegralFunction, numevals) = InplaceBatchIntegralFunction(BatchCounterFunction(numevals, f.f!), f.prototype; max_batch=f.max_batch)
+function insert_counter(f::CommonSolveIntegralFunction, numevals)
+    f.executor isa SerialExecutor || throw(ArgumentError("Can only count serial integrands"))
+    CommonSolveIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.prototype, f.specialize; f.kwargs...)
+end
 function init_cacheval(f, dom, p, alg::EvalCounter; kws...)
     numevals = Ref(0)
     # some algorithms need to store the integrand in the cache

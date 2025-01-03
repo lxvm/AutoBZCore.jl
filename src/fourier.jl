@@ -62,7 +62,7 @@ The `prototype` argument can help control how much to `specialize` on the type o
 problem, which defaults to `FullSpecialize()` so that run times are improved. However
 `FunctionWrapperSpecialize()` may help reduce compile times.
 """
-struct CommonSolveFourierIntegralFunction{P,A,S,K,U,PS,T,M<:AbstractSpecialization} <: AbstractFourierIntegralFunction
+struct CommonSolveFourierIntegralFunction{P,A,S,K,U,PS,T,M<:AbstractSpecialization,E<:AbstractExecutor} <: AbstractFourierIntegralFunction
     prob::P
     alg::A
     s::S
@@ -71,10 +71,11 @@ struct CommonSolveFourierIntegralFunction{P,A,S,K,U,PS,T,M<:AbstractSpecializati
     postsolve::PS
     prototype::T
     specialize::M
+    executor::E
     alias::Bool
 end
-function CommonSolveFourierIntegralFunction(prob, alg, update!, postsolve, s, prototype=nothing, specialize=FullSpecialize(); alias=false, kws...)
-    return CommonSolveFourierIntegralFunction(prob, alg, s, NamedTuple(kws), update!, postsolve, prototype, specialize, alias)
+function CommonSolveFourierIntegralFunction(prob, alg, update!, postsolve, s, prototype=nothing, specialize=FullSpecialize(), executor=SerialExecutor(); alias=false, kws...)
+    return CommonSolveFourierIntegralFunction(prob, alg, s, NamedTuple(kws), update!, postsolve, prototype, specialize, executor, alias)
 end
 
 function do_solve!(cache, f::CommonSolveFourierIntegralFunction, x, s, p)
@@ -321,7 +322,7 @@ function outer_integralfunction(f::CommonSolveFourierIntegralFunction, x0, p)
     ws = get_fourierworkspace(f)
     proto = get_prototype(f, x0, ws, p)
     s = workspace_contract!(ws, x0[end])
-    func = CommonSolveFourierIntegralFunction(f.prob, f.alg, f.update!, f.postsolve, s, proto, f.specialize; alias=true, f.kwargs...)
+    func = CommonSolveFourierIntegralFunction(f.prob, f.alg, f.update!, f.postsolve, s, proto, f.specialize, f.executor; alias=true, f.kwargs...)
     return func, ws, _fourier_update!, _postsolve
 end
 
@@ -561,4 +562,7 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AutoSymP
 end
 
 insert_counter(f::FourierIntegralFunction, numevals) = FourierIntegralFunction(CounterFunction(numevals, f.f), f.s, f.prototype; alias=f.alias)
-insert_counter(f::CommonSolveFourierIntegralFunction, numevals) = CommonSolveFourierIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.s, f.prototype, f.specialize; alias=f.alias, f.kwargs...)
+function insert_counter(f::CommonSolveFourierIntegralFunction, numevals)
+    f.executor isa SerialExecutor || throw(ArgumentError("Can only count serial integrands"))
+    CommonSolveFourierIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.s, f.prototype, f.specialize, f.executor; alias=f.alias, f.kwargs...)
+end
