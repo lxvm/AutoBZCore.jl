@@ -512,14 +512,14 @@ function bz_to_standard(f, bz, p, alg::TAI; kws...)
     return IntegralProblem(f, HyperCube(bz.lims.a, bz.lims.b), p; kws...), HCubatureJL(norm=alg.norm, initdiv = alg.initdiv)
 end
 
-struct AutoBZEvalCounter{T} <: AutoBZAlgorithm
+struct AutoBZEvalCounter{T<:AutoBZAlgorithm} <: AutoBZAlgorithm
     alg::T
 end
 function bz_to_standard(f, bz, p, bzalg::AutoBZEvalCounter; kws...)
     prob, alg = bz_to_standard(f, bz, p, bzalg.alg; kws...)
     return prob, EvalCounter(alg)
 end
-
+EvalCounter(alg::AutoBZAlgorithm) = AutoBZEvalCounter(alg)
 #=
 """
     PTR_IAI(; ptr=PTR(), iai=IAI())

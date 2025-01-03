@@ -39,5 +39,6 @@ end
             solver = init(ip, alg)
             @test @inferred(solve!(solver)).value ≈ vol
         end
+        @test solve(ip, EvalCounter(PTR(; npt=10))).stats.numevals == 10^dims
     end
 end

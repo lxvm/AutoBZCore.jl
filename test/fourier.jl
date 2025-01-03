@@ -100,6 +100,22 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
         # TODO implement CommonSolveFourierInplaceIntegralFunction
         # TODO implement CommonSolveFourierInplaceBatchIntegralFunction
     end
+
+    # EvalCounter
+    @testset "evalcounter" for prob in (
+        IntegralProblem(FourierIntegralFunction((x, s, p) -> x * s + p, FourierSeries([1, 0, 1]/2; period=1.0, offset=-2)), (0.0, 1.0), 0.0; abstol=1e-3),
+        IntegralProblem(CommonSolveFourierIntegralFunction(IntegralProblem((x, (y, s, p)) -> x * s + p + y, (0.0, 1.0), (0.5, 0.0, 1.0)), QuadGKJL(), (cache, x, s, p) -> (cache.p = (x, s, p)), (sol, x, s, p) -> sol.value, FourierSeries([1, 0, 1]/2; period=1.0, offset=-2)), (0.0, 1.0), 1.0),
+    )
+        # constant integrand should always use the same number of evaluations as the
+        # base quadrature rule
+        for (alg, numevals) in (
+            (QuadratureFunction(npt=10), 10),
+            (QuadGKJL(order=7), 15),
+            (QuadGKJL(order=9), 19),
+        )
+            @test solve(prob, EvalCounter(alg)).stats.numevals == numevals
+        end
+    end
 end
 
 #=

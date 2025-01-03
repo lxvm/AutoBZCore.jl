@@ -140,8 +140,17 @@ struct CounterFunction{F}
     f::F
 end
 (f::CounterFunction)(args...; kws...) = (f.counter[] += 1; f.f(args...; kws...))
+struct BatchCounterFunction{F}
+    counter::Base.RefValue{Int64}
+    f::F
+end
+(f::BatchCounterFunction)(y, x, p) = (f.counter[] += size(x)[end]; f.f(y, x, p))
+
 
 insert_counter(f::IntegralFunction, numevals) = IntegralFunction(CounterFunction(numevals, f.f), f.prototype)
+insert_counter(f::InplaceIntegralFunction, numevals) = InplaceIntegralFunction(CounterFunction(numevals, f.f!), f.prototype)
+insert_counter(f::InplaceBatchIntegralFunction, numevals) = InplaceBatchIntegralFunction(BatchCounterFunction(numevals, f.f!), f.prototype; max_batch=f.max_batch)
+insert_counter(f::CommonSolveIntegralFunction, numevals) = CommonSolveIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.prototype, f.specialize; f.kwargs...)
 function init_cacheval(f, dom, p, alg::EvalCounter; kws...)
     numevals = Ref(0)
     # some algorithms need to store the integrand in the cache

@@ -4,6 +4,33 @@ using AutoBZCore
 using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
 using AutoBZCore: CubicLimits
 
+
+struct TestProblem{A,B}
+    a::A
+    b::B
+end
+struct TestAlgorithm end
+mutable struct TestSolver{A,B,K}
+    a::A
+    b::B
+    k::K
+end
+function AutoBZCore.init(prob::TestProblem, alg::TestAlgorithm; kws...)
+    return TestSolver(prob.a, prob.b, NamedTuple(kws))
+end
+function AutoBZCore.solve!(solver::TestSolver)
+    (; a, b, k) = solver
+    return a+b
+end
+function testup!(solver, x, p)
+    solver.a = x
+    solver.b = p
+    return
+end
+function testpost(sol, x, p)
+    return sol
+end
+
 @testset "domains" begin
     # PuncturedInterval
     a = (0.0, 1.0, 2.0)
@@ -180,12 +207,14 @@ end
     prob = IntegralProblem(f2, 0.0, 2pi, (0.5, 1e-3))
     abstol = 1e-5; reltol=1e-5
     @test solve(prob, alg, reltol=reltol).value ≈ solve(prob, ref_alg, abstol=abstol).value atol=abstol
+    =#
 
     # EvalCounter
     for prob in (
-        IntegralProblem((x, p) -> 1.0, 0, 1),
-        IntegralProblem(InplaceIntegrand((y, x, p) -> y .= 1.0, fill(0.0)), 0, 1),
-        IntegralProblem(BatchIntegrand((y, x, p) -> y .= 1.0, Float64), 0, 1)
+        IntegralProblem((x, p) -> 1.0, (0, 1)),
+        IntegralProblem(InplaceIntegralFunction((y, x, p) -> y .= 1.0, fill(0.0)), (0, 1)),
+        IntegralProblem(InplaceBatchIntegralFunction((y, x, p) -> y .= 1.0, [0.0]), (0, 1)),
+        IntegralProblem(CommonSolveIntegralFunction(TestProblem(0.0, 0.0), TestAlgorithm(), testup!, testpost, 0.0), (0, 1), 3.0),
     )
         # constant integrand should always use the same number of evaluations as the
         # base quadrature rule
@@ -194,9 +223,8 @@ end
             (QuadGKJL(order=7), 15),
             (QuadGKJL(order=9), 19),
         )
-            prob.f isa BatchIntegrand && alg isa QuadGKJL && continue
-            @test solve(prob, EvalCounter(alg)).numevals == numevals
+            @test solve(prob, EvalCounter(alg)).stats.numevals == numevals
         end
     end
-    =#
+    @test solve(IntegralProblem((x, p) -> 1.0, CubicLimits((0,0), (1,1))), EvalCounter(NestedQuad(QuadGKJL(order=7)))).stats.numevals == 15^2
 end
