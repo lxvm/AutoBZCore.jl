@@ -191,14 +191,14 @@ function init_specialized_integrand(::FullSpecialize, solver, f, x, p, prototype
     (solver, f, x, p) -> do_solve!(solver, f, x, p)::typeof(prototype)
 end
 
-init_commonsolvefunction(f, dom, p; kws...) = init_commonsolvefunction_(f.executor, f, get_prototype(dom), p; kws...)
-function init_commonsolvefunction_(::SerialExecutor, f, x, p; kws...)
+init_commonsolvefunction(f, dom, p) = init_commonsolvefunction_(f.executor, f, get_prototype(dom), p)
+function init_commonsolvefunction_(::SerialExecutor, f, x, p)
     solver = init(f.prob, f.alg; f.kwargs...)
     prototype = get_prototype(f, x, p, solver)
     integrand = init_specialized_integrand(f.specialize, solver, f, x, p, prototype)
     return solver, integrand, prototype
 end
-function init_commonsolvefunction_(exec::AbstractThreadedExecutor, f, x, p; kws...)
+function init_commonsolvefunction_(exec::AbstractThreadedExecutor, f, x, p)
     channel = fillchannel(exec) do
         init(f.prob, f.alg; f.kwargs...)
     end

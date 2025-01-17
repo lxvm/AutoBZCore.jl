@@ -66,14 +66,11 @@ end
 init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...) = init_cacheval_cs(f.executor, f, dom, p, alg; kws...)
 function init_cacheval_cs(::SerialExecutor, f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    x = get_prototype(segs)
-    solver, integrand, prototype = init_commonsolvefunction(f, dom, p; x)
+    solver, integrand, prototype = init_commonsolvefunction(f, dom, p)
     return init_segbuf(prototype, segs, alg), solver, integrand
 end
 function init_cacheval_cs(exec::AbstractThreadedExecutor, f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...)
-    segs = PuncturedInterval(dom)
-    x = get_prototype(segs)
-    channel, integrand, prototype = init_commonsolvefunction(f, dom, p; x)
+    channel, integrand, prototype = init_commonsolvefunction(f, dom, p)
     proto = [prototype]
     func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, p
         do_threaded_solve!(integrand, channel, f, y, x, p)

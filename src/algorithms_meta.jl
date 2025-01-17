@@ -227,9 +227,9 @@ function nested_integralfunction_cs(::SerialExecutor, f, x0, p)
     return f
 end
 function nested_integralfunction_cs(exec::ThreadedExecutor, f, x0, p)
-    channel, integrand, prototype = init_commonsolvefunction_(exec, f, x0, p; kws...)
+    channel, integrand, prototype = init_commonsolvefunction_(exec, f, x0, p)
     proto = [prototype]
-    func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, (; p, state)
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, p
         do_threaded_solve!(integrand, channel, f, y, x, p)
     end
     return func
