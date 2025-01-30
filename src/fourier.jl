@@ -567,3 +567,134 @@ function insert_counter(f::CommonSolveFourierIntegralFunction, numevals)
     f.executor isa SerialExecutor || throw(ArgumentError("Can only count serial integrands"))
     CommonSolveFourierIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.s, f.prototype, f.specialize, f.executor; alias=f.alias, f.kwargs...)
 end
+
+
+struct FourierEliminationProblem{F<:AbstractFourierSeries,X,D,K}
+    f::F
+    x::X
+    dim::D
+    kwargs::K
+end
+FourierEliminationProblem(f::AbstractFourierSeries, x, dim; kws...) = FourierEliminationProblem(f, x, dim, kws)
+struct FourierEliminationAlgorithm end
+mutable struct FourierEliminationSolver{F,X,D,A,C,K}
+    f::F
+    x::X
+    dim::D
+    alg::A
+    cacheval::C
+    kwargs::K
+end
+function init(prob::FourierEliminationProblem, alg::FourierEliminationAlgorithm; kws...)
+    kwargs = (; prob.kwargs..., kws...)
+    cacheval = FourierSeriesEvaluators.allocate(prob.f, prob.x, prob.dim)
+    return FourierEliminationSolver(prob.f, prob.x, prob.dim, alg, cacheval, kwargs)
+end
+function solve!(solver::FourierEliminationSolver)
+    return FourierSeriesEvaluators.contract!(solver.cacheval, solver.f, solver.x, solver.dim)
+end
+
+function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQuad; kws...)
+    x0, segs, lims, states = unroll_limits(dom)
+    series, unroll_fourierseries(f.s, x0)
+    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
+    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom))) : alg.specialize
+    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor isa SharedThreadedExecutor ? SharedThreadedExecutor(alg.executor.ntasks) : alg.executor, Val(ndims(dom))) : alg.executor
+
+    _f = nested_innerintegralfunction(f, x0, p)
+    innerprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
+    innerup! = (solver, lims, segs, state, (; p, kws)) -> begin
+        solver.dom = segs
+        solver.p = (; p, state)
+        solver.kwargs = (; solver.kwargs..., kws...)
+        return
+    end
+    segprob = SegmentProblem(innerprob, algs[1], lims[1], states[1], 1, (; p, kws=(; innerprob.kwargs...)), innerup!, (;))
+
+    prob = nested_prob(segprob, _f.prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
+    return init(prob, SegmentAlgorithm(); kws...)
+end
+function nested_innerintegralfunction(f::FourierIntegralFunction, x0, p)
+    proto = get_prototype(f, x0, p)
+    func = IntegralFunction(proto) do x, (; p, state, fouriercache, fourierseries)
+        f.f(SVector(promote(x, state...)), FourierSeriesEvaluators.evaluate!(fouriercache, fourierseries, x), p)
+    end
+    return func
+end
+
+struct FourierEvaluationProblem{F<:AbstractFourierSeries,X,K}
+    f::F
+    x::X
+    alias::Bool
+    kwargs::K
+end
+FourierEvaluationProblem(f::AbstractFourierSeries, x, alias=false; kws...) = FourierEvaluationProblem(f, x, alias, kws)
+struct FourierEvaluationAlgorithm end
+mutable struct FourierEvaluationSolver{F,X,A,C,K}
+    f::F
+    x::X
+    alg::A
+    cacheval::C
+    kwargs::K
+end
+function init(prob::FourierEvaluationProblem, alg::FourierEvaluationAlgorithm; kws...)
+    kwargs = (; prob.kwargs..., kws...)
+    cacheval = FourierSeriesEvaluators.allocate(prob.f, prob.x, prob.dim)
+    return FourierEvaluationSolver(prob.f, prob.x, alg, cacheval, kwargs)
+end
+function solve!(solver::FourierEvaluationSolver)
+    return FourierSeriesEvaluators.evaluate!(solver.cacheval, solver.f, solver.x)
+end
+
+function func2prob(func::FourierIntegralFunction, x0)
+    (; f, s, prototype, alias) = func
+    prob = FourierEvaluationProblem(s, x0, alias)
+    alg = FourierEvaluationAlgorithm()
+    up! = (solver, x, p) -> solver.x = x
+    post = (sol, x, p) -> f(x, sol, p)
+    CommonSolveIntegralFunction(prob, alg, up!, post, prototype)
+end
+function func2prob(func::CommonSolveFourierIntegralFunction, x0, p)
+    (; prob, alg, s, kwargs, update!, postsolve, prototype, specialize, executor, alias) = func
+    fourierprob = FourierEvaluationProblem(s, x0, alias)
+    fourieralg = FourierEvaluationAlgorithm()
+    fullprob = ComposedCommonSolveProblem((; x=x0, p=p), fourierprob, prob) do ((; x, p), fouriersolver, probsolver)
+        fouriersolver.x = x
+        fx = solve!(fouriersolver)
+        update!(probsolver, x, fx, p)
+        sol = solve!(probsolver)
+        return postsolve(sol, x, p)
+    end
+    fullalg = ComposedCommonSolveAlgorithm(fourieralg, alg)
+    up! = (solver, x, p) -> solver.input = (; x, p)
+    post = (sol, x, p) -> sol
+    CommonSolveIntegralFunction(fullprob, fullalg, up!, post, prototype, specialize, executor; kwargs...)
+end
+
+struct ComposedCommonSolveProblem{P,S,I,K}
+    problems::P
+    solve!::S
+    input::I
+    kwargs::K
+    ComposedCommonSolveProblem(solve!, input, probs...; kws...) = new{typeof(probs),typeof(solve!),typeof(input),typeof(kws)}(probs, solve!, input, kws)
+end
+
+struct ComposedCommonSolveAlgorithm{A}
+    algorithms::A
+    ComposedCommonSolveAlgorithm(algs...) = new{typeof(algs)}(algs)
+end
+
+mutable struct ComposedCommonSolveSolver{S,SS,I,K}
+    solvers::S
+    solve!::SS
+    input::I
+    kwargs::K
+end
+function init(prob::ComposedCommonSolveProblem, alg::ComposedCommonSolveAlgorithm; kws...)
+    kwargs = (; prob.kwargs..., kws...)
+    solvers = map(init, prob.problems, alg.algorithms)
+    return ComposedCommonSolveSolver(solvers, prob.solve!, prob.input, kwargs)
+end
+function solve!(solver::ComposedCommonSolveSolver)
+    return solver.solve!(solver.input, solver.solvers...; solver.kwargs...)
+end

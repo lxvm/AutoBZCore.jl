@@ -18,48 +18,6 @@ end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 # TODO add a parallelization option for use when it is safe to do so
 
-struct NestedIntegralProblem{F,P,L,S,K}
-    f::F
-    p::P
-    lims::L
-    state::S
-    kwargs::K
-end
-mutable struct NestedIntegralSolver{F,P,L,S,A,C,K}
-    f::F
-    p::P
-    lims::L
-    state::S
-    alg::A
-    cacheval::C
-    kwargs::K
-end
-struct IteratedIntegrationJL end
-function init(prob::NestedIntegralProblem, alg::IteratedIntegrationJL; kws...)
-    kwargs = (; prob.kwargs..., kws...)
-    cacheval = if prob.f isa CommonSolveIntegralFunction
-        init(prob.f.prob, prob.f.alg; prob.f.kwargs...)
-    else
-        nothing
-    end
-    return NestedIntegralSolver(prob.f, prob.p, prob.lims, prob.state, alg, cacheval, kwargs)
-end
-function solve!(solver::NestedIntegralSolver)
-    # solver.cacheval.p = solver.p
-    next = limit_iterate(solver.lims, solver.state...)
-    if next isa SVector
-        if solver.f isa IntegralFunction
-            return solver.f.f(next, solver.p)
-        end
-    else
-        segs, lims, state = next
-        solver.cacheval.dom = segs
-        solver.cacheval.p = (; solver.cacheval.p..., p=solver.p, lims_state=(lims, state))
-        return solve!(solver.cacheval)
-    end
-
-end
-
 function _update!(cache, x, (; p, lims_state))
     segs, lims, state = limit_iterate(lims_state..., x)
     len = segs[end] - segs[begin]
@@ -123,74 +81,98 @@ function __update!(solver, x, p)
     return
 end
 
-struct SegmentProblem{T,A,L,S,D,P,U,K}
-    prob::T
-    alg::A
+struct SegmentProblem{L,D,K}
     lims::L
-    state::S
     dim::D
-    p::P
-    update!::U
     kwargs::K
 end
+SegmentProblem(lims, dim; kws...) = SegmentProblem(lims, dim, kws)
 
 struct SegmentAlgorithm end
 
-mutable struct SegmentSolver{C,L,S,D,P,U}
+mutable struct SegmentSolver{C,L,D,K}
     cacheval::C
     lims::L
-    state::S
     dim::D
-    p::P
-    update!::U
-end
-
-function init(prob::SegmentProblem, ::SegmentAlgorithm; kws...)
-    return SegmentSolver(init(prob.prob, prob.alg; prob.kwargs..., kws...), prob.lims, prob.state, prob.dim, prob.p, prob.update!)
-end
-
-function solve!(solver::SegmentSolver)
-    solver.update!(solver.cacheval, solver.lims, IteratedIntegration.segments(solver.lims, solver.dim), solver.state, solver.p)
-    return solve!(solver.cacheval)
-end
-
-struct EliminationProblem{T,A,P,X,D,S,L,U,K}
-    prob::T
-    alg::A
-    p::P
-    x::X
-    dim::D
-    state::S
-    lims::L
-    update!::U
     kwargs::K
 end
 
-struct EliminationAlgorithm end
-
-mutable struct EliminationSolver{C,P,X,D,S,L,U}
-    cacheval::C
-    p::P
-    x::X
-    dim::D
-    state::S
-    lims::L
-    update!::U
+function init(prob::SegmentProblem, ::SegmentAlgorithm; kws...)
+    kwargs = (; prob.kwargs..., kws...)
+    return SegmentSolver(nothing, prob.lims, prob.dim, kwargs)
 end
 
-function init(prob::EliminationProblem, ::EliminationAlgorithm; kws...)
-    return EliminationSolver(init(prob.prob, prob.alg; prob.kwargs..., kws...), prob.p, prob.x, prob.dim, prob.state, prob.lims, prob.update!)
+function solve!(solver::SegmentSolver)
+    return IteratedIntegration.segments(solver.lims, solver.dim)
+end
+
+struct EliminationProblem{L,X,D,K}
+    lims::L
+    x::X
+    dim::D
+    kwargs::K
+end
+EliminationProblem(lims, x, dim; kws...) = EliminationProblem(lims, x, dim, kws)
+
+struct EliminationAlgorithm end
+
+mutable struct EliminationSolver{L,X,D,A,C,K}
+    lims::L
+    x::X
+    dim::D
+    alg::A
+    cacheval::C
+    kwargs::K
+end
+
+function init(prob::EliminationProblem, alg::EliminationAlgorithm; kws...)
+    cacheval = nothing
+    kwargs = (; prob.kwargs..., kws...)
+    return EliminationSolver(prob.lims, prob.x, prob.dim, alg, cacheval, kwargs)
 end
 
 function solve!(solver::EliminationSolver)
-    lims = IteratedIntegration.fixandeliminate(solver.lims, solver.x, solver.dim)
-    solver.update!(solver.cacheval, lims, (solver.x, solver.state...), solver.dim, solver.p)
-    return solve!(solver.cacheval)
+    return IteratedIntegration.fixandeliminate(solver.lims, solver.x, solver.dim)
 end
 
 _val_unwrap(::Val{X}) where {X} = X
-function nested_prob(segprob, prototype, p, x0, segs, lims, states, algs, spec, exec; kws...)
-    length(states) == 0 && return segprob
+function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, algs, spec, exec; kws...)
+    length(states) == 0 && return innerprob, inneralg
+    elimprob = EliminationProblem(lims[1], x0[ndims(lims[1])], Val(ndims(lims[1])))
+    eliminput = (; x=x0[ndims(lims[1])], lims=lims[1], state=states[1], dim=Val(ndims(lims[1])), p, kws=innerprob.input.kws)
+    _prob = ComposedCommonSolveProblem(eliminput, elimprob, innerprob) do (; x, lims, state, dim, p, kws), elimsolver, innersolver
+        elimsolver.x = x
+        elimsolver.lims = lims
+        elimsolver.dim = dim
+        _state = (x, state...)
+        _lims = solve!(elimsolver)
+        innersolver.input = (; innersolver.input..., lims=_lims, state=_state, dim=Val(_val_unwrap(dim)-1), p, kws)
+        return solve!(innersolver)
+    end
+    _alg = ComposedCommonSolveAlgorithm(EliminationAlgorithm(), inneralg)
+    _up = (solver, x, p) -> solver.input = (; solver.input..., p..., x)
+    _post = (sol, x, p) -> sol.value
+    _f = CommonSolveIntegralFunction(_prob, _alg, _up, _post, prototype*real(prod(x0[begin:ndims(lims[1])-1])), spec[1], exec[1])
+    __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
+    _kws = _rescale_abstol(1/real(prod(@show(x0[begin+ndims(lims[1]):end]))); kws...)
+    innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], p, kws=_kws)
+    intprob = IntegralProblem(__f, segs[1], (; innerinput..., kws=eliminput.kws); _kws...)
+
+    segprob = SegmentProblem(lims[1], ndims(lims[1]))
+    _innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, p, kws), segsolver, intsolver
+        segsolver.lims = lims
+        segsolver.dim = _val_unwrap(dim)
+        segs = solve!(segsolver)
+        intsolver.dom = segs
+        len = abs(segs[end]-segs[begin])
+        intsolver.p = (; intsolver.p..., lims, state, dim, p, kws=_rescale_abstol(1/len; kws...))
+        intsolver.kwargs = (; intsolver.kwargs..., kws...)
+        return solve!(intsolver)
+    end
+    _inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
+
+    nested_prob(_innerprob, _inneralg, prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
+    #=
     segup! = (solver, lims, state, dim, (; p, kws, len)) -> begin
         solver.lims = lims
         solver.state = state
@@ -219,6 +201,7 @@ function nested_prob(segprob, prototype, p, x0, segs, lims, states, algs, spec, 
     end
     _segprob = SegmentProblem(intprob, algs[1], lims[1], states[1], ndims(lims[1]), (; p, kws=(; intprob.kwargs...)), intup!, kws)
     return nested_prob(_segprob, prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
+    =#
 end
 function nested_integralfunction(f::CommonSolveIntegralFunction, x0, p)
     return nested_integralfunction_cs(f.executor, f, x0, p)
@@ -261,22 +244,26 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
     exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor isa SharedThreadedExecutor ? SharedThreadedExecutor(alg.executor.ntasks) : alg.executor, Val(ndims(dom))) : alg.executor
 
     _f = nested_innerintegralfunction(f, x0, p)
-    innerprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
-    innerup! = (solver, lims, segs, state, (; p, kws)) -> begin
-        solver.dom = segs
-        solver.p = (; p, state)
-        solver.kwargs = (; solver.kwargs..., kws...)
-        return
-    end
-    segprob = SegmentProblem(innerprob, algs[1], lims[1], states[1], 1, (; p, kws=(; innerprob.kwargs...)), innerup!, (;))
 
-    prob = nested_prob(segprob, _f.prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
-    return init(prob, SegmentAlgorithm(); kws...)
+    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); @show(_rescale_abstol(1/real(prod(x0[begin+1:end])); kws...))...)
+    segprob = SegmentProblem(lims[1], 1)
+    innerinput = (; lims=lims[1], dim=Val(1), state=states[1], p, kws=intprob.kwargs)
+    innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, p, kws), segsolver, intsolver
+        segsolver.lims = lims
+        segsolver.dim = _val_unwrap(dim)
+        segs = solve!(segsolver)
+        intsolver.dom = segs
+        intsolver.p = (; p, state)
+        intsolver.kwargs = (; intsolver.kwargs..., kws...)
+        return solve!(intsolver)
+    end
+    inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
+    prob, alg = nested_prob(innerprob, inneralg, _f.prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
+    return init(prob, alg)
 end
 
 function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
-    cacheval.p = (; cacheval.p..., p, kws=(; kws...))
-    cacheval.lims = dom
+    cacheval.input = (; cacheval.input..., p, lims=dom, kws=(; kws...))
     return solve!(cacheval)
 end
 function inner_integralfunction(f::IntegralFunction, x0, p)
@@ -449,3 +436,20 @@ end
 #     g = (x, p) -> (n += 1; f(x, p)) # we need let to prevent Core.Box around the captured variable
 #     sol = do_solve(g, dom, p, alg.alg, cacheval; kws...)
 #     return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
+
+
+#=
+struct EliminationProblem
+    innerproblem
+    p
+    outerproblem
+    variables
+    domain
+end
+function solve!(solver::EliminationSolver)
+    innersolver = solver.outerupdate!(solver.ee)
+    sol = solve!(solver.outerproblem)
+    innersolver = solver.update!(so)
+
+end
+=#
