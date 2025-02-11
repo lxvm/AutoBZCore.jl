@@ -33,6 +33,8 @@ function get_prototype(p::PuncturedInterval)
     a, b, = segments(p)
     return (a + b)/2
 end
+IteratedIntegration.load_limits(p::PuncturedInterval) = CubicLimits(endpoints(p)...)
+
 
 """
     HyperCube(a, b)
@@ -57,3 +59,5 @@ function get_prototype(p::HyperCube)
 end
 
 get_prototype(l::AbstractIteratedLimits) = interior_point(l)
+
+IteratedIntegration.load_limits(c::HyperCube) = CubicLimits(endpoints(c)...)

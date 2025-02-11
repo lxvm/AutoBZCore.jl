@@ -60,7 +60,7 @@ using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspac
 using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature, hquadrature
 using CommonSolve: solve
-import CommonSolve: init, solve!
+import CommonSolve: init, solve!, step!
 export init, solve!, solve
 
 include("domains.jl")

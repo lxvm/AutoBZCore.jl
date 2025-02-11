@@ -98,7 +98,7 @@ struct FullSpecialize <: AbstractSpecialization end
 Type-stable specialization of a commonsolve function behind a C-function points.
 Requires `using FunctionWrappers` as this is implemented in a package extension.
 Asserts that the returned value is of the same type as the prototype.
-This gives both very fast runtimes, compile times, and zero allocations, but may be brittle w.r.t. world age and is not as flexible with types of integration limits.
+This gives both very fast runtimes, compile times, and zero allocations, but may be brittle w.r.t. world age and is not as flexible with types of integration limits.
 """
 struct FunctionWrapperSpecialize <: AbstractSpecialization end
 
@@ -141,35 +141,31 @@ SharedThreadedExecutor(ntasks::Integer) = SharedThreadedExecutor(ntasks, Channel
 
 
 """
-    CommonSolveIntegralFunction(prob, alg, update!, postsolve, [prototype, specialize, executor]; kws...)
+    CommonSolveIntegralFunction(solve!, prob, alg, [prototype, specialize, executor]; kws...)
 
 Constructor for an integrand that solves a problem defined with the CommonSolve.jl
-interface, `prob`, which is instantiated using `init(prob, alg; kws...)`. Helper functions
-include: `update!(solver, x, p)` is called before
-`solve!(solver)`, followed by `postsolve(sol, x, p)`, which should return the value of the solution.
+interface, `prob`, which is instantiated using `init(prob, alg; kws...)`.
+The `solution = solve!(solver, x, p)` function supplied by the caller must do the work of the problem, although it need not be a method of `CommonSolve.solve!` as the out-of-place semantics of passing the arguments `x, p` can provide a speedup.
 The `prototype` argument can help control how much to `specialize` on the solution type of the
 problem. By default, `specialize=DefaultSpecialize()` uses Julia's default heuristics, which can give up on inference in complicated codes.
 Additionally, `FullSpecialize()` can obtain the fastest run times with the longest compile times, `NoSpecialize()` strikes a good balance of run time, compile time and inference, and `FunctionWrapperSpecialize()` may have the fastest compile time and very good run times (comparable to `FullSpecialize()`) but with possible issues regarding world age.
 The `executor` keyword specifies how to schedule and run the integrand evaluation, defaulting to `SerialExecutor()` with an additional option for `ThreadedExecutor(::Integer)`.
 """
-struct CommonSolveIntegralFunction{P,A,K,U,S,T,M<:AbstractSpecialization,E<:AbstractExecutor} <: AbstractIntegralFunction
+struct CommonSolveIntegralFunction{F,P,A,K,T,M<:AbstractSpecialization,E<:AbstractExecutor} <: AbstractIntegralFunction
+    solve!::F
     prob::P
     alg::A
     kwargs::K
-    update!::U
-    postsolve::S
     prototype::T
     specialize::M
     executor::E
 end
-function CommonSolveIntegralFunction(prob, alg, update!, postsolve, prototype=nothing, specialize=DefaultSpecialize(), executor=SerialExecutor(); kws...)
-    return CommonSolveIntegralFunction(prob, alg, NamedTuple(kws), update!, postsolve, prototype, specialize, executor)
+function CommonSolveIntegralFunction(solve!, prob, alg, prototype=nothing, specialize=DefaultSpecialize(), executor=SerialExecutor(); kws...)
+    return CommonSolveIntegralFunction(solve!, prob, alg, NamedTuple(kws), prototype, specialize, executor)
 end
 
 function do_solve!(solver, f::CommonSolveIntegralFunction, x, p)
-    f.update!(solver, x, p)
-    sol = solve!(solver)
-    return f.postsolve(sol, x, p)
+    return f.solve!(solver, x, p)
 end
 Base.@nospecializeinfer function do_solve_nsp!(@nospecialize(solver), f::CommonSolveIntegralFunction, x, p)
     return do_solve!(solver, f, x, p)
@@ -232,6 +228,7 @@ function do_threaded_solve!(integrand, channel, f, y, x, p)
     @sync for (iy, xi) in zip(eachindex(y), x)
         solver = take!(channel)
         Threads.@spawn begin
+            # TODO mini-batch the x evaluations
             y[iy] = integrand(solver, f, xi, p)
             put!(channel, solver)
         end

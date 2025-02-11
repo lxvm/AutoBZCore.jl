@@ -52,51 +52,46 @@ end
 # TODO implement FourierInplaceIntegrand FourierInplaceBatchIntegrand
 
 """
-    CommonSolveFourierIntegralFunction(prob, alg, update!, postsolve, s, [prototype, specialize, executor]; alias=false, kws...)
+    CommonSolveFourierIntegralFunction(solve!, prob, alg, s, [prototype, specialize, executor]; alias=false, kws...)
 
 Constructor for an integrand that solves a problem defined with the CommonSolve.jl
-interface, `prob`, which is instantiated using `init(prob, alg; kws...)`. Helper functions
-include: `update!(cache, x, s(x), p)` is called before
-`solve!(cache)`, followed by `postsolve(sol, x, s(x), p)`, which should return the value of the solution.
+interface, `prob`, which is instantiated using `init(prob, alg; kws...)`. The function `sol = solve!(solver, x, s(x), p)` should return the value of the solution and `s` must be a Fourier series.
 The `prototype` argument can help control how much to `specialize` on the solution type of the
 problem. By default, `specialize=DefaultSpecialize()` uses Julia's default heuristics, which can give up on inference in complicated codes.
 Additionally, `FullSpecialize()` can obtain the fastest run times with the longest compile times, `NoSpecialize()` strikes a good balance of run time, compile time and inference, and `FunctionWrapperSpecialize()` may have the fastest compile time and very good run times (comparable to `FullSpecialize()`) but with possible issues regarding world age.
 The `executor` keyword specifies how to schedule and run the integrand evaluation, defaulting to `SerialExecutor()` with an additional option for `ThreadedExecutor(::Integer)`.
 """
-struct CommonSolveFourierIntegralFunction{P,A,S,K,U,PS,T,M<:AbstractSpecialization,E<:AbstractExecutor} <: AbstractFourierIntegralFunction
+struct CommonSolveFourierIntegralFunction{F,P,A,S,K,T,M<:AbstractSpecialization,E<:AbstractExecutor} <: AbstractFourierIntegralFunction
+    solve!::F
     prob::P
     alg::A
     s::S
     kwargs::K
-    update!::U
-    postsolve::PS
     prototype::T
     specialize::M
     executor::E
     alias::Bool
 end
-function CommonSolveFourierIntegralFunction(prob, alg, update!, postsolve, s, prototype=nothing, specialize=FullSpecialize(), executor=SerialExecutor(); alias=false, kws...)
-    return CommonSolveFourierIntegralFunction(prob, alg, s, NamedTuple(kws), update!, postsolve, prototype, specialize, executor, alias)
+function CommonSolveFourierIntegralFunction(solve!, prob, alg, s, prototype=nothing, specialize=FullSpecialize(), executor=SerialExecutor(); alias=false, kws...)
+    return CommonSolveFourierIntegralFunction(solve!, prob, alg, s, NamedTuple(kws), prototype, specialize, executor, alias)
 end
 
-function do_solve!(cache, f::CommonSolveFourierIntegralFunction, x, s, p)
-    f.update!(cache, x, s, p)
-    sol = solve!(cache)
-    return f.postsolve(sol, x, s, p)
+function do_solve!(solver, f::CommonSolveFourierIntegralFunction, x, s, p)
+    return f.solve!(solver, x, s, p)
 end
 function get_prototype(f::CommonSolveFourierIntegralFunction, x, ws, p)
     if isnothing(f.prototype)
-        cache = init(f.prob, f.alg; f.kwargs...)
-        do_solve!(cache, f, x, ws(x), p)
+        solver = init(f.prob, f.alg; f.kwargs...)
+        do_solve!(solver, f, x, ws(x), p)
     else
         f.prototype
     end
 end
 get_prototype(f::CommonSolveFourierIntegralFunction, x, p) = get_prototype(f, x, f.s, p)
 
-function init_specialized_fourierintegrand(cache, f, dom, p; x=get_prototype(dom), ws=f.s, s = ws(x), prototype=f.prototype)
-    proto = prototype === nothing ? do_solve!(cache, f, x, s, p) : prototype
-    func = (x, s, p) -> do_solve!(cache, f, x, s, p)
+function init_specialized_fourierintegrand(solver, f, dom, p; x=get_prototype(dom), ws=f.s, s = ws(x), prototype=f.prototype)
+    proto = prototype === nothing ? do_solve!(solver, f, x, s, p) : prototype
+    func = (x, s, p) -> do_solve!(solver, f, x, s, p)
     integrand = if f.specialize isa FullSpecialize
         func
     elseif f.specialize isa FunctionWrapperSpecialize
@@ -107,9 +102,9 @@ function init_specialized_fourierintegrand(cache, f, dom, p; x=get_prototype(dom
     return integrand, proto
 end
 function _init_commonsolvefourierfunction(f, dom, p; kws...)
-    cache = init(f.prob, f.alg; f.kwargs...)
-    integrand, prototype = init_specialized_fourierintegrand(cache, f, dom, p; kws...)
-    return cache, integrand, prototype
+    solver = init(f.prob, f.alg; f.kwargs...)
+    integrand, prototype = init_specialized_fourierintegrand(solver, f, dom, p; kws...)
+    return solver, integrand, prototype
 end
 
 # TODO implement CommonSolveFourierInplaceIntegrand CommonSolveFourierInplaceBatchIntegrand
@@ -282,49 +277,6 @@ function call_meroquadgk(f::CommonSolveFourierIntegralFunction, p, segs, cacheva
     integrand = cacheval.integrand
     ws = cacheval.ws
     meroquadgk(x -> integrand(x, ws(x), p), segs...; kws...)
-end
-
-function _fourier_update!(cache, x, p)
-    _update!(cache, x, p)
-    s = workspace_contract!(p.ws, x)
-    cache.cacheval.p = (; cache.cacheval.p..., ws=s)
-    return
-end
-function inner_integralfunction(f::FourierIntegralFunction, x0, p)
-    ws = get_fourierworkspace(f)
-    proto = get_prototype(f, x0, ws, p)
-    func = IntegralFunction(proto) do x, (; p, ws, lims_state)
-        f.f(limit_iterate(lims_state..., x), workspace_evaluate!(ws, x), p)
-    end
-    return func, ws
-end
-function outer_integralfunction(f::FourierIntegralFunction, x0, p)
-    ws = get_fourierworkspace(f)
-    proto = get_prototype(f, x0, ws, p)
-    s = workspace_contract!(ws, x0[end])
-    func = FourierIntegralFunction(f.f, s, proto; alias=true)
-    return func, ws, _fourier_update!, _postsolve
-end
-# TODO it would be desirable to allow the inner integralfunction to be of the
-# same type as f, which requires moving workspace out of the parameters into
-# some kind of mutable storage
-function inner_integralfunction(f::CommonSolveFourierIntegralFunction, x0, p)
-    ws = get_fourierworkspace(f)
-    proto = get_prototype(f, x0, ws, p)
-    cache = init(f.prob, f.alg; f.kwargs...)
-    func = IntegralFunction(proto) do x, (; p, ws, lims_state)
-        y = limit_iterate(lims_state..., x)
-        s = workspace_evaluate!(ws, x)
-        do_solve!(cache, f, y, s, p)
-    end
-    return func, ws
-end
-function outer_integralfunction(f::CommonSolveFourierIntegralFunction, x0, p)
-    ws = get_fourierworkspace(f)
-    proto = get_prototype(f, x0, ws, p)
-    s = workspace_contract!(ws, x0[end])
-    func = CommonSolveFourierIntegralFunction(f.prob, f.alg, f.update!, f.postsolve, s, proto, f.specialize, f.executor; alias=true, f.kwargs...)
-    return func, ws, _fourier_update!, _postsolve
 end
 
 # PTR rules
@@ -562,12 +514,21 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AutoSymP
     return (; rule, rule_cache, cache...)
 end
 
-insert_counter(f::FourierIntegralFunction, numevals) = FourierIntegralFunction(CounterFunction(numevals, f.f), f.s, f.prototype; alias=f.alias)
-function insert_counter(f::CommonSolveFourierIntegralFunction, numevals)
-    f.executor isa SerialExecutor || throw(ArgumentError("Can only count serial integrands"))
-    CommonSolveFourierIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.s, f.prototype, f.specialize, f.executor; alias=f.alias, f.kwargs...)
-end
 
+function insert_counter(f::CommonSolveFourierIntegralFunction, x, p, channel)
+    input = (; x, p, s=f.s(x))
+    prob = ComposedCommonSolveProblem(input, CounterProblem(; channel), f.prob) do (; x, s, p), countersolver, probsolver
+        step!(countersolver)
+        return f.solve!(probsolver, x, s, p)
+    end
+    alg = ComposedCommonSolveAlgorithm(SingleCount(), f.alg)
+    return CommonSolveFourierIntegralFunction(prob, alg, f.s, f.prototype, f.specialize, f.executor) do solver, x, s, p
+        # solver.input = (; solver.input..., x, s, p)
+        # return solve!(solver)
+        ## using out-of-place semantics can be faster
+        return solver.solve!((; x, s, p), solver.solvers...)
+    end
+end
 
 struct FourierEliminationProblem{F<:AbstractFourierSeries,X,D,K}
     f::F
@@ -594,26 +555,6 @@ function solve!(solver::FourierEliminationSolver)
     return FourierSeriesEvaluators.contract!(solver.cacheval, solver.f, solver.x, solver.dim)
 end
 
-function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQuad; kws...)
-    x0, segs, lims, states = unroll_limits(dom)
-    series, unroll_fourierseries(f.s, x0)
-    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
-    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom))) : alg.specialize
-    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor isa SharedThreadedExecutor ? SharedThreadedExecutor(alg.executor.ntasks) : alg.executor, Val(ndims(dom))) : alg.executor
-
-    _f = nested_innerintegralfunction(f, x0, p)
-    innerprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
-    innerup! = (solver, lims, segs, state, (; p, kws)) -> begin
-        solver.dom = segs
-        solver.p = (; p, state)
-        solver.kwargs = (; solver.kwargs..., kws...)
-        return
-    end
-    segprob = SegmentProblem(innerprob, algs[1], lims[1], states[1], 1, (; p, kws=(; innerprob.kwargs...)), innerup!, (;))
-
-    prob = nested_prob(segprob, _f.prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
-    return init(prob, SegmentAlgorithm(); kws...)
-end
 function nested_innerintegralfunction(f::FourierIntegralFunction, x0, p)
     proto = get_prototype(f, x0, p)
     func = IntegralFunction(proto) do x, (; p, state, fouriercache, fourierseries)
@@ -639,7 +580,7 @@ mutable struct FourierEvaluationSolver{F,X,A,C,K}
 end
 function init(prob::FourierEvaluationProblem, alg::FourierEvaluationAlgorithm; kws...)
     kwargs = (; prob.kwargs..., kws...)
-    cacheval = FourierSeriesEvaluators.allocate(prob.f, prob.x, prob.dim)
+    cacheval = FourierSeriesEvaluators.allocate(prob.f, prob.x, Val(1))#prob.dim)
     return FourierEvaluationSolver(prob.f, prob.x, alg, cacheval, kwargs)
 end
 function solve!(solver::FourierEvaluationSolver)
@@ -650,25 +591,29 @@ function func2prob(func::FourierIntegralFunction, x0)
     (; f, s, prototype, alias) = func
     prob = FourierEvaluationProblem(s, x0, alias)
     alg = FourierEvaluationAlgorithm()
-    up! = (solver, x, p) -> solver.x = x
-    post = (sol, x, p) -> f(x, sol, p)
-    CommonSolveIntegralFunction(prob, alg, up!, post, prototype)
+    _solve! = (solver, x, p) -> begin
+        solver.x = x
+        sol = solve!(solver)
+        sol = FourierSeriesEvaluators.evaluate!(solver.cacheval, solver.f, x)
+        return f(x, sol, p)
+    end
+    CommonSolveIntegralFunction(prob, alg, _solve!, prototype)
 end
 function func2prob(func::CommonSolveFourierIntegralFunction, x0, p)
-    (; prob, alg, s, kwargs, update!, postsolve, prototype, specialize, executor, alias) = func
+    (; prob, alg, s, kwargs, prototype, specialize, executor, alias) = func
     fourierprob = FourierEvaluationProblem(s, x0, alias)
     fourieralg = FourierEvaluationAlgorithm()
     fullprob = ComposedCommonSolveProblem((; x=x0, p=p), fourierprob, prob) do ((; x, p), fouriersolver, probsolver)
         fouriersolver.x = x
         fx = solve!(fouriersolver)
-        update!(probsolver, x, fx, p)
-        sol = solve!(probsolver)
-        return postsolve(sol, x, p)
+        return func.solve!(probsolver, x, fx, p)
     end
     fullalg = ComposedCommonSolveAlgorithm(fourieralg, alg)
-    up! = (solver, x, p) -> solver.input = (; x, p)
-    post = (sol, x, p) -> sol
-    CommonSolveIntegralFunction(fullprob, fullalg, up!, post, prototype, specialize, executor; kwargs...)
+    _solve! = (solver, x, p) -> begin
+        solver.input = (; x, p)
+        return solve!(solver)
+    end
+    CommonSolveIntegralFunction(fullprob, fullalg, _solve!, prototype, specialize, executor; kwargs...)
 end
 
 struct ComposedCommonSolveProblem{P,S,I,K}
@@ -697,4 +642,133 @@ function init(prob::ComposedCommonSolveProblem, alg::ComposedCommonSolveAlgorith
 end
 function solve!(solver::ComposedCommonSolveSolver)
     return solver.solve!(solver.input, solver.solvers...; solver.kwargs...)
+end
+
+function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQuad; kws...)
+    x0, segs, lims, states = unroll_limits(dom)
+    series = unroll_series(f.s)
+    algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
+    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom))) : alg.specialize
+    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor isa SharedThreadedExecutor ? SharedThreadedExecutor(alg.executor.ntasks) : alg.executor, Val(ndims(dom))) : alg.executor
+
+    _f = nested_innerfourierintegralfunction(f, x0, series[1], x0[1], p)
+
+    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1], series=series[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
+    segprob = SegmentProblem(lims[1], 1)
+    innerinput = (; lims=lims[1], dim=Val(1), state=states[1], p, series=series[1], kws=intprob.kwargs)
+    innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, p, series, kws), segsolver, intsolver
+        segsolver.lims = lims
+        segsolver.dim = _val_unwrap(dim)
+        _segs = solve!(segsolver)
+        intsolver.dom = _segs
+        intsolver.p = (; intsolver.p..., p, state, series)
+        intsolver.kwargs = (; intsolver.kwargs..., kws...)
+        return solve!(intsolver)
+    end
+    inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
+    prob, alg = nested_fourierprob(innerprob, inneralg, _f.prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end], series[2:end]; kws...)
+    return init(prob, alg)
+end
+function nested_fourierprob(innerprob, inneralg, prototype, p, x0, segs, lims, states, algs, spec, exec, series; kws...)
+    length(states) == 0 && return innerprob, inneralg
+    elimprob = EliminationProblem(lims[1], x0[ndims(lims[1])], Val(ndims(lims[1])))
+    eliminput = (; x=x0[ndims(lims[1])], lims=lims[1], state=states[1], dim=Val(ndims(lims[1])), series=series[1], p, kws=innerprob.input.kws)
+    fourierprob = FourierEliminationProblem(series[1], x0[ndims(lims[1])], Val(ndims(lims[1])))
+    _prob = ComposedCommonSolveProblem(eliminput, elimprob, fourierprob, innerprob) do (; x, lims, state, dim, p, series, kws), elimsolver, fouriersolver, innersolver
+        elimsolver.x = x
+        elimsolver.lims = lims
+        elimsolver.dim = dim
+        _state = (x, state...)
+        _lims = solve!(elimsolver)
+        fouriersolver.f = series
+        fouriersolver.x = x
+        fouriersolver.dim = dim
+        _series = solve!(fouriersolver)
+        innersolver.input = (; innersolver.input..., lims=_lims, state=_state, dim=Val(_val_unwrap(dim)-1), series=_series, p, kws)
+        return solve!(innersolver)
+    end
+    _alg = ComposedCommonSolveAlgorithm(EliminationAlgorithm(), FourierEliminationAlgorithm(), inneralg)
+    _f = CommonSolveIntegralFunction(_prob, _alg, prototype*real(prod(x0[begin:ndims(lims[1])-1])), spec[1], exec[1]) do solver, x, p
+        # solver.input = (; solver.input..., p..., x)
+        # sol = solve!(solver)
+        ## out-of-place semantics may be faster
+        sol = solver.solve!((; solver.input..., p..., x), solver.solvers...)
+        return sol.value
+    end
+    __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
+    _kws = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
+    innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], series=series[1], p, kws=_kws)
+    intprob = IntegralProblem(__f, segs[1], (; innerinput..., kws=eliminput.kws); _kws...)
+
+    segprob = SegmentProblem(lims[1], ndims(lims[1]))
+    _innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, series, p, kws), segsolver, intsolver
+        segsolver.lims = lims
+        segsolver.dim = _val_unwrap(dim)
+        _segs = solve!(segsolver)
+        intsolver.dom = _segs
+        len = abs(_segs[end]-_segs[begin])
+        # TODO figure out type instability/GC in line below
+        intsolver.p = (; intsolver.p..., lims, state, series, dim, p, kws=_rescale_abstol(1/len; kws...))
+        intsolver.kwargs = (; intsolver.kwargs..., kws...)
+        return solve!(intsolver)
+    end
+    _inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
+
+    nested_fourierprob(_innerprob, _inneralg, prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end], series[2:end]; kws...)
+end
+
+function unroll_series(s::AbstractFourierSeries)
+    if ndims(s) == 1
+        return (s,)
+    else
+        (unroll_series(FourierSeriesEvaluators.contract(s, FourierSeriesEvaluators.period(s, ndims(s)), Val(ndims(s))))..., s)
+    end
+end
+
+function nested_innerfourierintegralfunction(f::FourierIntegralFunction, x0, series, x1, p)
+    proto = get_prototype(f, x0, p)
+
+    prob = FourierEvaluationProblem(series, x1)
+    alg = FourierEvaluationAlgorithm()
+
+    _f = f.f
+    func = CommonSolveIntegralFunction(prob, alg, proto) do solver, x, p
+        # solver.x = x
+        # solver.f = p.series
+        # sol = solve!(solver)
+        ## using out-of-place semantics can be faster
+        sol = FourierSeriesEvaluators.evaluate!(solver.cacheval, p.series, x)
+        return _f(SVector(promote(x, state...)), sol, p)
+    end
+    return func
+end
+function nested_innerfourierintegralfunction(f::CommonSolveFourierIntegralFunction, x0, series, x1, p)
+    return nested_innerfourierintegralfunction_cs(f.executor, f, x0, series, x1, p)
+end
+function nested_innerfourierintegralfunction_cs(::SerialExecutor, f, x0, series, x1, p)
+    proto = get_prototype(f, x0, p)
+
+    prob = FourierEvaluationProblem(series, x1)
+    alg = FourierEvaluationAlgorithm()
+    input = (; x=x0, x1, series, p)
+    cprob = ComposedCommonSolveProblem(input, prob, f.prob) do (; x, x1, p, series), fouriersolver, fsolver
+        # fouriersolver.f = series
+        # fouriersolver.x = x1
+        # s = solve!(fouriersolver)
+        ## for performance, eliding the setfield! call is helpful for small fourier series
+        s = FourierSeriesEvaluators.evaluate!(fouriersolver.cacheval, series, x1)
+        return f.solve!(fsolver, x, s, p)
+    end
+
+    calg = ComposedCommonSolveAlgorithm(alg, f.alg)
+    return CommonSolveIntegralFunction(cprob, calg, proto, f.specialize, f.executor; f.kwargs...) do solver, x, (; p, state, series)
+        # solver.input = (; solver.input..., x1=x, x=SVector(promote(x, state...)), p, series)
+        # return solve!(solver)
+        ## out-of-place semantics may be faster
+        return solver.solve!((; solver.input..., x1=x, x=SVector(promote(x, state...)), p, series), solver.solvers...)
+    end
+end
+function nested_innerfourierintegralfunction_cs(exec::ThreadedExecutor, f, x0, series, x1, p)
+    _f = nested_innerfourierintegralfunction_cs(SerialExecutor(), f, x0, series, x1, p)
+    return nested_integralfunction_cs(exec, _f, x1, p)
 end

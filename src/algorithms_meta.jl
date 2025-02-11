@@ -150,11 +150,15 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
         return solve!(innersolver)
     end
     _alg = ComposedCommonSolveAlgorithm(EliminationAlgorithm(), inneralg)
-    _up = (solver, x, p) -> solver.input = (; solver.input..., p..., x)
-    _post = (sol, x, p) -> sol.value
-    _f = CommonSolveIntegralFunction(_prob, _alg, _up, _post, prototype*real(prod(x0[begin:ndims(lims[1])-1])), spec[1], exec[1])
+    _f = CommonSolveIntegralFunction(_prob, _alg, prototype*real(prod(x0[begin:ndims(lims[1])-1])), spec[1], exec[1]) do solver, x, p
+        # solver.input = (; solver.input..., p..., x)
+        # sol = solve!(solver)
+        ## out-of-place semantics may be faster
+        sol = solver.solve!((; solver.input..., p..., x), solver.solvers...)
+        return sol.value
+    end
     __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
-    _kws = _rescale_abstol(1/real(prod(@show(x0[begin+ndims(lims[1]):end]))); kws...)
+    _kws = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
     innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], p, kws=_kws)
     intprob = IntegralProblem(__f, segs[1], (; innerinput..., kws=eliminput.kws); _kws...)
 
@@ -172,36 +176,6 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
     _inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
 
     nested_prob(_innerprob, _inneralg, prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
-    #=
-    segup! = (solver, lims, state, dim, (; p, kws, len)) -> begin
-        solver.lims = lims
-        solver.state = state
-        solver.dim = _val_unwrap(dim)-1
-        solver.p = (; solver.p..., p, kws=_rescale_abstol(1/len; kws...))
-        return
-    end
-    _kws = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
-    elimprob = EliminationProblem(segprob, SegmentAlgorithm(), (; p, kws=_kws, len=abs(segs[1][end]-segs[1][begin])), x0[ndims(lims[1])], Val{ndims(lims[1])}(), states[1], lims[1], segup!, (;))
-    elimup! = (solver, x, (; p, lims, state, len, kws)) -> begin
-        solver.x = x
-        solver.lims = lims
-        solver.state = state
-        solver.p = (; solver.p..., p, kws, len)
-        return
-    end
-    elimpost = (sol, x, p) -> sol.value
-    _f = CommonSolveIntegralFunction(elimprob, EliminationAlgorithm(), elimup!, elimpost, prototype*real(prod(x0[begin:ndims(lims[1])-1])), spec[1], exec[1])
-    __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
-    intprob = IntegralProblem(__f, segs[1], (; p, lims=lims[1], state=states[1], len=abs(segs[1][end]-segs[1][begin]), kws=_kws); _kws...)
-    intup! = (solver, lims, segs, state, (; p, kws)) -> begin
-        solver.dom = segs
-        solver.kwargs = (; solver.kwargs..., kws...)
-        solver.p = (; solver.p..., p, lims, state, len=abs(segs[end]-segs[begin]), kws)
-        return
-    end
-    _segprob = SegmentProblem(intprob, algs[1], lims[1], states[1], ndims(lims[1]), (; p, kws=(; intprob.kwargs...)), intup!, kws)
-    return nested_prob(_segprob, prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
-    =#
 end
 function nested_integralfunction(f::CommonSolveIntegralFunction, x0, p)
     return nested_integralfunction_cs(f.executor, f, x0, p)
@@ -245,7 +219,7 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
 
     _f = nested_innerintegralfunction(f, x0, p)
 
-    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); @show(_rescale_abstol(1/real(prod(x0[begin+1:end])); kws...))...)
+    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
     segprob = SegmentProblem(lims[1], 1)
     innerinput = (; lims=lims[1], dim=Val(1), state=states[1], p, kws=intprob.kwargs)
     innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, p, kws), segsolver, intsolver
@@ -263,6 +237,7 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
 end
 
 function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
+    # @show kws
     cacheval.input = (; cacheval.input..., p, lims=dom, kws=(; kws...))
     return solve!(cacheval)
 end
@@ -359,16 +334,12 @@ end
 (f::BatchCounterFunction)(y, x, p) = (f.counter[] += size(x)[end]; f.f(y, x, p))
 
 
-struct CounterProblem{F,A<:Tuple,K<:NamedTuple}
-    f::F
-    args::A
+struct CounterProblem{K}
     kwargs::K
-    CounterProblem(f, args...; kws...) = new{typeof(f),typeof(args),typeof(NamedTuple(kws))}(f, args, NamedTuple(kws))
 end
+CounterProblem(; kws...) = CounterProblem(kws)
 
-mutable struct CounterSolver{F,A,K,G}
-    f::F
-    args::A
+mutable struct CounterSolver{K,G}
     kwargs::K
     alg::G
     counter::Int
@@ -376,27 +347,25 @@ end
 abstract type CounterAlgorithm end
 # this could
 struct SingleCount <: CounterAlgorithm end
-struct RemoteCount <: CounterAlgorithm
-    ch::Channel{CounterSolver}
-end
 function init(prob::CounterProblem, alg::CounterAlgorithm; kws...)
-    solver = CounterSolver(prob.f, prob.args, (; prob.kwargs..., kws...), alg, 0)
-    if alg isa RemoteCount
-        put!(alg.ch, solver)
+    kwargs = (; prob.kwargs..., kws...)
+    solver = CounterSolver(kwargs, alg, 0)
+    if haskey(kwargs, :channel)
+        put!(kwargs.channel, solver)
     end
     return solver
 end
-@inline function solve!(solver::CounterSolver)
+function step!(solver::CounterSolver)
     solver.counter += 1
-    return solver.f(solver.args...; solver.kwargs...)
+    return solver.counter
 end
 function insert_counter(f::IntegralFunction, x, p, channel)
-    prob = CounterProblem(f.f, x, p)
+    prob = CounterProblem()
     alg = RemoteCount(channel)
-    up = (solver, x, p) -> solver.args = (x, p)
-    post = (sol, x, p) -> sol
-    CommonSolveIntegralFunction(prob, alg, up, post, f.prototype)
-    # IntegralFunction(CounterFunction(numevals, f.f), f.prototype)
+    CommonSolveIntegralFunction(prob, alg, f.prototype) do solver, x, p
+        step!(solver)
+        return f.f(x, p)
+    end
 end
 # insert_counter(f::IntegralFunction, numevals) = IntegralFunction(CounterFunction(numevals, f.f), f.prototype)
 insert_counter(f::InplaceIntegralFunction, numevals) = InplaceIntegralFunction(CounterFunction(numevals, f.f!), f.prototype)

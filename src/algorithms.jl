@@ -85,6 +85,7 @@ function do_integral(f, dom, p, alg::QuadGKJL, cacheval;
     u = oneunit(eltype(dom))
     usegs = map(x -> x/u, dom)
     atol = isnothing(abstol) ? abstol : abstol/u
+    # @show atol
     val, err = call_quadgk(f, p, u, usegs, cacheval; maxevals = maxiters, rtol = reltol, atol, order = alg.order, norm = alg.norm)
     value = u*val
     retcode = err < max(something(atol, zero(err)), alg.norm(val)*something(reltol, isnothing(atol) ? sqrt(eps(one(eltype(usegs)))) : 0)) ? Success : Failure
