@@ -420,7 +420,7 @@ end
 IAI(algs::IntegralAlgorithm...) = IAI(algs)
 
 function bz_to_standard(f, bz, p, bzalg::IAI; kws...)
-    return IntegralProblem(f, bz.lims, p; kws...), NestedQuad(bzalg.algs, bzalg.specialize)
+    return IntegralProblem(f, bz.lims, p; kws...), NestedQuad(bzalg.algs, bzalg.specialize, bzalg.executor)
 end
 
 """
