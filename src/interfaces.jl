@@ -79,7 +79,7 @@ struct DefaultSpecialize <: AbstractSpecialization end
 
 Type-stable specialization of a commonsolve function without code generation or inference based on the solver type.
 Asserts that the returned value is of the same type as the prototype.
-Strikes a good balance of 
+Strikes a good balance of compile time and run time.
 """
 struct NoSpecialize <: AbstractSpecialization end
 
@@ -116,28 +116,16 @@ Policy that a commonsolve function be executed on a single thread.
 """
 struct SerialExecutor <: AbstractExecutor end
 
-abstract type AbstractThreadedExecutor <: AbstractExecutor end
 
 """
     ThreadedExecutor(ntasks::Int)
 
 Policy that a commonsolve function be executed on multiple threads, scheduling up to `ntasks` tasks at a time which may exceed the number of threads.
+The pool of commonsolve workers is of size `ntasks`.
 """
-struct ThreadedExecutor <: AbstractThreadedExecutor
+struct ThreadedExecutor <: AbstractExecutor
     ntasks::Int
 end
-
-"""
-    SharedThreadedExecutor(ntasks::Int, channel=Channel(ntasks))
-
-Policy that a commonsolve function be executed on multiple threads, scheduling up to `ntasks` tasks at a time which may exceed the number of threads.
-All solvers are shared in the supplied `channel`.
-"""
-struct SharedThreadedExecutor{T<:Channel} <: AbstractThreadedExecutor
-    ntasks::Int
-    channel::T
-end
-SharedThreadedExecutor(ntasks::Integer) = SharedThreadedExecutor(ntasks, Channel(ntasks))
 
 
 """
@@ -194,7 +182,7 @@ function init_commonsolvefunction_(::SerialExecutor, f, x, p)
     integrand = init_specialized_integrand(f.specialize, solver, f, x, p, prototype)
     return solver, integrand, prototype
 end
-function init_commonsolvefunction_(exec::AbstractThreadedExecutor, f, x, p)
+function init_commonsolvefunction_(exec::ThreadedExecutor, f, x, p)
     channel = fillchannel(exec) do
         init(f.prob, f.alg; f.kwargs...)
     end
@@ -207,12 +195,6 @@ end
 
 function fillchannel(f, exec::ThreadedExecutor)
     return fillchannel(f, exec.ntasks)
-end
-function fillchannel(f, exec::SharedThreadedExecutor)
-    while length(exec.channel.data) < exec.ntasks
-        put!(exec.channel, f())
-    end
-    return exec.channel
 end
 function fillchannel(f, n::Integer)
     item = f()

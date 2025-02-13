@@ -30,6 +30,11 @@ end
 function testpost(sol, x, p)
     return sol
 end
+function testsolve!(solver, x, p)
+    testup!(solver, x, p)
+    sol = solve!(solver)
+    return testpost(sol, x, p)
+end
 
 @testset "domains" begin
     # PuncturedInterval
@@ -56,14 +61,14 @@ end
     b = 2pi
     abstol=1e-5
     p=3.0
-    # QuadratureFunction QuadGKJL AuxQuadGKJL ContQuadGKJL MeroQuadGKJL
+    # QuadratureFunction QuadGKJL AuxQuadGKJL
     for (f, ref) in (
         ((x,p) -> p*sin(x), 0.0),
         ((x,p) -> p*one(x), p*(b-a)),
         ((x,p) -> inv(p-cos(x)), (b-a)/sqrt(p^2-1)),
     )
         prob = IntegralProblem(f, (a, b), p; abstol)
-        for alg in (QuadratureFunction(), QuadGKJL(), AuxQuadGKJL(), ContQuadGKJL(), MeroQuadGKJL())
+        for alg in (QuadratureFunction(), QuadGKJL(), AuxQuadGKJL())
             sol = solve(prob, alg)
             @test ref ≈ sol.value atol=abstol
         end
@@ -76,14 +81,17 @@ end
     b = 2pi
     abstol=1e-5
     p0=3.0
-    # QuadratureFunction QuadGKJL AuxQuadGKJL ContQuadGKJL MeroQuadGKJL
-    update! = (cache, x, p) -> cache.p = (x, p)
-    postsolve = (sol, x, p) -> sol.value
+    # QuadratureFunction QuadGKJL AuxQuadGKJL
+    _solve! = (solver, x, p) -> begin
+        solver.p = (x, p)
+        sol = solve!(solver)
+        return sol.value
+    end
     f = (x, (y, p)) -> p*(y + x)
     subprob = IntegralProblem(f, (a, b), ((a+b)/2, p0); abstol)
-    integrand = CommonSolveIntegralFunction(subprob, QuadGKJL(), update!, postsolve)
+    integrand = CommonSolveIntegralFunction(_solve!, subprob, QuadGKJL())
     prob = IntegralProblem(integrand, (a, b), p0; abstol)
-    for alg in (QuadratureFunction(), QuadGKJL(), HCubatureJL(), AuxQuadGKJL(), ContQuadGKJL(), MeroQuadGKJL())
+    for alg in (QuadratureFunction(), QuadGKJL(), HCubatureJL(), AuxQuadGKJL())
         cache = init(prob, alg)
         for p in [3.0, 4.0]
             ref = p*(b-a)*(b^2-a^2)
@@ -94,7 +102,7 @@ end
     end
     f = (x, (y, p)) -> p*(sin(only(y))^2 + x)
     subprob = IntegralProblem(f, (a, b), ([b/2], p0); abstol)
-    integrand = CommonSolveIntegralFunction(subprob, QuadGKJL(), update!, postsolve)
+    integrand = CommonSolveIntegralFunction(_solve!, subprob, QuadGKJL())
     prob = IntegralProblem(integrand, AutoBZCore.Basis(b*I(1)), p0; abstol)
     for alg in (MonkhorstPack(), AutoSymPTRJL(),)
         cache = init(prob, alg)
@@ -214,7 +222,7 @@ end
         IntegralProblem((x, p) -> 1.0, (0, 1)),
         IntegralProblem(InplaceIntegralFunction((y, x, p) -> y .= 1.0, fill(0.0)), (0, 1)),
         IntegralProblem(InplaceBatchIntegralFunction((y, x, p) -> y .= 1.0, [0.0]), (0, 1)),
-        IntegralProblem(CommonSolveIntegralFunction(TestProblem(0.0, 0.0), TestAlgorithm(), testup!, testpost, 0.0), (0, 1), 3.0),
+        IntegralProblem(CommonSolveIntegralFunction(testsolve!, TestProblem(0.0, 0.0), TestAlgorithm(), 0.0), (0, 1), 3.0),
     )
         # constant integrand should always use the same number of evaluations as the
         # base quadrature rule
