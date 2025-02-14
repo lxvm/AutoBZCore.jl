@@ -40,10 +40,10 @@ struct FourierIntegralFunction{F,S,P} <: AbstractFourierIntegralFunction
 end
 FourierIntegralFunction(f, s, p=nothing; alias=false) = FourierIntegralFunction(f, s, p, alias)
 
-function get_prototype(f::FourierIntegralFunction, x, ws, p)
+function _get_prototype(f::FourierIntegralFunction, x, ws, p)
     f.prototype === nothing ? f.f(x, ws(x), p) : f.prototype
 end
-get_prototype(f::FourierIntegralFunction, x, p) = get_prototype(f, x, f.s, p)
+get_prototype(f::FourierIntegralFunction, x, p) = _get_prototype(f, x, f.s, p)
 
 function get_fourierworkspace(f::AbstractFourierIntegralFunction)
     f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
@@ -79,15 +79,15 @@ end
 function do_solve!(solver, f::CommonSolveFourierIntegralFunction, x, s, p)
     return f.solve!(solver, x, s, p)
 end
-function get_prototype(f::CommonSolveFourierIntegralFunction, x, ws, p)
+function _get_prototype(f::CommonSolveFourierIntegralFunction, x, ws, p, _solver=nothing)
     if isnothing(f.prototype)
-        solver = init(f.prob, f.alg; f.kwargs...)
+        solver = isnothing(_solver) ? init(f.prob, f.alg; f.kwargs...) : _solver
         do_solve!(solver, f, x, ws(x), p)
     else
         f.prototype
     end
 end
-get_prototype(f::CommonSolveFourierIntegralFunction, x, p) = get_prototype(f, x, f.s, p)
+get_prototype(f::CommonSolveFourierIntegralFunction, x, p, _solver=nothing) = _get_prototype(f, x, f.s, p, _solver)
 
 function init_specialized_fourierintegrand(solver, f, dom, p; x=get_prototype(dom), ws=f.s, s = ws(x), prototype=f.prototype)
     proto = prototype === nothing ? do_solve!(solver, f, x, s, p) : prototype
@@ -109,32 +109,32 @@ end
 
 # TODO implement CommonSolveFourierInplaceIntegrand CommonSolveFourierInplaceBatchIntegrand
 
-# similar to workspace_allocate, but more type-stable because of loop unrolling and vector types
-function workspace_allocate_vec(s::AbstractFourierSeries{N}, x::NTuple{N,Any}, len::NTuple{N,Integer}=ntuple(one,Val(N))) where {N}
-    # Only the top-level workspace has an AbstractFourierSeries in the series field
-    # In the lower level workspaces the series field has a cache that can be contract!-ed
-    # into a series
-    dim = Val(N)
-    if N == 1
-        c = FourierSeriesEvaluators.allocate(s, x[N], dim)
-        ws = Vector{typeof(c)}(undef, len[N])
-        ws[1] = c
-        for n in 2:len[N]
-            ws[n] = FourierSeriesEvaluators.allocate(s, x[N], dim)
-        end
-    else
-        c = FourierSeriesEvaluators.allocate(s, x[N], dim)
-        t = FourierSeriesEvaluators.contract!(c, s, x[N], dim)
-        c_ = FourierWorkspace(c, FourierSeriesEvaluators.workspace_allocate(t, x[1:N-1], len[1:N-1]).cache)
-        ws = Vector{typeof(c_)}(undef, len[N])
-        ws[1] = c_
-        for n in 2:len[N]
-            _c = FourierSeriesEvaluators.allocate(s, x[N], dim)
-            _t = FourierSeriesEvaluators.contract!(_c, s, x[N], dim)
-            ws[n] = FourierWorkspace(_c, FourierSeriesEvaluators.workspace_allocate(_t, x[1:N-1], len[1:N-1]).cache)
-        end
+function fourier_to_standard(func::FourierIntegralFunction, x0, p)
+    (; f, s, prototype, alias) = func
+    prob = FourierEvaluationProblem(s, x0, alias)
+    alg = FourierEvaluationAlgorithm()
+    _solve! = (solver, x, p) -> begin
+        solver.x = x
+        sol = solve!(solver)
+        return f(x, sol, p)
     end
-    return FourierWorkspace(s, ws)
+    CommonSolveIntegralFunction(_solve!, prob, alg, prototype)
+end
+function fourier_to_standard(func::CommonSolveFourierIntegralFunction, x0, p)
+    (; prob, alg, s, kwargs, prototype, specialize, executor, alias) = func
+    fourierprob = FourierEvaluationProblem(s, x0, alias)
+    fourieralg = FourierEvaluationAlgorithm()
+    fullprob = ComposedCommonSolveProblem((; x=x0, p=p), fourierprob, prob) do (; x, p), fouriersolver, probsolver
+        fouriersolver.x = x
+        fx = solve!(fouriersolver)
+        return func.solve!(probsolver, x, fx, p)
+    end
+    fullalg = ComposedCommonSolveAlgorithm(fourieralg, alg)
+    _solve! = (solver, x, p) -> begin
+        solver.input = (; x, p)
+        return solve!(solver)
+    end
+    CommonSolveIntegralFunction(_solve!, fullprob, fullalg, prototype, specialize, executor; kwargs...)
 end
 
 struct FourierValue{X,S}
@@ -144,70 +144,48 @@ end
 @inline AutoSymPTR.mymul(w, x::FourierValue) = FourierValue(AutoSymPTR.mymul(w, x.x), x.s)
 @inline AutoSymPTR.mymul(::AutoSymPTR.One, x::FourierValue) = x
 
-function init_cacheval(f::FourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
-    segs = PuncturedInterval(dom)
-    ws = get_fourierworkspace(f)
-    prototype = get_prototype(f, get_prototype(segs), ws, p)
-    return init_segbuf(prototype, segs, alg), ws
+function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
+    g = fourier_to_standard(f, get_prototype(dom), p)
+    return g, init_cacheval(g, dom, p, alg; kws...)
 end
-function init_cacheval(f::CommonSolveFourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
-    segs = PuncturedInterval(dom)
-    x = get_prototype(segs)
-    ws = get_fourierworkspace(f)
-    cache, integrand, prototype = _init_commonsolvefourierfunction(f, dom, p; x, ws)
-    return init_segbuf(prototype, segs, alg), ws, cache, integrand
-end
-function call_quadgk(f::FourierIntegralFunction, p, u, usegs, cacheval; kws...)
-    segbuf, ws = cacheval
-    quadgk(x -> (ux =
-     u*x; f.f(ux, ws(ux), p)), usegs...; kws..., segbuf)
-end
-function call_quadgk(f::CommonSolveFourierIntegralFunction, p, u, usegs, cacheval; kws...)
-    segbuf, ws, _, integrand = cacheval
-    quadgk(x -> (ux = u*x; integrand(ux, ws(ux), p)), usegs...; kws..., segbuf)
+function call_quadgk(f::AbstractFourierIntegralFunction, p, u, usegs, (g, cacheval); kws...)
+    return call_quadgk(g, p, u, usegs, cacheval; kws...)
 end
 
-function init_cacheval(f::FourierIntegralFunction, dom, p, ::HCubatureJL; kws...)
-    # TODO utilize hcubature_buffer
-    ws = get_fourierworkspace(f)
-    return ws
+function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::HCubatureJL; kws...)
+    g = fourier_to_standard(f, get_prototype(dom), p)
+    return g, init_cacheval(g, dom, p, alg; kws...)
 end
-init_cacheval(f::CommonSolveFourierIntegralFunction, dom, p, alg::HCubatureJL; kws...) = init_cacheval_cs(f.executor, f, dom, p, alg; kws...)
-function init_cacheval_cs(::SerialExecutor, f::CommonSolveFourierIntegralFunction, dom, p, alg::HCubatureJL; kws...)
-    ws = get_fourierworkspace(f)
-    solver, integrand,  = init_commonsolvefunction(f, dom, p)
-    return (; ws, solver, integrand)
-end
-function init_cacheval_cs(exec::ThreadedExecutor, f::CommonSolveFourierIntegralFunction, dom, p, alg::HCubatureJL; kws...)
-    throw(ArgumentError("HCubatureJL does not support threaded execution because it does not support batched integrands"))
-end
-function hcubature_integrand(f::FourierIntegralFunction, p, a, b, ws)
-    x -> f.f(x, ws(x), p)
-end
-function hcubature_integrand(f::CommonSolveFourierIntegralFunction, p, a, b, cacheval)
-    integrand = cacheval.integrand
-    ws = cacheval.ws
-    x -> integrand(x, ws(x), p)
+function hcubature_integrand(f::AbstractFourierIntegralFunction, p, a, b, (g, cacheval))
+    return hcubature_integrand(g, p, a, b, cacheval)
 end
 
-function init_autosymptr_cache(f::FourierIntegralFunction, dom, p, bufsize; kws...)
-    ws = get_fourierworkspace(f)
-    return (; buffer=nothing, ws)
+
+function init_autosymptr_cache(f::AbstractFourierIntegralFunction, dom, p, bufsize; kws...)
+    g = fourier_to_standard(f, get_prototype(dom), p)
+    return (; g, init_autosymptr_cache(g, dom, p, bufsize; kws...)...)
 end
-function init_autosymptr_cache(f::CommonSolveFourierIntegralFunction, dom, p, bufsize; kws...)
-    ws = get_fourierworkspace(f)
-    cache, integrand, = _init_commonsolvefourierfunction(f, dom, p; ws)
-    return (; buffer=nothing, ws, cache, integrand)
+# function init_autosymptr_cache(f::FourierIntegralFunction, dom, p, bufsize; kws...)
+#     ws = get_fourierworkspace(f)
+#     return (; buffer=nothing, ws)
+# end
+# function init_autosymptr_cache(f::CommonSolveFourierIntegralFunction, dom, p, bufsize; kws...)
+#     ws = get_fourierworkspace(f)
+#     cache, integrand, = _init_commonsolvefourierfunction(f, dom, p; ws)
+#     return (; buffer=nothing, ws, cache, integrand)
+# end
+function autosymptr_integrand(f::AbstractFourierIntegralFunction, p, segs, cacheval)
+    return autosymptr_integrand(cacheval.g, p, segs, cacheval)
 end
-function autosymptr_integrand(f::FourierIntegralFunction, p, segs, cacheval)
-    ws = cacheval.ws
-    x -> x isa FourierValue ? f.f(x.x, x.s, p) : f.f(x, ws(x), p)
-end
-function autosymptr_integrand(f::CommonSolveFourierIntegralFunction, p, segs, cacheval)
-    integrand = cacheval.integrand
-    ws = cacheval.ws
-    return x -> x isa FourierValue ? integrand(x.x, x.s, p) : integrand(x, ws(x), p)
-end
+# function autosymptr_integrand(f::FourierIntegralFunction, p, segs, cacheval)
+#     ws = cacheval.ws
+#     x -> x isa FourierValue ? f.f(x.x, x.s, p) : f.f(x, ws(x), p)
+# end
+# function autosymptr_integrand(f::CommonSolveFourierIntegralFunction, p, segs, cacheval)
+#     integrand = cacheval.integrand
+#     ws = cacheval.ws
+#     return x -> x isa FourierValue ? integrand(x.x, x.s, p) : integrand(x, ws(x), p)
+# end
 
 
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
@@ -454,6 +432,15 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AutoSymP
 end
 
 
+function insert_counter(f::FourierIntegralFunction, x, p, channel)
+    prob = CounterProblem(; channel)
+    alg = SingleCount()
+    proto = get_prototype(f, x, p)
+    CommonSolveFourierIntegralFunction(prob, alg, f.s, proto) do solver, x, s, p
+        step!(solver)
+        return f.f(x, s, p)
+    end
+end
 function insert_counter(f::CommonSolveFourierIntegralFunction, x, p, channel)
     input = (; x, p, s=f.s(x))
     prob = ComposedCommonSolveProblem(input, CounterProblem(; channel), f.prob) do (; x, s, p), countersolver, probsolver
@@ -494,14 +481,6 @@ function solve!(solver::FourierEliminationSolver)
     return FourierSeriesEvaluators.contract!(solver.cacheval, solver.f, solver.x, solver.dim)
 end
 
-function nested_innerintegralfunction(f::FourierIntegralFunction, x0, p)
-    proto = get_prototype(f, x0, p)
-    func = IntegralFunction(proto) do x, (; p, state, fouriercache, fourierseries)
-        f.f(SVector(promote(x, state...)), FourierSeriesEvaluators.evaluate!(fouriercache, fourierseries, x), p)
-    end
-    return func
-end
-
 struct FourierEvaluationProblem{F<:AbstractFourierSeries,X,K}
     f::F
     x::X
@@ -519,68 +498,38 @@ mutable struct FourierEvaluationSolver{F,X,A,C,K}
 end
 function init(prob::FourierEvaluationProblem, alg::FourierEvaluationAlgorithm; kws...)
     kwargs = (; prob.kwargs..., kws...)
-    cacheval = FourierSeriesEvaluators.allocate(prob.f, prob.x, Val(1))#prob.dim)
+
+    cacheval = init_fourierevalcache(prob.f |> (prob.alias ? identity : deepcopy), Tuple(prob.x))
     return FourierEvaluationSolver(prob.f, prob.x, alg, cacheval, kwargs)
 end
+function init_fourierevalcache(f::AbstractFourierSeries, x::Tuple)
+    nd = ndims(f)
+    vd = Val(nd)
+    xd = x[nd]
+    if nd == 1
+        return (FourierSeriesEvaluators.allocate(f, xd, vd),)
+    else
+        solver = init(FourierEliminationProblem(f, xd, vd), FourierEliminationAlgorithm())
+        return (init_fourierevalcache(solve!(solver), x[1:nd-1])..., solver)
+    end
+end
+
+
 function solve!(solver::FourierEvaluationSolver)
-    return FourierSeriesEvaluators.evaluate!(solver.cacheval, solver.f, solver.x)
+    return solve_fourierevalcache!(solver.cacheval, solver.f, Tuple(solver.x))
 end
-
-function fourier_to_standard(func::FourierIntegralFunction, x0, p)
-    (; f, s, prototype, alias) = func
-    prob = FourierEvaluationProblem(s, x0, alias)
-    alg = FourierEvaluationAlgorithm()
-    _solve! = (solver, x, p) -> begin
-        solver.x = x
-        sol = solve!(solver)
-        sol = FourierSeriesEvaluators.evaluate!(solver.cacheval, solver.f, x)
-        return f(x, sol, p)
+function solve_fourierevalcache!(cacheval, f::AbstractFourierSeries, x::Tuple)
+    nd = ndims(f)
+    vd = Val(nd)
+    xd = x[nd]
+    cache = cacheval[nd]
+    if nd == 1
+        return FourierSeriesEvaluators.evaluate!(cache, f, xd)
+    else
+        cache.f = f
+        cache.x = xd
+        return solve_fourierevalcache!(cacheval[1:nd-1], solve!(cache), x[1:nd-1])
     end
-    CommonSolveIntegralFunction(_solve!, prob, alg, prototype)
-end
-function fourier_to_standard(func::CommonSolveFourierIntegralFunction, x0, p)
-    (; prob, alg, s, kwargs, prototype, specialize, executor, alias) = func
-    fourierprob = FourierEvaluationProblem(s, x0, alias)
-    fourieralg = FourierEvaluationAlgorithm()
-    fullprob = ComposedCommonSolveProblem((; x=x0, p=p), fourierprob, prob) do ((; x, p), fouriersolver, probsolver)
-        fouriersolver.x = x
-        fx = solve!(fouriersolver)
-        return func.solve!(probsolver, x, fx, p)
-    end
-    fullalg = ComposedCommonSolveAlgorithm(fourieralg, alg)
-    _solve! = (solver, x, p) -> begin
-        solver.input = (; x, p)
-        return solve!(solver)
-    end
-    CommonSolveIntegralFunction(_solve!, fullprob, fullalg, prototype, specialize, executor; kwargs...)
-end
-
-struct ComposedCommonSolveProblem{P,S,I,K}
-    problems::P
-    solve!::S
-    input::I
-    kwargs::K
-    ComposedCommonSolveProblem(solve!, input, probs...; kws...) = new{typeof(probs),typeof(solve!),typeof(input),typeof(kws)}(probs, solve!, input, kws)
-end
-
-struct ComposedCommonSolveAlgorithm{A}
-    algorithms::A
-    ComposedCommonSolveAlgorithm(algs...) = new{typeof(algs)}(algs)
-end
-
-mutable struct ComposedCommonSolveSolver{S,SS,I,K}
-    solvers::S
-    solve!::SS
-    input::I
-    kwargs::K
-end
-function init(prob::ComposedCommonSolveProblem, alg::ComposedCommonSolveAlgorithm; kws...)
-    kwargs = (; prob.kwargs..., kws...)
-    solvers = map(init, prob.problems, alg.algorithms)
-    return ComposedCommonSolveSolver(solvers, prob.solve!, prob.input, kwargs)
-end
-function solve!(solver::ComposedCommonSolveSolver)
-    return solver.solve!(solver.input, solver.solvers...; solver.kwargs...)
 end
 
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQuad; kws...)
@@ -671,12 +620,12 @@ function nested_innerfourierintegralfunction(f::FourierIntegralFunction, x0, ser
     alg = FourierEvaluationAlgorithm()
 
     _f = f.f
-    func = CommonSolveIntegralFunction(prob, alg, proto) do solver, x, p
+    func = CommonSolveIntegralFunction(prob, alg, proto) do solver, x, (; series, p, state)
         # solver.x = x
         # solver.f = p.series
         # sol = solve!(solver)
         ## using out-of-place semantics can be faster
-        sol = FourierSeriesEvaluators.evaluate!(solver.cacheval, p.series, x)
+        sol = solve_fourierevalcache!(solver.cacheval, series, Tuple(x))
         return _f(SVector(promote(x, state...)), sol, p)
     end
     return func

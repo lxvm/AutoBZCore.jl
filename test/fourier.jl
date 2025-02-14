@@ -26,13 +26,16 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
         b = 1
         p = 0.0
         t = 1.0
-        update! = (cache, x, s, p) -> cache.p = (x, s, p)
-        postsolve = (sol, x, s, p) -> sol.value
+        _solve! = (solver, x, s, p) -> begin
+            solver.p = (x, s, p)
+            sol = solve!(solver)
+            return sol.value
+        end
         s = FourierSeries([1, 0, 1]/2; period=t, offset=-2)
         f = (x, (y, s, p)) -> x * s + p + y
         subprob = IntegralProblem(f, (a, b), ((a+b)/2, s((a+b)/2), 1.0))
         abstol = 1e-5
-        prob = IntegralProblem(CommonSolveFourierIntegralFunction(subprob, QuadGKJL(), update!, postsolve, s), (a, b), p; abstol)
+        prob = IntegralProblem(CommonSolveFourierIntegralFunction(_solve!, subprob, QuadGKJL(), s), (a, b), p; abstol)
         for alg in (QuadGKJL(), HCubatureJL(), QuadratureFunction(), AuxQuadGKJL())
             cache = init(prob, alg)
             for p in [3.0, 4.0]
@@ -45,7 +48,7 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
         f = (x, (y, s, p)) -> x * s + p
         subprob = IntegralProblem(f, (a, b), ([(a+b)/2], s((a+b)/2), 1.0))
         abstol = 1e-5
-        prob = IntegralProblem(CommonSolveFourierIntegralFunction(subprob, QuadGKJL(), update!, postsolve, s), AutoBZCore.Basis(t*I(1)), p; abstol)
+        prob = IntegralProblem(CommonSolveFourierIntegralFunction(_solve!, subprob, QuadGKJL(), s), AutoBZCore.Basis(t*I(1)), p; abstol)
         for alg in (MonkhorstPack(), AutoSymPTRJL(),)
             cache = init(prob, alg)
             for p in [3.0, 4.0]
@@ -104,7 +107,7 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
     # EvalCounter
     @testset "evalcounter" for prob in (
         IntegralProblem(FourierIntegralFunction((x, s, p) -> x * s + p, FourierSeries([1, 0, 1]/2; period=1.0, offset=-2)), (0.0, 1.0), 0.0; abstol=1e-3),
-        IntegralProblem(CommonSolveFourierIntegralFunction(IntegralProblem((x, (y, s, p)) -> x * s + p + y, (0.0, 1.0), (0.5, 0.0, 1.0)), QuadGKJL(), (cache, x, s, p) -> (cache.p = (x, s, p)), (sol, x, s, p) -> sol.value, FourierSeries([1, 0, 1]/2; period=1.0, offset=-2)), (0.0, 1.0), 1.0),
+        IntegralProblem(CommonSolveFourierIntegralFunction((solver, x, s, p) -> (solver.p = (x, s, p); solve!(solver).value), IntegralProblem((x, (y, s, p)) -> x * s + p + y, (0.0, 1.0), (0.5, 0.0, 1.0)), QuadGKJL(), FourierSeries([1, 0, 1]/2; period=1.0, offset=-2)), (0.0, 1.0), 1.0),
     )
         # constant integrand should always use the same number of evaluations as the
         # base quadrature rule
@@ -117,54 +120,3 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
         end
     end
 end
-
-#=
-@testset "FourierIntegrand" begin
-    for dims in 1:3
-        s = FourierSeries(integer_lattice(dims), period=1)
-        # AutoBZ interface user function: f(x, args...; kwargs...) where args & kwargs
-        # stored in MixedParameters
-        # a FourierIntegrand should expect a FourierValue in the first argument
-        # a FourierIntegrand is just a wrapper around an integrand
-        f(x::FourierValue, a; b) = a*x.s*x.x .+ b
-        # IntegralSolver will accept args & kwargs for a FourierIntegrand
-        prob = IntegralProblem(FourierIntegrand(f, s, 1.3, b=4.2), zeros(dims), ones(dims))
-        u = IntegralSolver(prob, HCubatureJL())()
-        v = IntegralSolver(FourierIntegrand(f, s), zeros(dims), ones(dims), HCubatureJL())(1.3, b=4.2)
-        w = IntegralSolver(FourierIntegrand(f, s, b=4.2), zeros(dims), ones(dims), HCubatureJL())(1.3)
-        @test u == v == w
-
-        # tests for the nested integrand
-        nouter = 3
-        ws = FourierSeriesEvaluators.workspace_allocate(s, FourierSeriesEvaluators.period(s), ntuple(n -> n == dims ? nouter : 1,dims))
-        p = ParameterIntegrand(f, 1.3, b=4.2)
-        nest = NestedBatchIntegrand(ntuple(n -> deepcopy(p), nouter), SVector{dims,ComplexF64})
-        for (alg, dom) in (
-            (HCubatureJL(), HyperCube(zeros(dims), ones(dims))),
-            (NestedQuad(AuxQuadGKJL()), CubicLimits(zeros(dims), ones(dims))),
-            (MonkhorstPack(), Basis(one(SMatrix{dims,dims}))),
-        )
-            prob1 = IntegralProblem(FourierIntegrand(p, s), dom)
-            prob2 = IntegralProblem(FourierIntegrand(p, ws, nest), dom)
-            @test solve(prob1, alg).u ≈ solve(prob2, alg).u
-        end
-    end
-end
-@testset "algorithms" begin
-    f(x::FourierValue, a; b) = a*x.s+b
-    for dims in 1:3
-        vol = (2pi)^dims
-        A = I(dims)
-        s = FourierSeries(integer_lattice(dims), period=1)
-        for bz in (load_bz(FBZ(), A), load_bz(InversionSymIBZ(), A))
-            integrand = FourierIntegrand(f, s, 1.3, b=1.0)
-            prob = IntegralProblem(integrand, bz)
-            for alg in (IAI(), PTR(), AutoPTR(), TAI()), counter in (false, true)
-                new_alg = counter ? EvalCounter(alg) : alg
-                solver = IntegralSolver(prob, new_alg, reltol=0, abstol=1e-6)
-                @test solver() ≈ vol atol=1e-6
-            end
-        end
-    end
-end
-=#

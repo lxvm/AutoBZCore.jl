@@ -158,8 +158,9 @@ end
 Base.@nospecializeinfer function do_solve_nsp!(@nospecialize(solver), f::CommonSolveIntegralFunction, x, p)
     return do_solve!(solver, f, x, p)
 end
-function get_prototype(f::CommonSolveIntegralFunction, x, p, solver=init(f.prob, f.alg; f.kwargs...))
+function get_prototype(f::CommonSolveIntegralFunction, x, p, _solver=nothing)
     if isnothing(f.prototype)
+        solver = isnothing(_solver) ? init(f.prob, f.alg; f.kwargs...) : _solver
         do_solve!(solver, f, x, p)
     else
         f.prototype
@@ -331,4 +332,33 @@ struct IntegralSolution{T,S}
     value::T
     retcode::ReturnCode
     stats::S
+end
+
+
+struct ComposedCommonSolveProblem{P,S,I,K}
+    problems::P
+    solve!::S
+    input::I
+    kwargs::K
+    ComposedCommonSolveProblem(solve!, input, probs...; kws...) = new{typeof(probs),typeof(solve!),typeof(input),typeof(kws)}(probs, solve!, input, kws)
+end
+
+struct ComposedCommonSolveAlgorithm{A}
+    algorithms::A
+    ComposedCommonSolveAlgorithm(algs...) = new{typeof(algs)}(algs)
+end
+
+mutable struct ComposedCommonSolveSolver{S,SS,I,K}
+    solvers::S
+    solve!::SS
+    input::I
+    kwargs::K
+end
+function init(prob::ComposedCommonSolveProblem, alg::ComposedCommonSolveAlgorithm; kws...)
+    kwargs = (; prob.kwargs..., kws...)
+    solvers = map(init, prob.problems, alg.algorithms)
+    return ComposedCommonSolveSolver(solvers, prob.solve!, prob.input, kwargs)
+end
+function solve!(solver::ComposedCommonSolveSolver)
+    return solver.solve!(solver.input, solver.solvers...; solver.kwargs...)
 end
