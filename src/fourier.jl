@@ -407,11 +407,36 @@ function init_fourier_rule(w::FourierWorkspace, dom, alg::MonkhorstPack)
         return FourierMonkhorstPack(w, eltype(dom), Val(ndims(dom)), alg.npt, alg.syms)
     end
 end
+
+function fourier_to_partial(func::FourierIntegralFunction)
+    IntegralFunction(func.prototype) do _x, p
+        _x isa FourierValue || throw(ArgumentError("expected a FourierValue"))
+        return func.f(_x.x, _x.s, p)
+    end
+end
+function fourier_to_partial(func::CommonSolveFourierIntegralFunction)
+    CommonSolveIntegralFunction(func.prob, func.alg, func.prototype, func.specialize, func.executor; func.kwargs...) do solver, _x, p
+        _x isa FourierValue || throw(ArgumentError("expected a FourierValue"))
+        return func.solve!(solver, _x.x, _x.s, p)
+    end
+end
+
+struct FourierDomain{F,D}
+    f::F
+    dom::D
+end
+function get_prototype(dom::FourierDomain)
+    x = get_prototype(dom.dom)
+    return FourierValue(x, dom.f(x))
+end
+
 function init_cacheval(f::AbstractFourierIntegralFunction, dom , p, alg::MonkhorstPack; kws...)
-    cache = init_autosymptr_cache(f, dom, p, alg.nthreads; kws...)
-    ws = cache.ws
+    g = fourier_to_partial(f)
+    cache = init_autosymptr_cache(g, FourierDomain(f.s, dom), p, alg.nthreads; kws...)
+    # TODO smarter parallelization of fourier rule
+    ws = workspace_allocate(f.s, period(f.s))
     rule = init_fourier_rule(ws, dom, alg)
-    return (; rule, buffer=nothing, ws, cache...)
+    return (; g, rule, cache...)
 end
 
 function init_fourier_rule(w::FourierWorkspace, dom, alg::AutoSymPTRJL)
@@ -424,11 +449,19 @@ function init_fourier_rule(w::FourierWorkspace, dom::RepBZ, alg::AutoSymPTRJL)
     return SymmetricRuleDef(rule, dom.rep, dom.bz)
 end
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
-    cache = init_autosymptr_cache(f, dom, p, alg.nthreads; kws...)
-    ws = cache.ws
+    # cache = init_autosymptr_cache(f, dom, p, alg.nthreads; kws...)
+    # ws = cache.ws
+    # rule = init_fourier_rule(ws, dom, alg)
+    # rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
+    # return (; rule, rule_cache, cache...)
+
+    g = fourier_to_partial(f)
+    cache = init_autosymptr_cache(g, FourierDomain(f.s, dom), p, alg.nthreads; kws...)
+    # TODO smarter parallelization of fourier rule
+    ws = workspace_allocate(f.s, period(f.s))
     rule = init_fourier_rule(ws, dom, alg)
     rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
-    return (; rule, rule_cache, cache...)
+    return (; g, rule, rule_cache, cache...)
 end
 
 
