@@ -2,6 +2,10 @@
 # - init_cacheval
 # - do_integral
 
+# Methods an integrand must define
+# - init_integrand_cacheval -> (prototype, cacheval)
+# - $(algorithm)_integrand
+
 init_integrand_cacheval(f::IntegralFunction, dom, p) = init_integrand_cacheval_if(f.executor, f, dom, p)
 init_integrand_cacheval(f::CommonSolveIntegralFunction, dom, p) = init_integrand_cacheval_cs(f.executor, f, dom, p)
 
@@ -178,11 +182,9 @@ end
 HCubatureJL(; norm=norm, initdiv=1) = HCubatureJL(norm, initdiv)
 
 function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::HCubatureJL; kws...)
-    f isa IntegralFunction && f.executor isa ThreadedExecutor && throw(ArgumentError("HCubatureJL does not support threaded execution because it does not support batched integrands"))
-    f isa CommonSolveIntegralFunction && f.executor isa ThreadedExecutor && throw(ArgumentError("HCubatureJL does not support threaded execution because it does not support batched integrands"))
-    f isa InplaceIntegralFunction && throw(ArgumentError("HCubatureJL does not support inplace integrands"))
-    f isa InplaceBatchIntegralFunction && throw(ArgumentError("HCubatureJL does not support inplace, batched integrands"))
     prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p)
+    prototype isa InplaceArray && throw(ArgumentError("HCubatureJL does not support inplace integrands"))
+    prototype isa BatchArray && throw(ArgumentError("HCubatureJL does not support batched integrands"))
     return integrand_cacheval
 end
 

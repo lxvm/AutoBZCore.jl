@@ -424,7 +424,7 @@ function bz_to_standard(f, bz, p, bzalg::IAI; kws...)
 end
 
 """
-    PTR(; npt=50, nthreads=1)
+    PTR(; npt=50)
 
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
 using the routine `ptr` from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
@@ -432,17 +432,16 @@ using the routine `ptr` from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.
 """
 struct PTR <: AutoBZAlgorithm
     npt::Int
-    nthreads::Int
 end
-PTR(; npt = 50, nthreads = 1) = PTR(npt, nthreads)
+PTR(; npt=50) = PTR(npt)
 
 function bz_to_standard(f, bz, p, alg::PTR; kws...)
-    return IntegralProblem(f, canonical_ptr_basis(bz.B), p; kws...), MonkhorstPack(npt = alg.npt, syms = bz.syms, nthreads = alg.nthreads)
+    return IntegralProblem(f, canonical_ptr_basis(bz.B), p; kws...), MonkhorstPack(npt=alg.npt, syms=bz.syms)
 end
 
 
 """
-    AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2, nthreads=1)
+    AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2)
 
 Periodic trapezoidal rule with automatic convergence to tolerances passed to the
 solver with respect to `norm` using the routine `autosymptr` from
@@ -457,10 +456,9 @@ struct AutoPTR{F} <: AutoBZAlgorithm
     n₀::Float64
     Δn::Float64
     keepmost::Int
-    nthreads::Int
 end
-function AutoPTR(; norm = norm, a = 1.0, nmin = 50, nmax = 1000, n₀ = 6.0, Δn = log(10), keepmost = 2, nthreads = 1)
-    return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost, nthreads)
+function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2)
+    return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost)
 end
 
 
@@ -475,7 +473,7 @@ get_prototype(dom::RepBZ) = get_prototype(dom.bz)
 
 function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoPTR; kws...)
     prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
-    alg = AutoSymPTRJL(norm = bzalg.norm, a = bzalg.a, nmin = bzalg.nmin, nmax = bzalg.nmax, n₀ = bzalg.n₀, Δn = bzalg.Δn, keepmost = bzalg.keepmost, syms = bz.syms, nthreads = bzalg.nthreads)
+    alg = AutoSymPTRJL(norm=bzalg.norm, a=bzalg.a, nmin=bzalg.nmin, nmax=bzalg.nmax, n₀=bzalg.n₀, Δn=bzalg.Δn, keepmost=bzalg.keepmost, syms=bz.syms)
     return init(prob, alg)
 end
 get_basis(dom::RepBZ) = canonical_ptr_basis(dom.bz.B)

@@ -57,21 +57,17 @@ function autosymptr_integrand_cs(exec::ThreadedExecutor, f, p, segs, alg_cache, 
 end
 
 """
-    MonkhorstPack(; npt=50, syms=nothing, nthreads=1)
+    MonkhorstPack(; npt=50, syms=nothing)
 
 Periodic trapezoidal rule with a fixed number of k-points per dimension, `npt`,
 using the `PTR` rule from [AutoSymPTR.jl](https://github.com/lxvm/AutoSymPTR.jl).
-`nthreads` sets the numbers of threads used to parallelize the quadrature only when the
-integrand is a , in which case the user must parallelize the
-integrand evaluations. For no threading set `nthreads=1`.
 **The caller should check that the integral is converged w.r.t. `npt`**.
 """
 struct MonkhorstPack{S} <: IntegralAlgorithm
     npt::Int
     syms::S
-    nthreads::Int
 end
-MonkhorstPack(; npt=50, syms=nothing, nthreads=1) = MonkhorstPack(npt, syms, nthreads)
+MonkhorstPack(; npt=50, syms=nothing) = MonkhorstPack(npt, syms)
 function init_rule(dom, alg::MonkhorstPack)
     # rule = AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
     # return rule(eltype(dom), Val(ndims(dom)))
