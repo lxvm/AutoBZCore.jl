@@ -139,7 +139,7 @@ function nested_integralfunction_cs(exec::ThreadedExecutor, f, x0, p)
 end
 function nested_innerintegralfunction(f::IntegralFunction, x0, p)
     proto = get_prototype(f, x0, p)
-    func = IntegralFunction(proto) do x, (; p, state)
+    func = IntegralFunction(proto, f.executor) do x, (; p, state)
         f.f(SVector(promote(x, state...)), p)
     end
     return func
@@ -239,7 +239,7 @@ function insert_counter(f::IntegralFunction, x, p, channel)
     prob = CounterProblem(; channel)
     alg = SingleCount()
     proto = get_prototype(f, x, p)
-    CommonSolveIntegralFunction(prob, alg, proto) do solver, x, p
+    CommonSolveIntegralFunction(prob, alg, proto, DefaultSpecialize(), f.executor) do solver, x, p
         step!(solver)
         return f.f(x, p)
     end

@@ -3,17 +3,33 @@ abstract type AbstractIntegralFunction end
 # - f
 # - integrand_prototype
 
+
 """
-    IntegralFunction(f, [prototype=nothing])
+    AbstractSpecialization
+
+Supertype for compiler specializations of commonsolve functions to control code generation and inference.
+"""
+abstract type AbstractSpecialization end
+
+"""
+    AbstractExecutor
+
+Supertype of policies for how to schedule the execution of commonsolve functions.
+"""
+abstract type AbstractExecutor end
+
+"""
+    IntegralFunction(f, [prototype=nothing, executor=SerialExecutor()])
 
 Constructor for an out-of-place integrand of the form `f(x, p)`.
 Optionally, a `prototype` can be provided for the output of the function.
 """
-struct IntegralFunction{F,P} <: AbstractIntegralFunction
+struct IntegralFunction{F,P,E<:AbstractExecutor} <: AbstractIntegralFunction
     f::F
     prototype::P
+    executor::E
 end
-IntegralFunction(f) = IntegralFunction(f, nothing)
+IntegralFunction(f, proto=nothing) = IntegralFunction(f, proto, SerialExecutor())
 
 function get_prototype(f::IntegralFunction, x, p)
     f.prototype === nothing ? f.f(x, p) : f.prototype
@@ -42,7 +58,7 @@ end
 Constructor for an inplace, batched integrand of the form `f!(y, x, p)` that accepts an
 array `x` containing a batch of evaluation points stored along the last axis of the array.
 A `prototype` array is required to store the same type and size as the result, `y`, however
-the last axis, which is reserved for batching, which should contain at least one element.
+the last axis, which is reserved for batching, should contain at least one element.
 The `max_batch` keyword sets a soft limit on the number of points batched simultaneously.
 """
 struct InplaceBatchIntegralFunction{F,P<:AbstractArray} <: AbstractIntegralFunction
@@ -59,13 +75,6 @@ function get_prototype(f::InplaceBatchIntegralFunction, x, p)
     # iip is required to have a prototype array
     f.prototype
 end
-
-"""
-    AbstractSpecialization
-
-Supertype for compiler specializations of commonsolve functions to control code generation and inference.
-"""
-abstract type AbstractSpecialization end
 
 """
     DefaultSpecialize()
@@ -101,13 +110,6 @@ Asserts that the returned value is of the same type as the prototype.
 This gives both very fast runtimes, compile times, and zero allocations, but may be brittle w.r.t. world age and is not as flexible with types of integration limits.
 """
 struct FunctionWrapperSpecialize <: AbstractSpecialization end
-
-"""
-    AbstractExecutor
-
-Supertype of policies for how to schedule the execution of commonsolve functions.
-"""
-abstract type AbstractExecutor end
 
 """
     SerialExecutor()
