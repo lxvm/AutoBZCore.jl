@@ -24,7 +24,7 @@
 abstract type AbstractFourierIntegralFunction <: AbstractIntegralFunction end
 
 """
-    FourierIntegralFunction(f, s, [prototype=nothing]; alias=false)
+    FourierIntegralFunction(f, s, [prototype=nothing, executor=SerialExecutor()]; alias=false)
 
 ## Arguments
 - `f`: The integrand, accepting inputs `f(x, s(x), p)`
@@ -32,13 +32,14 @@ abstract type AbstractFourierIntegralFunction <: AbstractIntegralFunction end
 - `prototype`:
 - `alias::Bool`: whether to `deepcopy` the series (false) or use the series as-is (true)
 """
-struct FourierIntegralFunction{F,S,P} <: AbstractFourierIntegralFunction
+struct FourierIntegralFunction{F,S,P,E<:AbstractExecutor} <: AbstractFourierIntegralFunction
     f::F
     s::S
     prototype::P
+    executor::E
     alias::Bool
 end
-FourierIntegralFunction(f, s, p=nothing; alias=false) = FourierIntegralFunction(f, s, p, alias)
+FourierIntegralFunction(f, s, p=nothing, exec=SerialExecutor(); alias=false) = FourierIntegralFunction(f, s, p, exec, alias)
 
 function _get_prototype(f::FourierIntegralFunction, x, ws, p)
     f.prototype === nothing ? f.f(x, ws(x), p) : f.prototype
@@ -72,7 +73,7 @@ struct CommonSolveFourierIntegralFunction{F,P,A,S,K,T,M<:AbstractSpecialization,
     executor::E
     alias::Bool
 end
-function CommonSolveFourierIntegralFunction(solve!, prob, alg, s, prototype=nothing, specialize=FullSpecialize(), executor=SerialExecutor(); alias=false, kws...)
+function CommonSolveFourierIntegralFunction(solve!, prob, alg, s, prototype=nothing, specialize=DefaultSpecialize(), executor=SerialExecutor(); alias=false, kws...)
     return CommonSolveFourierIntegralFunction(solve!, prob, alg, s, NamedTuple(kws), prototype, specialize, executor, alias)
 end
 
@@ -144,59 +145,31 @@ end
 @inline AutoSymPTR.mymul(w, x::FourierValue) = FourierValue(AutoSymPTR.mymul(w, x.x), x.s)
 @inline AutoSymPTR.mymul(::AutoSymPTR.One, x::FourierValue) = x
 
-function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::QuadGKJL; kws...)
+# standard integrators with a full series evaluation at each point
+
+function init_integrand_cacheval(f::AbstractFourierIntegralFunction, dom, p)
     g = fourier_to_standard(f, get_prototype(dom), p)
-    return g, init_cacheval(g, dom, p, alg; kws...)
-end
-function call_quadgk(f::AbstractFourierIntegralFunction, p, u, usegs, (g, cacheval); kws...)
-    return call_quadgk(g, p, u, usegs, cacheval; kws...)
+    prototype, cacheval = init_integrand_cacheval(g, dom, p)
+    return prototype, (g, cacheval)
 end
 
-function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::HCubatureJL; kws...)
-    g = fourier_to_standard(f, get_prototype(dom), p)
-    return g, init_cacheval(g, dom, p, alg; kws...)
+function quadgk_integrand(f::AbstractFourierIntegralFunction, p, u, alg_cache, (g, cacheval))
+    return quadgk_integrand(g, p, u, alg_cache, cacheval)
 end
+
 function hcubature_integrand(f::AbstractFourierIntegralFunction, p, a, b, (g, cacheval))
     return hcubature_integrand(g, p, a, b, cacheval)
 end
 
-
-function init_autosymptr_cache(f::AbstractFourierIntegralFunction, dom, p, bufsize; kws...)
-    g = fourier_to_standard(f, get_prototype(dom), p)
-    return (; g, init_autosymptr_cache(g, dom, p, bufsize; kws...)...)
-end
-# function init_autosymptr_cache(f::FourierIntegralFunction, dom, p, bufsize; kws...)
-#     ws = get_fourierworkspace(f)
-#     return (; buffer=nothing, ws)
-# end
-# function init_autosymptr_cache(f::CommonSolveFourierIntegralFunction, dom, p, bufsize; kws...)
-#     ws = get_fourierworkspace(f)
-#     cache, integrand, = _init_commonsolvefourierfunction(f, dom, p; ws)
-#     return (; buffer=nothing, ws, cache, integrand)
-# end
-function autosymptr_integrand(f::AbstractFourierIntegralFunction, p, segs, cacheval)
-    return autosymptr_integrand(cacheval.g, p, segs, cacheval)
-end
-# function autosymptr_integrand(f::FourierIntegralFunction, p, segs, cacheval)
-#     ws = cacheval.ws
-#     x -> x isa FourierValue ? f.f(x.x, x.s, p) : f.f(x, ws(x), p)
-# end
-# function autosymptr_integrand(f::CommonSolveFourierIntegralFunction, p, segs, cacheval)
-#     integrand = cacheval.integrand
-#     ws = cacheval.ws
-#     return x -> x isa FourierValue ? integrand(x.x, x.s, p) : integrand(x, ws(x), p)
-# end
-
-
-function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AuxQuadGKJL; kws...)
-    g = fourier_to_standard(f, get_prototype(dom), p)
-    return g, init_cacheval(g, dom, p, alg; kws...)
-end
-function call_auxquadgk(f::AbstractFourierIntegralFunction, p, u, usegs, (g, cacheval); kws...)
-    return call_auxquadgk(g, p, u, usegs, cacheval; kws...)
+function autosymptr_integrand(f::AbstractFourierIntegralFunction, p, segs, alg_cache, (g, cacheval))
+    return autosymptr_integrand(g, p, segs, alg_cache, cacheval)
 end
 
-# PTR rules
+function auxquadgk_integrand(f::AbstractFourierIntegralFunction, p, u, alg_cache, (g, cacheval))
+    return auxquadgk_integrand(g, p, u, alg_cache, cacheval)
+end
+
+# PTR rules with special series evaluation on rectangular grids
 
 # no symmetries
 struct FourierPTR{N,T,S,X} <: AbstractArray{Tuple{AutoSymPTR.One,FourierValue{SVector{N,T},S}},N}
@@ -245,6 +218,15 @@ function FourierPTR(w::FourierWorkspace, ::Type{T}, ndim, npt) where {T}
     s = workspace_evaluate(w, ntuple(_->zero(T), ndim))
     vals = similar(p, typeof(s))
     fourier_ptr!(vals, w, p.x)
+    return FourierPTR(vals, p)
+end
+
+function FourierPTR(f::AbstractFourierSeries, ::Type{T}, ndim, npt) where {T}
+    FourierSeriesEvaluators.isinplace(f) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
+    # unitless quadrature weight/node, but unitful value to Fourier series
+    p = AutoSymPTR.PTR(typeof(float(real(one(T)))), ndim, npt)
+    prob = FourierEvaluationProblem(f, BatchedArray(p))
+    vals = solve(prob, FourierEvaluationAlgorithm())
     return FourierPTR(vals, p)
 end
 
@@ -395,10 +377,6 @@ end
 
 # dispatch on PTR algorithms
 
-# function init_buffer(f::FourierIntegrand, len)
-#     return f.nest isa NestedBatchIntegrand ? Vector{eltype(f.nest.y)}(undef, len) : nothing
-# end
-
 function init_fourier_rule(w::FourierWorkspace, dom, alg::MonkhorstPack)
     @assert ndims(w.series) == ndims(dom)
     if alg.syms === nothing
@@ -408,6 +386,14 @@ function init_fourier_rule(w::FourierWorkspace, dom, alg::MonkhorstPack)
     end
 end
 
+function init_fourier_rule(f::AbstractFourierSeries, dom, alg::MonkhorstPack)
+    @assert ndims(w.series) == ndims(dom)
+    # if alg.syms === nothing
+    #     return FourierPTR(f, eltype(dom), Val(ndims(dom)), alg.npt)
+    # else
+    #     return FourierMonkhorstPack(w, eltype(dom), Val(ndims(dom)), alg.npt, alg.syms)
+    # end
+end
 function fourier_to_partial(func::FourierIntegralFunction)
     IntegralFunction(func.prototype) do _x, p
         _x isa FourierValue || throw(ArgumentError("expected a FourierValue"))
@@ -425,18 +411,23 @@ struct FourierDomain{F,D}
     f::F
     dom::D
 end
+Base.ndims(dom::FourierDomain) = ndims(dom.dom)
+Base.eltype(::Type{FourierDomain{F,D}}) where {F,D} = eltype(D) # ? FourierValue{eltype(D),?eltype(F)}
+function init_rule(dom::FourierDomain, alg::MonkhorstPack)
+    # TODO smarter parallelization of init_fourier_rule
+    w = workspace_allocate(dom.f, period(dom.f))
+    return init_fourier_rule(w, dom.dom, alg)
+end
 function get_prototype(dom::FourierDomain)
     x = get_prototype(dom.dom)
     return FourierValue(x, dom.f(x))
 end
+get_basis(dom::FourierDomain) = get_basis(dom.dom)
 
 function init_cacheval(f::AbstractFourierIntegralFunction, dom , p, alg::MonkhorstPack; kws...)
     g = fourier_to_partial(f)
-    cache = init_autosymptr_cache(g, FourierDomain(f.s, dom), p, alg.nthreads; kws...)
-    # TODO smarter parallelization of fourier rule
-    ws = workspace_allocate(f.s, period(f.s))
-    rule = init_fourier_rule(ws, dom, alg)
-    return (; g, rule, cache...)
+    (; rule, algorithm_cacheval, integrand_cacheval) = init_cacheval(g, FourierDomain(f.s, dom), p, alg; kws...)
+    return (; rule, algorithm_cacheval, integrand_cacheval=(g, integrand_cacheval))
 end
 
 function init_fourier_rule(w::FourierWorkspace, dom, alg::AutoSymPTRJL)
@@ -448,20 +439,15 @@ function init_fourier_rule(w::FourierWorkspace, dom::RepBZ, alg::AutoSymPTRJL)
     rule = init_fourier_rule(w, B, alg)
     return SymmetricRuleDef(rule, dom.rep, dom.bz)
 end
+function init_rule(dom::FourierDomain, alg::AutoSymPTRJL)
+    # TODO smarter parallelization of init_fourier_rule
+    w = workspace_allocate(dom.f, period(dom.f))
+    return init_fourier_rule(w, dom.dom, alg)
+end
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
-    # cache = init_autosymptr_cache(f, dom, p, alg.nthreads; kws...)
-    # ws = cache.ws
-    # rule = init_fourier_rule(ws, dom, alg)
-    # rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
-    # return (; rule, rule_cache, cache...)
-
     g = fourier_to_partial(f)
-    cache = init_autosymptr_cache(g, FourierDomain(f.s, dom), p, alg.nthreads; kws...)
-    # TODO smarter parallelization of fourier rule
-    ws = workspace_allocate(f.s, period(f.s))
-    rule = init_fourier_rule(ws, dom, alg)
-    rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
-    return (; g, rule, rule_cache, cache...)
+    (; rule_cache, rule, algorithm_cacheval, integrand_cacheval) = init_cacheval(g, FourierDomain(f.s, dom), p, alg; kws...)
+    return (; rule_cache, rule, algorithm_cacheval, integrand_cacheval=(g, integrand_cacheval))
 end
 
 
@@ -469,7 +455,7 @@ function insert_counter(f::FourierIntegralFunction, x, p, channel)
     prob = CounterProblem(; channel)
     alg = SingleCount()
     proto = get_prototype(f, x, p)
-    CommonSolveFourierIntegralFunction(prob, alg, f.s, proto) do solver, x, s, p
+    CommonSolveFourierIntegralFunction(prob, alg, f.s, proto, DefaultSpecialize(), f.executor) do solver, x, s, p
         step!(solver)
         return f.f(x, s, p)
     end
@@ -564,6 +550,8 @@ function solve_fourierevalcache!(cacheval, f::AbstractFourierSeries, x::Tuple)
         return solve_fourierevalcache!(cacheval[1:nd-1], solve!(cache), x[1:nd-1])
     end
 end
+
+# Nested quadrature with special series evaluation on a hierarchical grid
 
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQuad; kws...)
     x0, segs, lims, states = unroll_limits(dom)

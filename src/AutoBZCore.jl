@@ -54,7 +54,7 @@ using ChunkSplitters: chunks, getchunk
 using AutoSymPTR
 using FourierSeriesEvaluators
 using IteratedIntegration
-using QuadGK: quadgk, quadgk!, BatchIntegrand
+using QuadGK: quadgk, quadgk!, BatchIntegrand, InplaceIntegrand
 using HCubature: hcubature
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
 using IteratedIntegration: limit_iterate, interior_point

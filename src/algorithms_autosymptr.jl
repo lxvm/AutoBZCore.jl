@@ -12,7 +12,7 @@ end
 
 function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::AffineQuad; kws...)
     rule = init_rule(dom, alg)
-    prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p; kws...)
+    prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p)
     algorithm_cacheval = if prototype isa BatchArray
         (data = prototype.data) isa AbstractVector || throw(ArgumentError("AutoSymPTR.jl does not support batched functions with multidimensional outputs"))
         bufsize = 0 # a buffer of size zero will be filled with the default number of threads
@@ -84,8 +84,8 @@ end
 
 function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::MonkhorstPack; kws...)
     b = get_basis(dom)
-    rule = init_rule(b, alg)
-    return init_cacheval(f, b, p, AffineQuad(rule); kws...)
+    rule = init_rule(dom, alg)
+    return init_cacheval(f, dom, p, AffineQuad(rule); kws...)
 end
 
 function do_integral(f, dom, p, alg::MonkhorstPack, cacheval;
@@ -127,7 +127,7 @@ end
 function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
     b = get_basis(dom)
     rule = init_rule(dom, alg)
-    cache = init_cacheval(f, b, p, AffineQuad(rule); kws...)
+    cache = init_cacheval(f, dom, p, AffineQuad(rule); kws...)
     rule_cache = AutoSymPTR.alloc_cache(eltype(dom), Val(ndims(dom)), rule)
     return (; rule_cache, cache...)
 end
