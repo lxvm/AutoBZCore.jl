@@ -689,7 +689,7 @@ function nested_innerfourierintegralfunction_cs(exec::SerialExecutor, f, x0, ser
         # fouriersolver.x = x1
         # s = solve!(fouriersolver)
         ## for performance, eliding the setfield! call is helpful for small fourier series
-        s = FourierSeriesEvaluators.evaluate!(fouriersolver.cacheval, series, x1, exec)
+        s = solve_fourierevalcache!(fouriersolver.cacheval, series, Tuple(x1), SerialExecutor())
         return f.solve!(fsolver, x, s, p)
     end
 
