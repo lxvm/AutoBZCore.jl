@@ -12,8 +12,6 @@ AutoBZCore.IntegralAlgorithm
 AutoBZCore.QuadratureFunction
 AutoBZCore.QuadGKJL
 AutoBZCore.AuxQuadGKJL
-AutoBZCore.ContQuadGKJL
-AutoBZCore.MeroQuadGKJL
 ```
 
 ### Cubature
