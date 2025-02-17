@@ -107,7 +107,7 @@ end
 # TODO implement CommonSolveFourierInplaceIntegrand CommonSolveFourierInplaceBatchIntegrand
 
 function fourier_to_standard(func::FourierIntegralFunction, x0, p)
-    (; f, s, prototype, alias) = func
+    (; f, s, prototype, alias, executor) = func
     prob = FourierEvaluationProblem(s, x0, alias)
     alg = FourierEvaluationAlgorithm()
     _solve! = (solver, x, p) -> begin
@@ -115,7 +115,7 @@ function fourier_to_standard(func::FourierIntegralFunction, x0, p)
         sol = solve!(solver)
         return f(x, sol, p)
     end
-    CommonSolveIntegralFunction(_solve!, prob, alg, prototype)
+    CommonSolveIntegralFunction(_solve!, prob, alg, prototype, DefaultSpecialize(), executor)
 end
 function fourier_to_standard(func::CommonSolveFourierIntegralFunction, x0, p)
     (; prob, alg, s, kwargs, prototype, specialize, executor, alias) = func
@@ -276,7 +276,6 @@ function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::Abstract
     end
     return vals
 end
-
 function fourier_symptr!(wxs, w, u, npt, wsym, flags)
     flag, f = flags[begin:end-1], flags[end]
     return _fourier_symptr!(wxs, w, u, npt, wsym, flag, (), (), f[])
@@ -296,6 +295,14 @@ function FourierMonkhorstPack(w::FourierWorkspace, ::Type{T}, ndim::Val{d}, npt,
     return FourierMonkhorstPack(npt, length(syms), wxs)
 end
 
+function FourierMonkhorstPack(f::AbstractFourierSeries, ::Type{T}, ndim::Val{d}, npt, syms, exec) where {d,T}
+    # unitless quadrature weight/node, but unitful value to Fourier series
+    # TODO recast the _fourier_symptr function as a FourierEvaluationProblem with
+    # specialized batched input type
+    w = workspace_allocate(f, period(f), exec isa SerialExecutor ? ntuple(_->1,ndim) : ntuple(n->n==d ? exec.ntasks : 1, ndim))
+    return FourierMonkhorstPack(w, T, ndim, npt, syms)
+end
+
 # indexing
 Base.getindex(rule::FourierMonkhorstPack, i::Int) = rule.wxs[i]
 
@@ -311,31 +318,32 @@ end
 
 # rule definition
 
-struct FourierMonkhorstPackRule{S,M}
+struct FourierMonkhorstPackRule{S,M,E}
     s::S
     m::M
+    executor::E
 end
 
-function FourierMonkhorstPackRule(s, syms, a, nmin, nmax, n₀, Δn)
+function FourierMonkhorstPackRule(s, syms, a, nmin, nmax, n₀, Δn, exec)
     mp = AutoSymPTR.MonkhorstPackRule(syms, a, nmin, nmax, n₀, Δn)
-    return FourierMonkhorstPackRule(s, mp)
+    return FourierMonkhorstPackRule(s, mp, exec)
 end
 AutoSymPTR.nsyms(r::FourierMonkhorstPackRule) = AutoSymPTR.nsyms(r.m)
 
 function (r::FourierMonkhorstPackRule)(::Type{T}, v::Val{d}) where {T,d}
     if r.m.syms isa Nothing
-        FourierPTR(r.s, T, v, r.m.n₀)
+        FourierPTR(r.s, T, v, r.m.n₀, r.executor)
     else
-        FourierMonkhorstPack(r.s, T, v, r.m.n₀, r.m.syms)
+        FourierMonkhorstPack(r.s, T, v, r.m.n₀, r.m.syms, r.executor)
     end
 end
 
 function AutoSymPTR.nextrule(p::FourierPTR{d,T}, r::FourierMonkhorstPackRule) where {d,T}
-    return FourierPTR(r.s, T, Val(d), length(p.p.x)+r.m.Δn)
+    return FourierPTR(r.s, T, Val(d), length(p.p.x)+r.m.Δn, r.executor)
 end
 
 function AutoSymPTR.nextrule(p::FourierMonkhorstPack{d,W,T}, r::FourierMonkhorstPackRule) where {d,W,T}
-    return FourierMonkhorstPack(r.s, T, Val(d), p.npt+r.m.Δn, r.m.syms)
+    return FourierMonkhorstPack(r.s, T, Val(d), p.npt+r.m.Δn, r.m.syms, r.executor)
 end
 
 # dispatch on PTR algorithms
@@ -344,12 +352,9 @@ function init_fourier_rule(f::AbstractFourierSeries, dom, alg::MonkhorstPack, ex
     @assert ndims(f) == ndims(dom)
     if alg.syms === nothing
         return FourierPTR(f, eltype(dom), Val(ndims(dom)), alg.npt, exec)
+    else
+        return FourierMonkhorstPack(f, eltype(dom), Val(ndims(dom)), alg.npt, alg.syms, exec)
     end
-    # if alg.syms === nothing
-    #     return FourierPTR(f, eltype(dom), Val(ndims(dom)), alg.npt)
-    # else
-    #     return FourierMonkhorstPack(w, eltype(dom), Val(ndims(dom)), alg.npt, alg.syms)
-    # end
 end
 function fourier_to_partial(func::FourierIntegralFunction)
     IntegralFunction(func.prototype, func.executor) do _x, p
@@ -367,12 +372,12 @@ end
 struct FourierDomain{F,D,E}
     f::F
     dom::D
-    exec::E
+    executor::E
 end
 Base.ndims(dom::FourierDomain) = ndims(dom.dom)
 Base.eltype(::Type{FourierDomain{F,D,E}}) where {F,D,E} = eltype(D) # ? FourierValue{eltype(D),?eltype(F)}
 function init_rule(dom::FourierDomain, alg::MonkhorstPack)
-    return init_fourier_rule(dom.f, dom.dom, alg, dom.exec)
+    return init_fourier_rule(dom.f, dom.dom, alg, dom.executor)
 end
 function get_prototype(dom::FourierDomain)
     x = get_prototype(dom.dom)
@@ -386,9 +391,9 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom , p, alg::Monkhor
     return (; rule, algorithm_cacheval, integrand_cacheval=(g, integrand_cacheval))
 end
 
-function init_fourier_rule(w::FourierWorkspace, dom, alg::AutoSymPTRJL)
-    @assert ndims(w.series) == ndims(dom)
-    return FourierMonkhorstPackRule(w, alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
+function init_fourier_rule(f::AbstractFourierSeries, dom, alg::AutoSymPTRJL, exec)
+    @assert ndims(f) == ndims(dom)
+    return FourierMonkhorstPackRule(f, alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn, exec)
 end
 function init_fourier_rule(w::FourierWorkspace, dom::RepBZ, alg::AutoSymPTRJL)
     B = get_basis(dom)
@@ -397,8 +402,7 @@ function init_fourier_rule(w::FourierWorkspace, dom::RepBZ, alg::AutoSymPTRJL)
 end
 function init_rule(dom::FourierDomain, alg::AutoSymPTRJL)
     # TODO smarter parallelization of init_fourier_rule
-    w = workspace_allocate(dom.f, period(dom.f))
-    return init_fourier_rule(w, dom.dom, alg)
+    return init_fourier_rule(dom.f, dom.dom, alg, dom.executor)
 end
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
     g = fourier_to_partial(f)
@@ -515,10 +519,9 @@ function init_fourierevalcache(f::AbstractFourierSeries, x::BatchArray, exec::Th
     # the output array above would not work for inplace series
     return (channel, out)
 end
-Base.similar(p::AutoSymPTR.PTR{N}, ::Type{T}=eltype(p), dims::NTuple{N,Int}=size(p)) where {N,T} = Array{T}(undef, dims)
 
 function solve!(solver::FourierEvaluationSolver)
-    return solve_fourierevalcache!(solver.cacheval, solver.f, solver.x isa BatchArray ? solver.x : solver.Tuple(solver.x), solver.alg.exec)
+    return solve_fourierevalcache!(solver.cacheval, solver.f, solver.x isa BatchArray ? solver.x : Tuple(solver.x), solver.alg.exec)
 end
 function solve_fourierevalcache!(cacheval, f::AbstractFourierSeries, x::Tuple, exec::AbstractExecutor)
     nd = ndims(f)
@@ -534,10 +537,6 @@ function solve_fourierevalcache!(cacheval, f::AbstractFourierSeries, x::Tuple, e
     end
 end
 function solve_fourierevalcache!((cacheval, out), f::AbstractFourierSeries, x::BatchArray, exec::AbstractExecutor)
-    # for i in eachindex(x.data)
-    #     xi = x.data[i]
-    #     out[i] = solve_fourierevalcache!(cacheval, f, Tuple(xi), exec)
-    # end
     batchsolve_fourierevalcache!(out, cacheval, f, x.data, exec)
 end
 function batchsolve_fourierevalcache!(out, cacheval, f, x::ProductArray, exec::SerialExecutor)
@@ -662,15 +661,16 @@ function nested_innerfourierintegralfunction(f::FourierIntegralFunction, x0, ser
     proto = get_prototype(f, x0, p)
 
     prob = FourierEvaluationProblem(series, x1)
-    alg = FourierEvaluationAlgorithm()
+    alg = FourierEvaluationAlgorithm(SerialExecutor())
 
     _f = f.f
-    func = CommonSolveIntegralFunction(prob, alg, proto) do solver, x, (; series, p, state)
+    exec = f.executor
+    func = CommonSolveIntegralFunction(prob, alg, proto, DefaultSpecialize(), exec) do solver, x, (; series, p, state)
         # solver.x = x
         # solver.f = p.series
         # sol = solve!(solver)
         ## using out-of-place semantics can be faster
-        sol = solve_fourierevalcache!(solver.cacheval, series, Tuple(x))
+        sol = solve_fourierevalcache!(solver.cacheval, series, Tuple(x), SerialExecutor())
         return _f(SVector(promote(x, state...)), sol, p)
     end
     return func
@@ -678,18 +678,18 @@ end
 function nested_innerfourierintegralfunction(f::CommonSolveFourierIntegralFunction, x0, series, x1, p)
     return nested_innerfourierintegralfunction_cs(f.executor, f, x0, series, x1, p)
 end
-function nested_innerfourierintegralfunction_cs(::SerialExecutor, f, x0, series, x1, p)
+function nested_innerfourierintegralfunction_cs(exec::SerialExecutor, f, x0, series, x1, p)
     proto = get_prototype(f, x0, p)
 
     prob = FourierEvaluationProblem(series, x1)
-    alg = FourierEvaluationAlgorithm()
+    alg = FourierEvaluationAlgorithm(exec)
     input = (; x=x0, x1, series, p)
     cprob = ComposedCommonSolveProblem(input, prob, f.prob) do (; x, x1, p, series), fouriersolver, fsolver
         # fouriersolver.f = series
         # fouriersolver.x = x1
         # s = solve!(fouriersolver)
         ## for performance, eliding the setfield! call is helpful for small fourier series
-        s = FourierSeriesEvaluators.evaluate!(fouriersolver.cacheval, series, x1)
+        s = FourierSeriesEvaluators.evaluate!(fouriersolver.cacheval, series, x1, exec)
         return f.solve!(fsolver, x, s, p)
     end
 
