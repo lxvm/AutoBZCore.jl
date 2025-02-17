@@ -17,10 +17,12 @@ end
 function init_integrand_cacheval_if(exec::ThreadedExecutor, f::IntegralFunction, dom, p)
     prototype = get_prototype(f, get_prototype(dom), p)
     proto = [prototype]
-    func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, p
-        @sync for (iy, xi) in zip(eachindex(y), x)
-            Threads.@spawn begin
-                y[iy] = f.f(xi, p)
+    func = InplaceBatchIntegralFunction(proto; max_batch=1_000_000*exec.ntasks) do y, x, p
+        d, r = divrem(size(x)[end], exec.ntasks)
+        @sync for n in 1:exec.ntasks
+            chunk = ((n-1)*d+(n > r ? r : n-1)):(n*d-1+(n > r ? r : n))
+            Threads.@spawn for i in chunk
+                y[begin+i] = f.f(x[begin+i], p)
             end
         end
     end
@@ -52,7 +54,7 @@ end
 function init_integrand_integrand_cacheval_cs(exec::ThreadedExecutor, f::CommonSolveIntegralFunction, dom, p)
     channel, integrand, prototype = init_commonsolvefunction(f, dom, p)
     proto = [prototype]
-    func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, p
+    func = InplaceBatchIntegralFunction(proto; max_batch=1_000_000*exec.ntasks) do y, x, p
         do_threaded_solve!(integrand, channel, f, y, x, p)
     end
     _prototype, _cacheval = init_integrand_cacheval(func, dom, p)

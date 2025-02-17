@@ -46,10 +46,6 @@ function _get_prototype(f::FourierIntegralFunction, x, ws, p)
 end
 get_prototype(f::FourierIntegralFunction, x, p) = _get_prototype(f, x, f.s, p)
 
-function get_fourierworkspace(f::AbstractFourierIntegralFunction)
-    f.s isa FourierWorkspace ? f.s : FourierSeriesEvaluators.workspace_allocate(f.alias ? f.s : deepcopy(f.s), FourierSeriesEvaluators.period(f.s))
-end
-
 # TODO implement FourierInplaceIntegrand FourierInplaceBatchIntegrand
 
 """
@@ -177,56 +173,23 @@ struct FourierPTR{N,T,S,X} <: AbstractArray{Tuple{AutoSymPTR.One,FourierValue{SV
     p::AutoSymPTR.PTR{N,T,X}
 end
 
-function fourier_ptr!(vals::AbstractArray{T,1}, w::FourierWorkspace, x::AbstractVector) where {T}
-    t = period(w.series, 1)
-    if length(w.cache) === 1
-        for (i, y) in zip(eachindex(vals), x)
-            @inbounds vals[i] = workspace_evaluate!(w, t*y)
-        end
-    else
-        # we batch for memory locality in vals array on each thread
-        Threads.@threads for (vrange, ichunk) in chunks(axes(vals, 1), length(w.cache), :batch)
-            for i in vrange
-                @inbounds vals[i] = workspace_evaluate!(w, t*x[i], ichunk)
-            end
-        end
-    end
-    return vals
-end
-function fourier_ptr!(vals::AbstractArray{T,d}, w::FourierWorkspace, x::AbstractVector) where {T,d}
-    t = period(w.series, d)
-    if length(w.cache) === 1
-        for (y, v) in zip(x, eachslice(vals, dims=d))
-            fourier_ptr!(v, workspace_contract!(w, t*y), x)
-        end
-    else
-        # we batch for memory locality in vals array on each thread
-        Threads.@threads for (vrange, ichunk) in chunks(axes(vals, d), length(w.cache), :batch)
-            for i in vrange
-                ws = workspace_contract!(w, t*x[i], ichunk)
-                fourier_ptr!(view(vals, ntuple(_->(:),Val(d-1))..., i), ws, x)
-            end
-        end
-    end
-    return vals
-end
 
-function FourierPTR(w::FourierWorkspace, ::Type{T}, ndim, npt) where {T}
-    FourierSeriesEvaluators.isinplace(w.series) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
-    # unitless quadrature weight/node, but unitful value to Fourier series
-    p = AutoSymPTR.PTR(typeof(float(real(one(T)))), ndim, npt)
-    s = workspace_evaluate(w, ntuple(_->zero(T), ndim))
-    vals = similar(p, typeof(s))
-    fourier_ptr!(vals, w, p.x)
-    return FourierPTR(vals, p)
+struct ProductArray{T,N,X<:NTuple{N,<:AbstractVector{T}}} <: AbstractArray{T,N}
+    xs::X
 end
+Base.size(p::ProductArray) = map(length, p.xs)
+Base.getindex(p::ProductArray{T,N}, idx::Vararg{Int,N}) where {T,N} = SVector{N,T}(map(getindex, p.xs, idx))
 
-function FourierPTR(f::AbstractFourierSeries, ::Type{T}, ndim, npt) where {T}
+Base.IteratorSize(::Type{<:ProductArray{T,N}}) where {T,N} = Base.HasShape{N}()
+Base.size(p::ProductArray, dim) = length(p.xs[dim])
+Base.axes(p::ProductArray) = map(eachindex, p.xs)
+
+function FourierPTR(f::AbstractFourierSeries, ::Type{T}, ndim, npt, exec) where {T}
     FourierSeriesEvaluators.isinplace(f) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
     # unitless quadrature weight/node, but unitful value to Fourier series
     p = AutoSymPTR.PTR(typeof(float(real(one(T)))), ndim, npt)
-    prob = FourierEvaluationProblem(f, BatchedArray(p))
-    vals = solve(prob, FourierEvaluationAlgorithm())
+    prob = FourierEvaluationProblem(f, BatchArray(ProductArray(ntuple(_->p.x,ndim))))
+    vals = solve(prob, FourierEvaluationAlgorithm(exec))
     return FourierPTR(vals, p)
 end
 
@@ -377,17 +340,11 @@ end
 
 # dispatch on PTR algorithms
 
-function init_fourier_rule(w::FourierWorkspace, dom, alg::MonkhorstPack)
-    @assert ndims(w.series) == ndims(dom)
+function init_fourier_rule(f::AbstractFourierSeries, dom, alg::MonkhorstPack, exec)
+    @assert ndims(f) == ndims(dom)
     if alg.syms === nothing
-        return FourierPTR(w, eltype(dom), Val(ndims(dom)), alg.npt)
-    else
-        return FourierMonkhorstPack(w, eltype(dom), Val(ndims(dom)), alg.npt, alg.syms)
+        return FourierPTR(f, eltype(dom), Val(ndims(dom)), alg.npt, exec)
     end
-end
-
-function init_fourier_rule(f::AbstractFourierSeries, dom, alg::MonkhorstPack)
-    @assert ndims(w.series) == ndims(dom)
     # if alg.syms === nothing
     #     return FourierPTR(f, eltype(dom), Val(ndims(dom)), alg.npt)
     # else
@@ -395,7 +352,7 @@ function init_fourier_rule(f::AbstractFourierSeries, dom, alg::MonkhorstPack)
     # end
 end
 function fourier_to_partial(func::FourierIntegralFunction)
-    IntegralFunction(func.prototype) do _x, p
+    IntegralFunction(func.prototype, func.executor) do _x, p
         _x isa FourierValue || throw(ArgumentError("expected a FourierValue"))
         return func.f(_x.x, _x.s, p)
     end
@@ -407,16 +364,15 @@ function fourier_to_partial(func::CommonSolveFourierIntegralFunction)
     end
 end
 
-struct FourierDomain{F,D}
+struct FourierDomain{F,D,E}
     f::F
     dom::D
+    exec::E
 end
 Base.ndims(dom::FourierDomain) = ndims(dom.dom)
-Base.eltype(::Type{FourierDomain{F,D}}) where {F,D} = eltype(D) # ? FourierValue{eltype(D),?eltype(F)}
+Base.eltype(::Type{FourierDomain{F,D,E}}) where {F,D,E} = eltype(D) # ? FourierValue{eltype(D),?eltype(F)}
 function init_rule(dom::FourierDomain, alg::MonkhorstPack)
-    # TODO smarter parallelization of init_fourier_rule
-    w = workspace_allocate(dom.f, period(dom.f))
-    return init_fourier_rule(w, dom.dom, alg)
+    return init_fourier_rule(dom.f, dom.dom, alg, dom.exec)
 end
 function get_prototype(dom::FourierDomain)
     x = get_prototype(dom.dom)
@@ -426,7 +382,7 @@ get_basis(dom::FourierDomain) = get_basis(dom.dom)
 
 function init_cacheval(f::AbstractFourierIntegralFunction, dom , p, alg::MonkhorstPack; kws...)
     g = fourier_to_partial(f)
-    (; rule, algorithm_cacheval, integrand_cacheval) = init_cacheval(g, FourierDomain(f.s, dom), p, alg; kws...)
+    (; rule, algorithm_cacheval, integrand_cacheval) = init_cacheval(g, FourierDomain(f.s, dom, f.executor), p, alg; kws...)
     return (; rule, algorithm_cacheval, integrand_cacheval=(g, integrand_cacheval))
 end
 
@@ -446,7 +402,7 @@ function init_rule(dom::FourierDomain, alg::AutoSymPTRJL)
 end
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::AutoSymPTRJL; kws...)
     g = fourier_to_partial(f)
-    (; rule_cache, rule, algorithm_cacheval, integrand_cacheval) = init_cacheval(g, FourierDomain(f.s, dom), p, alg; kws...)
+    (; rule_cache, rule, algorithm_cacheval, integrand_cacheval) = init_cacheval(g, FourierDomain(f.s, dom, f.executor), p, alg; kws...)
     return (; rule_cache, rule, algorithm_cacheval, integrand_cacheval=(g, integrand_cacheval))
 end
 
@@ -507,7 +463,10 @@ struct FourierEvaluationProblem{F<:AbstractFourierSeries,X,K}
     kwargs::K
 end
 FourierEvaluationProblem(f::AbstractFourierSeries, x, alias=false; kws...) = FourierEvaluationProblem(f, x, alias, kws)
-struct FourierEvaluationAlgorithm end
+struct FourierEvaluationAlgorithm{E}
+    exec::E
+end
+FourierEvaluationAlgorithm(; exec=SerialExecutor()) = FourierEvaluationAlgorithm(exec)
 mutable struct FourierEvaluationSolver{F,X,A,C,K}
     f::F
     x::X
@@ -517,11 +476,11 @@ mutable struct FourierEvaluationSolver{F,X,A,C,K}
 end
 function init(prob::FourierEvaluationProblem, alg::FourierEvaluationAlgorithm; kws...)
     kwargs = (; prob.kwargs..., kws...)
-
-    cacheval = init_fourierevalcache(prob.f |> (prob.alias ? identity : deepcopy), Tuple(prob.x))
+    FourierSeriesEvaluators.isinplace(prob.f) && throw(ArgumentError("Cannot evaluate an inplace Fourier series. Please file a bug report"))
+    cacheval = init_fourierevalcache(prob.f |> (prob.alias ? identity : deepcopy), prob.x isa BatchArray ? prob.x : Tuple(prob.x), alg.exec)
     return FourierEvaluationSolver(prob.f, prob.x, alg, cacheval, kwargs)
 end
-function init_fourierevalcache(f::AbstractFourierSeries, x::Tuple)
+function init_fourierevalcache(f::AbstractFourierSeries, x::Tuple, exec::AbstractExecutor)
     nd = ndims(f)
     vd = Val(nd)
     xd = x[nd]
@@ -529,15 +488,39 @@ function init_fourierevalcache(f::AbstractFourierSeries, x::Tuple)
         return (FourierSeriesEvaluators.allocate(f, xd, vd),)
     else
         solver = init(FourierEliminationProblem(f, xd, vd), FourierEliminationAlgorithm())
-        return (init_fourierevalcache(solve!(solver), x[1:nd-1])..., solver)
+        return (init_fourierevalcache(solve!(solver), x[1:nd-1], exec)..., solver)
     end
 end
-
+_firstpoint(x) = first(x)
+function init_fourierevalcache(f::AbstractFourierSeries, x::BatchArray, exec::SerialExecutor)
+    # serial execution only needs the memory for a single evaluator
+    x1 = _firstpoint(x.data)
+    solver = init_fourierevalcache(f, Tuple(x1), exec)
+    sol = solve_fourierevalcache!(solver, f, Tuple(x1), exec)
+    out = similar(x.data, typeof(sol))
+    # the output array above would not work for inplace series
+    return (solver, out)
+end
+function init_fourierevalcache(f::AbstractFourierSeries, x::BatchArray, exec::ThreadedExecutor)
+    # threaded execution needs multiple solvers
+    # heuristically, we assume that the workload can be distributed uniformly over the
+    # outermost variable (otherwise an adaptive scheme is possible like for IAI)
+    x1 = _firstpoint(x.data)
+    channel = fillchannel(exec) do
+        init_fourierevalcache(f, Tuple(x1), exec)
+    end
+    solver = first(channel)
+    sol = solve_fourierevalcache!(solver, f, Tuple(x1), exec)
+    out = similar(x.data, typeof(sol))
+    # the output array above would not work for inplace series
+    return (channel, out)
+end
+Base.similar(p::AutoSymPTR.PTR{N}, ::Type{T}=eltype(p), dims::NTuple{N,Int}=size(p)) where {N,T} = Array{T}(undef, dims)
 
 function solve!(solver::FourierEvaluationSolver)
-    return solve_fourierevalcache!(solver.cacheval, solver.f, Tuple(solver.x))
+    return solve_fourierevalcache!(solver.cacheval, solver.f, solver.x isa BatchArray ? solver.x : solver.Tuple(solver.x), solver.alg.exec)
 end
-function solve_fourierevalcache!(cacheval, f::AbstractFourierSeries, x::Tuple)
+function solve_fourierevalcache!(cacheval, f::AbstractFourierSeries, x::Tuple, exec::AbstractExecutor)
     nd = ndims(f)
     vd = Val(nd)
     xd = x[nd]
@@ -547,8 +530,49 @@ function solve_fourierevalcache!(cacheval, f::AbstractFourierSeries, x::Tuple)
     else
         cache.f = f
         cache.x = xd
-        return solve_fourierevalcache!(cacheval[1:nd-1], solve!(cache), x[1:nd-1])
+        return solve_fourierevalcache!(cacheval[1:nd-1], solve!(cache), x[1:nd-1], exec)
     end
+end
+function solve_fourierevalcache!((cacheval, out), f::AbstractFourierSeries, x::BatchArray, exec::AbstractExecutor)
+    # for i in eachindex(x.data)
+    #     xi = x.data[i]
+    #     out[i] = solve_fourierevalcache!(cacheval, f, Tuple(xi), exec)
+    # end
+    batchsolve_fourierevalcache!(out, cacheval, f, x.data, exec)
+end
+function batchsolve_fourierevalcache!(out, cacheval, f, x::ProductArray, exec::SerialExecutor)
+    nd = ndims(x)
+    vd = Val(nd)
+    if nd == 1
+        for (i,xi) in zip(eachindex(out), x.xs[1])
+            out[i] = solve_fourierevalcache!(cacheval, f, Tuple(xi), exec)
+        end
+    else
+        solver = cacheval[nd]
+        for (i,ix) in zip(axes(out)[nd], axes(x)[nd])
+            solver.f = f
+            solver.x = x.xs[nd][ix]
+            g = solve!(solver)
+            batchsolve_fourierevalcache!(view(out, ntuple(_->(:), Val(nd-1))..., i), cacheval[1:nd-1], g, ProductArray(x.xs[1:nd-1]), exec)
+        end
+    end
+    return out
+end
+function batchsolve_fourierevalcache!(out, channel, f::AbstractFourierSeries, x::ProductArray, exec::ThreadedExecutor)
+    # partition ProductArray into exec.ntasks chunks and then launch work
+    d, r = divrem(size(x)[end], exec.ntasks)
+    ix = firstindex(axes(x)[end])
+    io = firstindex(axes(out)[end])
+    for n in 1:exec.ntasks
+        chunk = ((n-1)*d+(n > r ? r : n-1)):(n*d-1+(n > r ? r : n))
+        cacheval = take!(channel)
+        Threads.@spawn begin
+            nd = ndims(x)
+            batchsolve_fourierevalcache!(view(out, ntuple(_->(:),Val(nd-1))..., chunk .+ io), cacheval, f, ProductArray((ntuple(n->x.xs[n],Val(nd-1))..., x.xs[nd][chunk .+ ix])), SerialExecutor())
+            put!(channel, cacheval)
+        end
+    end
+    return out
 end
 
 # Nested quadrature with special series evaluation on a hierarchical grid
