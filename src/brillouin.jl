@@ -387,13 +387,11 @@ function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm; kws..
     return init(prob, alg)
 end
 
-function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; _kws...)
+function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; kws...)
     j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
-    kws = NamedTuple(_kws)
     cacheval.f = f
     cacheval.p = p
-    cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol = kws.abstol / (j * nsyms(bz)),)) : kws
-
+    cacheval.kwargs = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol] / (j * nsyms(bz))) : (; kws...)
     sol = solve!(cacheval)
     value = j * symmetrize(rep, bz, sol.value)
     stats = (; sol.stats...)
@@ -474,7 +472,9 @@ get_prototype(dom::RepBZ) = get_prototype(dom.bz)
 
 
 function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoPTR; kws...)
-    prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
+    j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
+    kwargs = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol] / (j * nsyms(bz))) : (; kws...)
+    prob = IntegralProblem(f, RepBZ(rep, bz), p; kwargs...)
     alg = AutoSymPTRJL(norm=bzalg.norm, a=bzalg.a, nmin=bzalg.nmin, nmax=bzalg.nmax, n₀=bzalg.n₀, Δn=bzalg.Δn, keepmost=bzalg.keepmost, syms=bz.syms)
     return init(prob, alg)
 end
@@ -486,12 +486,11 @@ function init_rule(dom::RepBZ, alg::AutoSymPTRJL)
 end
 # The spectral convergence of the PTR for integrands with non-trivial symmetry action
 # requires symmetrizing inside the quadrature
-function do_solve_autobz(rep, f, bz, p, bzalg::AutoPTR, cacheval; _kws...)
+function do_solve_autobz(rep, f, bz, p, bzalg::AutoPTR, cacheval; kws...)
     j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
-    kws = NamedTuple(_kws)
     cacheval.f = f
     cacheval.p = p
-    cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol = kws.abstol / j,)) : kws
+    cacheval.kwargs = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol] / (j * nsyms(bz))) : (; kws...)
 
     sol = solve!(cacheval)
     value = j * sol.value

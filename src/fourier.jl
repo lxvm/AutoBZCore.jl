@@ -395,9 +395,9 @@ function init_fourier_rule(f::AbstractFourierSeries, dom, alg::AutoSymPTRJL, exe
     @assert ndims(f) == ndims(dom)
     return FourierMonkhorstPackRule(f, alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn, exec)
 end
-function init_fourier_rule(w::FourierWorkspace, dom::RepBZ, alg::AutoSymPTRJL)
+function init_fourier_rule(f::AbstractFourierSeries, dom::RepBZ, alg::AutoSymPTRJL, exec)
     B = get_basis(dom)
-    rule = init_fourier_rule(w, B, alg)
+    rule = init_fourier_rule(f, B, alg, exec)
     return SymmetricRuleDef(rule, dom.rep, dom.bz)
 end
 function init_rule(dom::FourierDomain, alg::AutoSymPTRJL)
