@@ -285,7 +285,7 @@ function FourierMonkhorstPack(w::FourierWorkspace, ::Type{T}, ndim::Val{d}, npt,
     # unitless quadrature weight/node, but unitful value to Fourier series
     FourierSeriesEvaluators.isinplace(w.series) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
     u = AutoSymPTR.ptrpoints(typeof(float(real(one(T)))), npt)
-    s = w(map(*, period(w.series), ntuple(_->zero(T), ndim)))
+    s = w(map(*, period(w.series), ntuple(_->zero(eltype(u)), ndim)))
     # the bottleneck is likely to be symptr_rule, which is not a fast or parallel algorithm
     wsym, flags, nsym = AutoSymPTR.symptr_rule(npt, ndim, syms)
     wxs = Vector{Tuple{eltype(wsym),FourierValue{SVector{d,eltype(u)},typeof(s)}}}(undef, nsym)
