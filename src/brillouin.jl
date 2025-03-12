@@ -103,7 +103,7 @@ Base.iterate(r::SymmetricRule, args...) = iterate(r.rule, args...)
 function (r::SymmetricRule)(f::F, args...) where {F}
     out = r.rule(f, args...)
     val = symmetrize(r.rep, r.bz, out)
-    return val
+    return val/nsyms(r.bz)
 end
 
 struct SymmetricRuleDef{R, U, B}
@@ -382,8 +382,8 @@ end
 
 function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm; kws...)
     j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
-    kwargs = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol] / (j * nsyms(bz))) : (; kws...)
-    prob, alg = bz_to_standard(f, bz, p, bzalg; kwargs...)
+    kwargs = haskey(kws, :abstol) ? (; kws..., abstol=@show(kws[:abstol] / (j * nsyms(bz)))) : (; kws...)
+    prob, alg = bz_to_standard(rep, f, bz, p, bzalg; kwargs...)
     return init(prob, alg)
 end
 
@@ -419,7 +419,7 @@ struct IAI{T,S,E} <: AutoBZAlgorithm
 end
 IAI(algs::IntegralAlgorithm...) = IAI(algs)
 
-function bz_to_standard(f, bz, p, bzalg::IAI; kws...)
+function bz_to_standard(rep, f, bz, p, bzalg::IAI; kws...)
     return IntegralProblem(f, bz.lims, p; kws...), NestedQuad(bzalg.algs, bzalg.specialize, bzalg.executor)
 end
 
@@ -435,7 +435,7 @@ struct PTR <: AutoBZAlgorithm
 end
 PTR(; npt=50) = PTR(npt)
 
-function bz_to_standard(f, bz, p, alg::PTR; kws...)
+function bz_to_standard(rep, f, bz, p, alg::PTR; kws...)
     return IntegralProblem(f, canonical_ptr_basis(bz.B), p; kws...), MonkhorstPack(npt=alg.npt, syms=bz.syms)
 end
 
@@ -469,15 +469,13 @@ end
 Base.ndims(dom::RepBZ) = ndims(dom.bz)
 Base.eltype(::Type{RepBZ{R, B}}) where {R, B} = eltype(B)
 get_prototype(dom::RepBZ) = get_prototype(dom.bz)
-
-
-function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoPTR; kws...)
-    j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
-    kwargs = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol] / (j * nsyms(bz))) : (; kws...)
-    prob = IntegralProblem(f, RepBZ(rep, bz), p; kwargs...)
-    alg = AutoSymPTRJL(norm=bzalg.norm, a=bzalg.a, nmin=bzalg.nmin, nmax=bzalg.nmax, n₀=bzalg.n₀, Δn=bzalg.Δn, keepmost=bzalg.keepmost, syms=bz.syms)
-    return init(prob, alg)
+symmetrize(rep, bz::RepBZ, x) = symmetrize_(TrivialRep(), bz, x)
+function bz_to_standard(rep, f, bz, p, alg::AutoPTR; kws...)
+    prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
+    alg = AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms)
+    return prob, alg
 end
+
 get_basis(dom::RepBZ) = canonical_ptr_basis(dom.bz.B)
 function init_rule(dom::RepBZ, alg::AutoSymPTRJL)
     B = get_basis(dom)
@@ -486,17 +484,7 @@ function init_rule(dom::RepBZ, alg::AutoSymPTRJL)
 end
 # The spectral convergence of the PTR for integrands with non-trivial symmetry action
 # requires symmetrizing inside the quadrature
-function do_solve_autobz(rep, f, bz, p, bzalg::AutoPTR, cacheval; kws...)
-    j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
-    cacheval.f = f
-    cacheval.p = p
-    cacheval.kwargs = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol] / (j * nsyms(bz))) : (; kws...)
 
-    sol = solve!(cacheval)
-    value = j * sol.value
-    stats = (; sol.stats..., error = sol.stats.error * j)
-    return IntegralSolution(value, sol.retcode, stats)
-end
 
 
 """
@@ -512,7 +500,7 @@ struct TAI{N} <: AutoBZAlgorithm
 end
 TAI(; norm = norm, initdiv = 1) = TAI(norm, initdiv)
 
-function bz_to_standard(f, bz, p, alg::TAI; kws...)
+function bz_to_standard(rep, f, bz, p, alg::TAI; kws...)
     @assert bz.lims isa CubicLimits "TAI can only integrate rectangular regions"
     return IntegralProblem(f, HyperCube(bz.lims.a, bz.lims.b), p; kws...), HCubatureJL(norm = alg.norm, initdiv = alg.initdiv)
 end
@@ -520,44 +508,8 @@ end
 struct AutoBZEvalCounter{T <: AutoBZAlgorithm} <: AutoBZAlgorithm
     alg::T
 end
-function bz_to_standard(f, bz, p, bzalg::AutoBZEvalCounter; kws...)
-    prob, alg = bz_to_standard(f, bz, p, bzalg.alg; kws...)
+function bz_to_standard(rep, f, bz, p, bzalg::AutoBZEvalCounter; kws...)
+    prob, alg = bz_to_standard(rep, f, bz, p, bzalg.alg; kws...)
     return prob, EvalCounter(alg)
 end
 EvalCounter(alg::AutoBZAlgorithm) = AutoBZEvalCounter(alg)
-#=
-"""
-    PTR_IAI(; ptr=PTR(), iai=IAI())
-
-Multi-algorithm that returns an `IAI` calculation with an `abstol` determined
-from the given `reltol` and a `PTR` estimate, `I`, as `reltol*norm(I)`.
-This addresses the issue that `IAI` does not currently use a globally-adaptive
-algorithm and may not have the expected scaling with localization length unless
-an `abstol` is used since computational effort may be wasted via a `reltol` with
-the naive `nested_quadgk`.
-"""
-PTR_IAI(; ptr=PTR(), iai=IAI(), kws...) = AbsoluteEstimate(ptr, iai; kws...)
-
-
-"""
-    AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI())
-
-Multi-algorithm that returns an `IAI` calculation with an `abstol` determined
-from an `AutoPTR` estimate, `I`, computed to `reltol` precision, and the `rtol`
-given to the solver as `abstol=rtol*norm(I)`.
-This addresses the issue that `IAI` does not currently use a globally-adaptive
-algorithm and may not have the expected scaling with localization length unless
-an `abstol` is used since computational effort may be wasted via a `reltol` with
-the naive `nested_quadgk`.
-"""
-AutoPTR_IAI(; reltol=1.0, ptr=AutoPTR(), iai=IAI(), kws...) = AbsoluteEstimate(ptr, iai; reltol=reltol, kws...)
-
-function count_bz_to_standard(bz, alg)
-    _bz, dom, _alg = bz_to_standard(bz, alg)
-    return _bz, dom, EvalCounter(_alg)
-end
-
-function do_solve(f, bz::SymmetricBZ, p, alg::EvalCounter{<:AutoBZAlgorithm}, cacheval; kws...)
-    return do_solve_autobz(count_bz_to_standard, f, bz, p, alg.alg, cacheval; kws...)
-end
-=#
