@@ -434,6 +434,31 @@ function insert_counter(f::CommonSolveFourierIntegralFunction, x, p, channel)
         return solver.solve!((; x, s, p), solver.solvers...)
     end
 end
+function insert_logger(logger::L, f::FourierIntegralFunction, x, p, channel) where {L}
+    prob = LoggerProblem(logger, (x, p); channel)
+    alg = SingleLogger()
+    proto = get_prototype(f, x, p)
+    CommonSolveFourierIntegralFunction(prob, alg, f.s, proto, DefaultSpecialize(), f.executor) do solver, x, s, p
+        solver.args = (x, p)
+        step!(solver)
+        return f.f(x, s, p)
+    end
+end
+function insert_logger(logger::L, f::CommonSolveFourierIntegralFunction, x, p, channel) where {L}
+    input = (; x, p, s=f.s(x))
+    prob = ComposedCommonSolveProblem(input, LoggerProblem(logger, (x, p); channel), f.prob) do (; x, s, p), loggersolver, probsolver
+        loggersolver.args = (x, p)
+        step!(loggersolver)
+        return f.solve!(probsolver, x, s, p)
+    end
+    alg = ComposedCommonSolveAlgorithm(SingleLogger(), f.alg)
+    return CommonSolveFourierIntegralFunction(prob, alg, f.s, f.prototype, f.specialize, f.executor) do solver, x, s, p
+        # solver.input = (; solver.input..., x, s, p)
+        # return solve!(solver)
+        ## using out-of-place semantics can be faster
+        return solver.solve!((; x, s, p), solver.solvers...)
+    end
+end
 
 struct FourierEliminationProblem{F<:AbstractFourierSeries,X,D,K}
     f::F

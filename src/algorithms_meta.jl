@@ -198,18 +198,6 @@ struct EvalCounter{T <: IntegralAlgorithm} <: IntegralAlgorithm
     alg::T
 end
 
-struct CounterFunction{F}
-    counter::Base.RefValue{Int64}
-    f::F
-end
-(f::CounterFunction)(args...; kws...) = (f.counter[] += 1; f.f(args...; kws...))
-struct BatchCounterFunction{F}
-    counter::Base.RefValue{Int64}
-    f::F
-end
-(f::BatchCounterFunction)(y, x, p) = (f.counter[] += size(x)[end]; f.f(y, x, p))
-
-
 struct CounterProblem{K}
     kwargs::K
 end
@@ -298,4 +286,119 @@ function do_integral(f, dom, p, alg::EvalCounter, (g, channel, cacheval); kws...
         numevals += c.counter
     end
     return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., numevals))
+end
+
+
+"""
+    EvalCounter([logger=logpoint], ::IntegralAlgorithm)
+
+An algorithm which logs the inputs to the integrand used by another algorithm.
+`logger` is a function that accepts the inputs to the integrand and outputs an item to store in the log.
+By default, the evaluation point `x` is logged and the parameters are ignored.
+The log is stored in the `sol.stats.evallog` field, an iterator over the items that have been logged.
+"""
+struct EvalLogger{L,T<:IntegralAlgorithm} <: IntegralAlgorithm
+    logger::L
+    alg::T
+end
+EvalLogger(alg::IntegralAlgorithm) = EvalLogger(logpoint, alg)
+logpoint(x, _...) = x
+
+function init_cacheval(f, dom, p, alg::EvalLogger; kws...)
+    channel = Channel{LoggerSolver}(Inf)
+    g = insert_logger(alg.logger, f, get_prototype(dom), p, channel)
+    return g, channel, init_cacheval(g, dom, p, alg.alg; kws...)
+end
+function do_integral(f, dom, p, alg::EvalLogger, (g, channel, cacheval); kws...)
+    for c in channel.data
+        empty!(c.log)
+    end
+    sol = do_integral(g, dom, p, alg.alg, cacheval; kws...)
+    evallog = Iterators.flatten((c.log for c in channel.data))
+    return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., evallog))
+end
+
+struct LoggerProblem{L,A,K}
+    logger::L
+    args::A
+    kwargs::K
+end
+LoggerProblem(logger, args; kws...) = LoggerProblem(logger, args, kws)
+
+mutable struct LoggerSolver{L,A,K,G,X}
+    logger::L
+    args::A
+    kwargs::K
+    alg::G
+    log::Vector{X}
+end
+abstract type LoggerAlgorithm end
+# this could
+struct SingleLogger <: LoggerAlgorithm end
+
+function init(prob::LoggerProblem, alg::LoggerAlgorithm; kws...)
+    kwargs = (; prob.kwargs..., kws...)
+    record = prob.logger(prob.args...)
+    solver = LoggerSolver(prob.logger, prob.args, kwargs, alg, typeof(record)[])
+    if haskey(kwargs, :channel)
+        put!(kwargs.channel, solver)
+    end
+    return solver
+end
+function step!(solver::LoggerSolver)
+    record = solver.logger(solver.args...)
+    push!(solver.log, record)
+    return record
+end
+function insert_logger(logger::L, f::IntegralFunction, x, p, channel) where {L}
+    prob = LoggerProblem(logger, (x, p); channel)
+    alg = SingleLogger()
+    proto = get_prototype(f, x, p)
+    CommonSolveIntegralFunction(prob, alg, proto, DefaultSpecialize(), f.executor) do solver, x, p
+        solver.args = (x, p)
+        step!(solver)
+        return f.f(x, p)
+    end
+end
+
+function insert_logger(logger::L, f::InplaceIntegralFunction, x, p, channel) where {L}
+    prob = LoggerProblem(logger, (x, p); channel)
+    alg = SingleLogger()
+    solver = init(prob, alg)
+    _f = (y, x, p) -> begin
+        solver.args = (x, p)
+        step!(solver)
+        return f.f!(y, x, p)
+    end
+    # TODO return a commonsolve function because this integrand is not thread safe
+    return InplaceIntegralFunction(_f, f.prototype)
+end
+function insert_logger(logger::L, f::InplaceBatchIntegralFunction, x, p, channel) where {L}
+    prob = LoggerProblem(logger, (x, p); channel)
+    alg = SingleLogger()
+    solver = init(prob, alg)
+    _f = (y, x, p) -> begin
+        for i in axes(x)[end]
+            solver.args = (x[ntuple(_->(:),Val(ndims(x)-1))...,i], p)
+            step!(solver)
+        end
+        return f.f!(y, x, p)
+    end
+    # TODO return a commonsolve function because this integrand is not thread safe
+    return InplaceBatchIntegralFunction(_f, f.prototype; max_batch= f.max_batch)
+end
+function insert_logger(logger::L, f::CommonSolveIntegralFunction, x, p, channel) where {L}
+    input = (; x, p)
+    prob = ComposedCommonSolveProblem(input, LoggerProblem(logger, (x, p); channel), f.prob) do (; x, p), loggersolver, probsolver
+        loggersolver.args = (x, p)
+        step!(loggersolver)
+        return f.solve!(probsolver, x, p)
+    end
+    alg = ComposedCommonSolveAlgorithm(SingleLogger(), f.alg)
+    return CommonSolveIntegralFunction(prob, alg, f.prototype, f.specialize, f.executor) do solver, x, p
+        # solver.input = (; solver.input..., x, p)
+        # return solve!(solver)
+        ## using out-of-place semantics can be faster
+        return solver.solve!((; x, p), solver.solvers...)
+    end
 end
