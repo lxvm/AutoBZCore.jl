@@ -12,11 +12,11 @@ stability of the integrand, so you should always pick the widest integration lim
 that inference works properly. For example, if [`ContQuadGKJL`](@ref) is used as an
 algorithm in the nested scheme, then the limits of integration should be made complex.
 """
-struct NestedQuad{T,S} <: IntegralAlgorithm
+struct NestedQuad{T, S} <: IntegralAlgorithm
     algs::T
     specialize::S
-    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization=FunctionWrapperSpecialize()) = new{typeof(alg),typeof(specialize)}(alg, specialize)
-    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->FunctionWrapperSpecialize(), length(algs))) = new{typeof(algs),typeof(specialize)}(algs, specialize)
+    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization = FunctionWrapperSpecialize()) = new{typeof(alg), typeof(specialize)}(alg, specialize)
+    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}} = ntuple(_ -> FunctionWrapperSpecialize(), length(algs))) = new{typeof(algs), typeof(specialize)}(algs, specialize)
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 # TODO add a parallelization option for use when it is safe to do so
@@ -27,8 +27,8 @@ function _update!(cache, x, (; p, lims_state))
     kws = cache.kwargs
     cache.p = p
     cache.cacheval.dom = segs
-    cache.cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
-    cache.cacheval.p = (; cache.cacheval.p..., lims_state=(lims, state))
+    cache.cacheval.kwargs = haskey(kws, :abstol) ? merge(kws, (abstol = kws.abstol / len,)) : kws
+    cache.cacheval.p = (; cache.cacheval.p..., lims_state = (lims, state))
     return
 end
 _postsolve(sol, x, p) = sol.value
@@ -46,15 +46,15 @@ function init_cacheval(f, nextdom, p, alg::NestedQuad; kws...)
         integrand, ws, update!, postsolve = outer_integralfunction(f, x0, p)
         proto = get_prototype(integrand, x0, p)
         a, b, = segs
-        x = (a+b)/2
+        x = (a + b) / 2
         next = (x0[begin:end-1], limit_iterate(lims, state, x))
         kws = NamedTuple(kws)
         len = segs[end] - segs[begin]
-        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol=kws.abstol/len,)) : kws
+        kwargs = haskey(kws, :abstol) ? merge(kws, (abstol = kws.abstol / len,)) : kws
         subprob = IntegralProblem(integrand, next, p; kwargs...)
-        func = CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1], spec[1:ndims(lims)-1]), update!, postsolve, proto*x^(ndims(lims)-1), spec[ndims(lims)])
+        func = CommonSolveIntegralFunction(subprob, NestedQuad(algs[1:ndims(lims)-1], spec[1:ndims(lims)-1]), update!, postsolve, proto * x^(ndims(lims) - 1), spec[ndims(lims)])
     end
-    prob = IntegralProblem(func, segs, (; p, lims_state=(lims, state), ws); kws...)
+    prob = IntegralProblem(func, segs, (; p, lims_state = (lims, state), ws); kws...)
     return init(prob, algs[ndims(lims)])
     # the order of updates is somewhat tricky. I think some could be simplified if instead
     # we use an IntegralProblem modified to contain lims_state, instead of passing the
@@ -131,7 +131,7 @@ end
 An algorithm which counts the evaluations used by another algorithm.
 The count is stored in the `sol.stats.numevals` field.
 """
-struct EvalCounter{T<:IntegralAlgorithm} <: IntegralAlgorithm
+struct EvalCounter{T <: IntegralAlgorithm} <: IntegralAlgorithm
     alg::T
 end
 
@@ -149,7 +149,7 @@ end
 
 insert_counter(f::IntegralFunction, numevals) = IntegralFunction(CounterFunction(numevals, f.f), f.prototype)
 insert_counter(f::InplaceIntegralFunction, numevals) = InplaceIntegralFunction(CounterFunction(numevals, f.f!), f.prototype)
-insert_counter(f::InplaceBatchIntegralFunction, numevals) = InplaceBatchIntegralFunction(BatchCounterFunction(numevals, f.f!), f.prototype; max_batch=f.max_batch)
+insert_counter(f::InplaceBatchIntegralFunction, numevals) = InplaceBatchIntegralFunction(BatchCounterFunction(numevals, f.f!), f.prototype; max_batch = f.max_batch)
 insert_counter(f::CommonSolveIntegralFunction, numevals) = CommonSolveIntegralFunction(f.prob, f.alg, CounterFunction(numevals, f.update!), f.postsolve, f.prototype, f.specialize; f.kwargs...)
 function init_cacheval(f, dom, p, alg::EvalCounter; kws...)
     numevals = Ref(0)
@@ -161,20 +161,20 @@ function do_integral(f, dom, p, alg::EvalCounter, (numevals, cacheval); kws...)
     numevals[] = 0
     g = insert_counter(f, numevals)
     sol = do_integral(g, dom, p, alg.alg, cacheval; kws...)
-    return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., numevals=numevals[]))
+    return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., numevals = numevals[]))
 end
-    # elseif InplaceIntegrand
-    #     ni::Int = 0
-    #     gi = (y, x, p) -> (ni += 1; f.f!(y, x, p))
-    #     soli = do_solve(InplaceIntegrand(gi, f.I), dom, p, alg.alg, cacheval; kws...)
-    #     return IntegralSolution(soli.u, soli.resid, soli.retcode, ni)
-    # elseif f isa BatchIntegrand
-    #     nb::Int = 0
-    #     gb = (y, x, p) -> (nb += length(x); f.f!(y, x, p))
-    #     solb = do_solve(BatchIntegrand(gb, f.y, f.x, max_batch=f.max_batch), dom, p, alg.alg, cacheval; kws...)
-    #     return IntegralSolution(solb.u, solb.resid, solb.retcode, nb)
-    # else
-    #     n::Int = 0
-    #     g = (x, p) -> (n += 1; f(x, p)) # we need let to prevent Core.Box around the captured variable
-    #     sol = do_solve(g, dom, p, alg.alg, cacheval; kws...)
-    #     return IntegralSolution(sol.u, sol.resid, sol.retcode, n)
+# elseif InplaceIntegrand
+#     ni::Int = 0
+#     gi = (y, x, p) -> (ni += 1; f.f!(y, x, p))
+#     soli = do_solve(InplaceIntegrand(gi, f.I), dom, p, alg.alg, cacheval; kws...)
+#     return IntegralSolution(soli.u, soli.resid, soli.retcode, ni)
+# elseif f isa BatchIntegrand
+#     nb::Int = 0
+#     gb = (y, x, p) -> (nb += length(x); f.f!(y, x, p))
+#     solb = do_solve(BatchIntegrand(gb, f.y, f.x, max_batch=f.max_batch), dom, p, alg.alg, cacheval; kws...)
+#     return IntegralSolution(solb.u, solb.resid, solb.retcode, nb)
+# else
+#     n::Int = 0
+#     g = (x, p) -> (n += 1; f(x, p)) # we need let to prevent Core.Box around the captured variable
+#     sol = do_solve(g, dom, p, alg.alg, cacheval; kws...)
+#     return IntegralSolution(sol.u, sol.resid, sol.retcode, n)

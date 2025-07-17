@@ -23,7 +23,7 @@ interpolatory methods.
 struct GGR <: DOSAlgorithm
     npt::Int
 end
-GGR(; npt=50) = GGR(npt)
+GGR(; npt = 50) = GGR(npt)
 
 
 """
@@ -39,10 +39,19 @@ ImplicitIntegrationJL(; kws...) = ImplicitIntegrationJL(kws)
 """
     BCD(npt, α, ΔE)
 
+Brillouin Contour Deformation method was developed in ["Efficient extraction of resonant states 
+in systems with defects"](https://doi.org/10.1016/j.jcp.2023.111928).
+This method requires the Hamiltonian and its first and second order derivatives. 
+It performs a deformation of the Brillouin zone into the complex planes based on
+the first derivative of the Hamiltonian at singularity points. The deformation is controlled by 
+two parameters α and ΔE which scale the deformation around singularity respectively in amplitude and width.
+This method is expected to show exponential convergence and is not highly sensitive 
+to the choice of parameters. Therefore it can be used with default parameters in most cases.
+
 ## Arguments
 - `npt`: the number of k-points per dimension
-- `α`: a scaling parameter for the deformation
-- `ΔE`: a parameter for the cut-off function in the deformation
+- `α`: a scaling parameter for the amplitude of the deformation
+- `ΔE`: a parameter which impacts the width of the deformation at singularities
 """
 struct BCD <: DOSAlgorithm
     npt::Int
@@ -50,4 +59,20 @@ struct BCD <: DOSAlgorithm
     ΔE::Float64
     η::Float64
 end
-BCD(; npt=50, α=0.1/(2π), ΔE=0.9, η=0) = BCD(npt, α, ΔE, η)
+BCD(; npt = 50, α = 0.1 / (2π), ΔE = 0.9, η = 0) = BCD(npt, α, ΔE, η)
+
+"""
+    LT(npt)
+
+Linear Tetrahedron method ["High-precision sampling for Brillouin-zone integration in metals"](https://doi.org/10.1103/PhysRevB.40.3616).
+This method requires Hamiltonian's eigenvalues. It performs a linear interpolation of the eigenvalues on a tetrahedric decomposition
+of the Brillouin zone. Therefore only the eigenvalues are needed at each k-point to perform interpolation. This method is expected to show
+quadratic convergence.
+
+## Arguments
+- `npt`: the number of k-points per dimension
+"""
+struct LT <: DOSAlgorithm
+    npt::Int
+end
+LT(; npt = 50) = LT(npt)

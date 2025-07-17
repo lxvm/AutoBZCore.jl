@@ -49,7 +49,6 @@ AutoBZCore.AutoPTR
 
 Currently the available algorithms are an initial release and we would like to include
 the following reference algorithms that are also common in the literature in a future release:
-- (Linear) Tetrahedron Method
 - Adaptive Gaussian broadening
 
 ```@docs
@@ -57,4 +56,5 @@ AutoBZCore.DOSAlgorithm
 AutoBZCore.GGR
 AutoBZCore.BCD
 AutoBZCore.ImplicitIntegrationJL
+AutoBZCore.LT
 ```

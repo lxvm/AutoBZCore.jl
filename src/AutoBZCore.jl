@@ -84,7 +84,7 @@ export SymmetricBZ, nsyms
 export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, UnknownRep, TrivialRep
 export AutoBZProblem
-export IAI, PTR, AutoPTR, TAI
+export IAI, PTR, AutoPTR, TAI, AutoBZEvalCounter
 include("brillouin.jl")
 
 export FourierIntegralFunction, CommonSolveFourierIntegralFunction
@@ -93,9 +93,9 @@ include("fourier.jl")
 export DOSProblem
 include("dos_interfaces.jl")
 
-export GGR, ImplicitIntegrationJL, BCD
+export GGR, ImplicitIntegrationJL, BCD, LT
 include("dos_algorithms.jl")
 include("dos_ggr.jl")
 include("dos_bcd.jl")
-
+include("dos_lt.jl")
 end
