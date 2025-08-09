@@ -210,7 +210,7 @@ end
 function step_stats!(solver::StatsSolver, args...)
     return stats_step!(solver.cacheval, solver.alg, solver.batch, args...)
 end
-struct SolverStats{A,S} <: IntegralAlgorithm
+struct SolverStats{A <: IntegralAlgorithm, S <: StatsAlgorithm} <: IntegralAlgorithm
     alg::A
     stats::S
 end
@@ -273,8 +273,13 @@ function insert_stats(alg::SolverStats, f::CommonSolveIntegralFunction, x, p, ch
     end
 end
 
+"""
+    EvalCounter(alg::IntegralAlgorithm)
+
+This algorithm wrapper will count the number of function evaluations used by integration algorithm `alg` during a solve. This information is found in the `sol.stats.numevals` field of an `IntegralSolution`.
+"""
 struct EvalCounter <: StatsAlgorithm end
-EvalCounter(alg::IntegralAlgorithm) = SolverStats(alg, EvalCounter())
+EvalCounter(alg) = SolverStats(alg, EvalCounter())
 
 function init_stats_cacheval(::EvalCounter, batch, args...)
     Ref(0)
@@ -308,6 +313,11 @@ function stats_summary(::EvalCounter, channel)
     return (; numevals)
 end
 
+"""
+    EvalLogger(alg::IntegralAlgorithm)
+
+This algorithm wrapper will record the quadrature points used by integration algorithm `alg` during a solve. This information is found in the `sol.stats.evallog` field of an `IntegralSolution`.
+"""
 struct EvalLogger <: StatsAlgorithm end
 EvalLogger(alg) = SolverStats(alg, EvalLogger())
 

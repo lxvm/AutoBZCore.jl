@@ -78,14 +78,14 @@ export AuxQuadGKJL
 include("algorithms_iterated.jl")
 export MonkhorstPack, AutoSymPTRJL
 include("algorithms_autosymptr.jl")
-export NestedQuad, EvalCounter
+export NestedQuad, EvalCounter, EvalLogger
 include("algorithms_meta.jl")
 
 export SymmetricBZ, nsyms
 export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, UnknownRep, TrivialRep
 export AutoBZProblem
-export IAI, PTR, AutoPTR, TAI, AutoBZEvalCounter
+export IAI, PTR, AutoPTR, TAI
 include("brillouin.jl")
 
 export FourierIntegralFunction, CommonSolveFourierIntegralFunction
