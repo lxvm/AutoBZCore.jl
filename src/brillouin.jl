@@ -329,7 +329,6 @@ To integrate with symmetry, define an AbstractSymRep for your integrand.
 """
 
 function AutoBZProblem(rep::AbstractSymRep, f::AbstractIntegralFunction, bz::SymmetricBZ, p = NullParameters(); kws...)
-    proto = get_prototype(f, get_prototype(bz), p)
     if rep isa UnknownRep && !(bz isa FullBZ)
         @warn WARN_UNKNOWN_SYMMETRY
         fbz = SymmetricBZ(bz.A, bz.B, lattice_bz_limits(bz.B), nothing)
