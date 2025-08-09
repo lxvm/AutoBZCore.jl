@@ -187,82 +187,84 @@ function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
     return solve!(cacheval)
 end
 
+abstract type StatsAlgorithm end
 
-"""
-    EvalCounter(::IntegralAlgorithm)
-
-An algorithm which counts the evaluations used by another algorithm.
-The count is stored in the `sol.stats.numevals` field.
-"""
-struct EvalCounter{T <: IntegralAlgorithm} <: IntegralAlgorithm
-    alg::T
+struct StatsProblem{A,C}
+    args::A
+    channel::C
+    batch::Bool
 end
 
-struct CounterProblem{K}
-    kwargs::K
+mutable struct StatsSolver{A,C}
+    batch::Bool
+    alg::A
+    cacheval::C
 end
-CounterProblem(; kws...) = CounterProblem(kws)
 
-mutable struct CounterSolver{K,G}
-    kwargs::K
-    alg::G
-    counter::Int
+function init(prob::StatsProblem, alg::StatsAlgorithm)
+    cacheval = init_stats_cacheval(alg, prob.batch, prob.args...)
+    put!(prob.channel, cacheval)
+    return StatsSolver(prob.batch, alg, cacheval)
 end
-abstract type CounterAlgorithm end
-# this could
-struct SingleCount <: CounterAlgorithm end
-function init(prob::CounterProblem, alg::CounterAlgorithm; kws...)
-    kwargs = (; prob.kwargs..., kws...)
-    solver = CounterSolver(kwargs, alg, 0)
-    if haskey(kwargs, :channel)
-        put!(kwargs.channel, solver)
-    end
-    return solver
+
+function step_stats!(solver::StatsSolver, args...)
+    return stats_step!(solver.cacheval, solver.alg, solver.batch, args...)
 end
-function step!(solver::CounterSolver)
-    solver.counter += 1
-    return solver.counter
+struct SolverStats{A,S} <: IntegralAlgorithm
+    alg::A
+    stats::S
 end
-function insert_counter(f::IntegralFunction, x, p, channel)
-    prob = CounterProblem(; channel)
-    alg = SingleCount()
+
+function init_cacheval(f, dom, p, alg::SolverStats; kws...)
+    channel = Channel(Inf)
+    g = insert_stats(alg, f, get_prototype(dom), p, channel)
+    return g, channel, init_cacheval(g, dom, p, alg.alg; kws...)
+end
+function do_integral(f, dom, p, alg::SolverStats, (g, channel, cacheval); kws...)
+    stats_reset(alg.stats, channel)
+    sol = do_integral(g, dom, p, alg.alg, cacheval; kws...)
+    stats = stats_summary(alg.stats, channel)
+    return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., stats...))
+end
+function insert_stats(alg::SolverStats, f::IntegralFunction, x, p, channel)
     proto = get_prototype(f, x, p)
-    CommonSolveIntegralFunction(prob, alg, proto, DefaultSpecialize(), f.executor) do solver, x, p
-        step!(solver)
-        return f.f(x, p)
+    prob = StatsProblem((x, p, proto), channel, false)
+    CommonSolveIntegralFunction(prob, alg.stats, proto, DefaultSpecialize(), f.executor) do solver, x, p
+        value = f.f(x, p)
+        step_stats!(solver, x, p, value)
+        return value
     end
 end
-function insert_counter(f::InplaceIntegralFunction, x, p, channel)
-    prob = CounterProblem(; channel)
-    alg = SingleCount()
-    solver = init(prob, alg)
+function insert_stats(alg::SolverStats, f::InplaceIntegralFunction, x, p, channel)
+    prob = StatsProblem((x, p, f.prototype), channel, false)
+    solver = init(prob, alg.stats)
     _f = (y, x, p) -> begin
-        step!(solver)
-        return f.f!(y, x, p)
+        out = f.f!(y, x, p)
+        step_stats!(solver, x, p, y)
+        return out
     end
     # TODO return a commonsolve function because this integrand is not thread safe
     return InplaceIntegralFunction(_f, f.prototype)
 end
-function insert_counter(f::InplaceBatchIntegralFunction, x, p, channel)
-    prob = CounterProblem(; channel)
-    alg = SingleCount()
-    solver = init(prob, alg)
+function insert_stats(alg::SolverStats, f::InplaceBatchIntegralFunction, x, p, channel)
+    prob = StatsProblem((x, p, f.prototype), channel, true)
+    solver = init(prob, alg.stats)
     _f = (y, x, p) -> begin
-        for _ in 1:size(x)[end]
-            step!(solver)
-        end
-        return f.f!(y, x, p)
+        out = f.f!(y, x, p)
+        step_stats!(solver, x, p, y)
+        return out
     end
     # TODO return a commonsolve function because this integrand is not thread safe
     return InplaceBatchIntegralFunction(_f, f.prototype; max_batch= f.max_batch)
 end
-function insert_counter(f::CommonSolveIntegralFunction, x, p, channel)
+function insert_stats(alg::SolverStats, f::CommonSolveIntegralFunction, x, p, channel)
     input = (; x, p)
-    prob = ComposedCommonSolveProblem(input, CounterProblem(; channel), f.prob) do (; x, p), countersolver, probsolver
-        step!(countersolver)
-        return f.solve!(probsolver, x, p)
+    prob = ComposedCommonSolveProblem(input, f.prob, StatsProblem((x, p, f.prototype), channel, false)) do (; x, p), probsolver, statssolver
+        out = f.solve!(probsolver, x, p)
+        step_stats!(statssolver, x, p, out)
+        return out
     end
-    alg = ComposedCommonSolveAlgorithm(SingleCount(), f.alg)
+    alg = ComposedCommonSolveAlgorithm(f.alg, alg.stats)
     return CommonSolveIntegralFunction(prob, alg, f.prototype, f.specialize, f.executor) do solver, x, p
         # solver.input = (; solver.input..., x, p)
         # return solve!(solver)
@@ -271,134 +273,58 @@ function insert_counter(f::CommonSolveIntegralFunction, x, p, channel)
     end
 end
 
-function init_cacheval(f, dom, p, alg::EvalCounter; kws...)
-    channel = Channel{CounterSolver}(Inf)
-    g = insert_counter(f, get_prototype(dom), p, channel)
-    return g, channel, init_cacheval(g, dom, p, alg.alg; kws...)
+struct EvalCounter <: StatsAlgorithm end
+EvalCounter(alg::IntegralAlgorithm) = SolverStats(alg, EvalCounter())
+
+function init_stats_cacheval(::EvalCounter, batch, args...)
+    Ref(0)
 end
-function do_integral(f, dom, p, alg::EvalCounter, (g, channel, cacheval); kws...)
-    for c in channel.data
-        c.counter = 0
+function stats_step!(counter, ::EvalCounter, batch, args...)
+    x = args[1]
+    sol = args[end]
+    if sol isa CommonSolutionStats
+        if haskey(sol.stats, :numevals)
+            counter[] += sol.stats.numevals
+        else
+            counter[] += 1
+        end
+    elseif batch
+        counter[] += size(x)[end]
+    else
+        counter[] += 1
     end
-    sol = do_integral(g, dom, p, alg.alg, cacheval; kws...)
+    return
+end
+function stats_reset(::EvalCounter, channel)
+    for c in channel.data
+        c[] = 0
+    end
+end
+function stats_summary(::EvalCounter, channel)
     numevals = 0
     for c in channel.data
-        numevals += c.counter
+        numevals += c[]
     end
-    return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., numevals))
+    return (; numevals)
 end
 
+struct EvalLogger <: StatsAlgorithm end
+EvalLogger(alg) = SolverStats(alg, EvalLogger())
 
-"""
-    EvalCounter([logger=logpoint], ::IntegralAlgorithm)
-
-An algorithm which logs the inputs to the integrand used by another algorithm.
-`logger` is a function that accepts the inputs to the integrand and outputs an item to store in the log.
-By default, the evaluation point `x` is logged and the parameters are ignored.
-The log is stored in the `sol.stats.evallog` field, an iterator over the items that have been logged.
-"""
-struct EvalLogger{L,T<:IntegralAlgorithm} <: IntegralAlgorithm
-    logger::L
-    alg::T
+function init_stats_cacheval(::EvalLogger, args...)
+    x, = args
+    Vector{typeof(x)}(undef, 0)
 end
-EvalLogger(alg::IntegralAlgorithm) = EvalLogger(logpoint, alg)
-logpoint(x, _...) = x
-
-function init_cacheval(f, dom, p, alg::EvalLogger; kws...)
-    channel = Channel{LoggerSolver}(Inf)
-    g = insert_logger(alg.logger, f, get_prototype(dom), p, channel)
-    return g, channel, init_cacheval(g, dom, p, alg.alg; kws...)
+function stats_step!(log, ::EvalLogger, batch, args...)
+    x, = args
+    push!(log, x)
 end
-function do_integral(f, dom, p, alg::EvalLogger, (g, channel, cacheval); kws...)
+function stats_reset(::EvalLogger, channel)
     for c in channel.data
-        empty!(c.log)
-    end
-    sol = do_integral(g, dom, p, alg.alg, cacheval; kws...)
-    evallog = Iterators.flatten((c.log for c in channel.data))
-    return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., evallog))
-end
-
-struct LoggerProblem{L,A,K}
-    logger::L
-    args::A
-    kwargs::K
-end
-LoggerProblem(logger, args; kws...) = LoggerProblem(logger, args, kws)
-
-mutable struct LoggerSolver{L,A,K,G,X}
-    logger::L
-    args::A
-    kwargs::K
-    alg::G
-    log::Vector{X}
-end
-abstract type LoggerAlgorithm end
-# this could
-struct SingleLogger <: LoggerAlgorithm end
-
-function init(prob::LoggerProblem, alg::LoggerAlgorithm; kws...)
-    kwargs = (; prob.kwargs..., kws...)
-    record = prob.logger(prob.args...)
-    solver = LoggerSolver(prob.logger, prob.args, kwargs, alg, typeof(record)[])
-    if haskey(kwargs, :channel)
-        put!(kwargs.channel, solver)
-    end
-    return solver
-end
-function step!(solver::LoggerSolver)
-    record = solver.logger(solver.args...)
-    push!(solver.log, record)
-    return record
-end
-function insert_logger(logger::L, f::IntegralFunction, x, p, channel) where {L}
-    prob = LoggerProblem(logger, (x, p); channel)
-    alg = SingleLogger()
-    proto = get_prototype(f, x, p)
-    CommonSolveIntegralFunction(prob, alg, proto, DefaultSpecialize(), f.executor) do solver, x, p
-        solver.args = (x, p)
-        step!(solver)
-        return f.f(x, p)
+        empty!(c)
     end
 end
-
-function insert_logger(logger::L, f::InplaceIntegralFunction, x, p, channel) where {L}
-    prob = LoggerProblem(logger, (x, p); channel)
-    alg = SingleLogger()
-    solver = init(prob, alg)
-    _f = (y, x, p) -> begin
-        solver.args = (x, p)
-        step!(solver)
-        return f.f!(y, x, p)
-    end
-    # TODO return a commonsolve function because this integrand is not thread safe
-    return InplaceIntegralFunction(_f, f.prototype)
-end
-function insert_logger(logger::L, f::InplaceBatchIntegralFunction, x, p, channel) where {L}
-    prob = LoggerProblem(logger, (x, p); channel)
-    alg = SingleLogger()
-    solver = init(prob, alg)
-    _f = (y, x, p) -> begin
-        for i in axes(x)[end]
-            solver.args = (x[ntuple(_->(:),Val(ndims(x)-1))...,i], p)
-            step!(solver)
-        end
-        return f.f!(y, x, p)
-    end
-    # TODO return a commonsolve function because this integrand is not thread safe
-    return InplaceBatchIntegralFunction(_f, f.prototype; max_batch= f.max_batch)
-end
-function insert_logger(logger::L, f::CommonSolveIntegralFunction, x, p, channel) where {L}
-    input = (; x, p)
-    prob = ComposedCommonSolveProblem(input, LoggerProblem(logger, (x, p); channel), f.prob) do (; x, p), loggersolver, probsolver
-        loggersolver.args = (x, p)
-        step!(loggersolver)
-        return f.solve!(probsolver, x, p)
-    end
-    alg = ComposedCommonSolveAlgorithm(SingleLogger(), f.alg)
-    return CommonSolveIntegralFunction(prob, alg, f.prototype, f.specialize, f.executor) do solver, x, p
-        # solver.input = (; solver.input..., x, p)
-        # return solve!(solver)
-        ## using out-of-place semantics can be faster
-        return solver.solve!((; x, p), solver.solvers...)
-    end
+function stats_summary(::EvalLogger, channel)
+    evallog = Iterators.flatten((log for log in channel.data))
+    return (; evallog)
 end

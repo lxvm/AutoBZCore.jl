@@ -205,17 +205,6 @@ end
             @test_broken ref ≈ solve(batchprob, ndalg, abstol=abstol).value atol=abstol
         end
     end
-    #=
-    # AbsoluteEstimate
-    est_alg = QuadratureFunction()
-    abs_alg = QuadGKJL()
-    alg = AbsoluteEstimate(est_alg, abs_alg)
-    ref_alg = MeroQuadGKJL()
-    f2(x, p) = inv(complex(p...) - cos(x))
-    prob = IntegralProblem(f2, 0.0, 2pi, (0.5, 1e-3))
-    abstol = 1e-5; reltol=1e-5
-    @test solve(prob, alg, reltol=reltol).value ≈ solve(prob, ref_alg, abstol=abstol).value atol=abstol
-    =#
 
     # EvalCounter
     for prob in (
@@ -235,4 +224,19 @@ end
         end
     end
     @test solve(IntegralProblem((x, p) -> 1.0, CubicLimits((0,0), (1,1))), EvalCounter(NestedQuad(QuadGKJL(order=7)))).stats.numevals == 15^2
+    # EvalCounter for nested integrals using CommonSolutionStats
+    let
+        counter = Ref(0)
+        f = IntegralFunction((x, (counter, p)) -> (counter[] += 1; (1 / (p - cos(x)))), 0.0im)
+        prob1 = IntegralProblem(f, (0.0, 2pi), (counter, 1.0+im))
+        g = CommonSolveIntegralFunction(prob1, EvalCounter(QuadGKJL()), 0.0im) do solver, x, (counter, p)
+            solver.p = (counter, p-cos(x))
+            sol = solve!(solver)
+            return AutoBZCore.CommonSolutionStats(sol.value, sol.stats)
+        end
+        prob2 = IntegralProblem(g, (0.0, 2pi), (counter, 0.5+0.1im))
+        counter[] = 0
+        sol = solve(prob2, EvalCounter(QuadGKJL()))
+        @test sol.stats.numevals == counter[]
+    end
 end

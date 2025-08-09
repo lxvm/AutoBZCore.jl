@@ -382,7 +382,7 @@ end
 
 function init_cacheval(rep, f, bz::SymmetricBZ, p, bzalg::AutoBZAlgorithm; kws...)
     j = abs(det(bz.B))  # rescale tolerance to (I)BZ coordinate and get the right number of digits
-    kwargs = haskey(kws, :abstol) ? (; kws..., abstol=@show(kws[:abstol] / (j * nsyms(bz)))) : (; kws...)
+    kwargs = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol] / (j * nsyms(bz))) : (; kws...)
     prob, alg = bz_to_standard(rep, f, bz, p, bzalg; kwargs...)
     return init(prob, alg)
 end

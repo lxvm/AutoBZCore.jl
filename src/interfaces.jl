@@ -154,18 +154,33 @@ function CommonSolveIntegralFunction(solve!, prob, alg, prototype=nothing, speci
     return CommonSolveIntegralFunction(solve!, prob, alg, NamedTuple(kws), prototype, specialize, executor)
 end
 
+struct CommonSolutionStats{V,S}
+    value::V
+    stats::S
+end
+
 function do_solve!(solver, f::CommonSolveIntegralFunction, x, p)
-    return f.solve!(solver, x, p)
+    sol = f.solve!(solver, x, p)
+    if sol isa CommonSolutionStats
+        return sol.value
+    else
+        return sol
+    end
 end
 Base.@nospecializeinfer function do_solve_nsp!(@nospecialize(solver), f::CommonSolveIntegralFunction, x, p)
     return do_solve!(solver, f, x, p)
 end
 function get_prototype(f::CommonSolveIntegralFunction, x, p, _solver=nothing)
-    if isnothing(f.prototype)
+    sol = if isnothing(f.prototype)
         solver = isnothing(_solver) ? init(f.prob, f.alg; f.kwargs...) : _solver
         do_solve!(solver, f, x, p)
     else
         f.prototype
+    end
+    if sol isa CommonSolutionStats
+        return sol.value
+    else
+        return sol
     end
 end
 function init_specialized_integrand(::DefaultSpecialize, solver, f, x, p, prototype)
