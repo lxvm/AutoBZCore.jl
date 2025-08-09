@@ -154,6 +154,12 @@ function CommonSolveIntegralFunction(solve!, prob, alg, prototype=nothing, speci
     return CommonSolveIntegralFunction(solve!, prob, alg, NamedTuple(kws), prototype, specialize, executor)
 end
 
+"""
+    CommonSolutionStats(value, stats)
+
+When a `CommonSolveIntegralFunction` or `CommonSolveFourierIntegralFunction` returns its solution in this struct in the `value` field, additional information about the solve may also be passed in the `stats` field.
+Currently, the only use is for `EvalCounter` to count integrand evaluations for an IntegralProblem solved within another integral problem.
+"""
 struct CommonSolutionStats{V,S}
     value::V
     stats::S
