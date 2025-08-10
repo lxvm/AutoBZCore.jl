@@ -565,8 +565,8 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQu
     x0, segs, lims, states = unroll_limits(dom)
     series = unroll_series(f.s)
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
-    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom))) : alg.specialize
-    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor, Val(ndims(dom))) : alg.executor
+    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom)-1)) : alg.specialize
+    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor, Val(ndims(dom)-1)) : alg.executor
 
     _f, fprototype = nested_innerfourierintegralfunction(f, x0, series[1], x0[1], p)
 

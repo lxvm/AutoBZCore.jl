@@ -162,8 +162,8 @@ _rescale_abstol(s; kws...) = haskey(kws, :abstol) ? (; kws..., abstol=kws[:absto
 function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
     x0, segs, lims, states = unroll_limits(dom)
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
-    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom))) : alg.specialize
-    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor, Val(ndims(dom))) : alg.executor
+    spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom)-1)) : alg.specialize
+    exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor, Val(ndims(dom)-1)) : alg.executor
 
     _f, fprototype = nested_innerintegralfunction(f, x0, p)
 
