@@ -24,6 +24,7 @@
 abstract type AbstractFourierIntegralFunction <: AbstractIntegralFunction end
 
 # TODO think about generalizing FourierIntegralFunction to a EliminationIntegralFunction
+# TODO implement CommonSolveFourierInplaceIntegrand CommonSolveFourierInplaceBatchIntegrand
 
 """
     FourierIntegralFunction(f, s, [prototype=nothing, executor=SerialExecutor()]; alias=false)
@@ -87,26 +88,6 @@ function _get_prototype(f::CommonSolveFourierIntegralFunction, x, ws, p, _solver
     end
 end
 get_prototype(f::CommonSolveFourierIntegralFunction, x, p, _solver=nothing) = _get_prototype(f, x, f.s, p, _solver)
-
-function init_specialized_fourierintegrand(solver, f, dom, p; x=get_prototype(dom), ws=f.s, s = ws(x), prototype=f.prototype)
-    proto = prototype === nothing ? do_solve!(solver, f, x, s, p) : prototype
-    func = (x, s, p) -> do_solve!(solver, f, x, s, p)
-    integrand = if f.specialize isa FullSpecialize
-        func
-    elseif f.specialize isa FunctionWrapperSpecialize
-        FunctionWrapper{typeof(prototype), typeof((x, s, p))}(func)
-    else
-        throw(ArgumentError("$(f.specialize) is not implemented"))
-    end
-    return integrand, proto
-end
-function _init_commonsolvefourierfunction(f, dom, p; kws...)
-    solver = init(f.prob, f.alg; f.kwargs...)
-    integrand, prototype = init_specialized_fourierintegrand(solver, f, dom, p; kws...)
-    return solver, integrand, prototype
-end
-
-# TODO implement CommonSolveFourierInplaceIntegrand CommonSolveFourierInplaceBatchIntegrand
 
 function fourier_to_standard(func::FourierIntegralFunction, x0, p)
     (; f, s, prototype, alias, executor) = func
@@ -587,7 +568,7 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQu
     spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom))) : alg.specialize
     exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor, Val(ndims(dom))) : alg.executor
 
-    _f = nested_innerfourierintegralfunction(f, x0, series[1], x0[1], p)
+    _f, fprototype = nested_innerfourierintegralfunction(f, x0, series[1], x0[1], p)
 
     intprob = IntegralProblem(_f, segs[1], (; p, state=states[1], series=series[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
     segprob = SegmentProblem(lims[1], 1)
@@ -602,7 +583,7 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQu
         return solve!(intsolver)
     end
     inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
-    prob, alg = nested_fourierprob(innerprob, inneralg, _f.prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end], series[2:end]; kws...)
+    prob, alg = nested_fourierprob(innerprob, inneralg, fprototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec, exec, series[2:end]; kws...)
     return init(prob, alg)
 end
 function nested_fourierprob(innerprob, inneralg, prototype, p, x0, segs, lims, states, algs, spec, exec, series; kws...)
@@ -677,13 +658,13 @@ function nested_innerfourierintegralfunction(f::FourierIntegralFunction, x0, ser
         sol = solve_fourierevalcache!(solver.cacheval, series, Tuple(x), SerialExecutor())
         return _f(SVector(promote(x, state...)), sol, p)
     end
-    return func
+    return func, proto
 end
 function nested_innerfourierintegralfunction(f::CommonSolveFourierIntegralFunction, x0, series, x1, p)
-    return nested_innerfourierintegralfunction_cs(f.executor, f, x0, series, x1, p)
-end
-function nested_innerfourierintegralfunction_cs(exec::SerialExecutor, f, x0, series, x1, p)
     proto = get_prototype(f, x0, p)
+    return nested_innerfourierintegralfunction_cs(f.executor, f, x0, series, x1, p, proto), proto
+end
+function nested_innerfourierintegralfunction_cs(exec::SerialExecutor, f, x0, series, x1, p, proto)
 
     prob = FourierEvaluationProblem(series, x1)
     alg = FourierEvaluationAlgorithm(exec)
@@ -705,7 +686,7 @@ function nested_innerfourierintegralfunction_cs(exec::SerialExecutor, f, x0, ser
         return solver.solve!((; solver.input..., x1=x, x=SVector(promote(x, state...)), p, series), solver.solvers...)
     end
 end
-function nested_innerfourierintegralfunction_cs(exec::ThreadedExecutor, f, x0, series, x1, p)
-    _f = nested_innerfourierintegralfunction_cs(SerialExecutor(), f, x0, series, x1, p)
+function nested_innerfourierintegralfunction_cs(exec::ThreadedExecutor, f, x0, series, x1, p, proto)
+    _f = nested_innerfourierintegralfunction_cs(SerialExecutor(), f, x0, series, x1, p, proto)
     return nested_integralfunction_cs(exec, _f, x1, p)
 end

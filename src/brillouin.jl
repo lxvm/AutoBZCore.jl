@@ -88,7 +88,6 @@ symmetrize_(rep, bz, x) = symmetrize__(rep, bz, x)
 symmetrize_(rep, bz, x::AuxValue) = AuxValue(symmetrize__(rep, bz, x.val), symmetrize__(rep, bz, x.aux))
 
 symmetrize__(::TrivialRep, bz, x) = nsyms(bz) * x
-symmetrize__(::UnknownRep, bz, x) = error("unknown representation cannot be symmetrized")
 
 struct SymmetricRule{R, U, B}
     rule::R
@@ -112,7 +111,6 @@ struct SymmetricRuleDef{R, U, B}
     bz::B
 end
 
-AutoSymPTR.nsyms(r::SymmetricRuleDef) = AutoSymPTR.nsyms(r.r)
 function (r::SymmetricRuleDef)(::Type{T}, v::Val{d}) where {T, d}
     return SymmetricRule(r.rule(T, v), r.rep, r.bz)
 end
@@ -147,10 +145,7 @@ Interface to loading Brillouin zones.
 !!! note "Assumptions"
     `AutoBZCore` assumes that all calculations occur in the reciprocal
     lattice basis, since that is the basis in which Wannier interpolants are most
-    efficiently described. See [`SymmetricBZ`](@ref) for details. We also assume that the
-    integrands are cheap to evaluate, which is why we provide adaptive methods in the first
-    place, so that return types can be determined at runtime (and mechanisms are in place
-    for compile time as well)
+    efficiently described. See [`SymmetricBZ`](@ref) for details.
 """
 function load_bz end
 
@@ -414,7 +409,7 @@ struct IAI{T,S,E} <: AutoBZAlgorithm
     specialize::S
     executor::E
     IAI(alg::IntegralAlgorithm=AuxQuadGKJL(), specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor()) = new{typeof(alg),typeof(specialize),typeof(executor)}(alg, specialize, executor)
-    IAI(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->NoSpecialize(),length(algs)), executor::Tuple{Vararg{AbstractExecutor}}=ntuple(_->SerialExecutor(),length(algs))) = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
+    IAI(algs::Tuple{IntegralAlgorithm,Vararg{IntegralAlgorithm,N}}, specialize::Tuple{Vararg{AbstractSpecialization,N}}=ntuple(_->NoSpecialize(),length(algs)-1), executor::Tuple{Vararg{AbstractExecutor,N}}=ntuple(_->SerialExecutor(),length(algs)-1)) where {N} = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
 end
 IAI(algs::IntegralAlgorithm...) = IAI(algs)
 
@@ -468,7 +463,6 @@ end
 Base.ndims(dom::RepBZ) = ndims(dom.bz)
 Base.eltype(::Type{RepBZ{R, B}}) where {R, B} = eltype(B)
 get_prototype(dom::RepBZ) = get_prototype(dom.bz)
-symmetrize(rep, bz::RepBZ, x) = symmetrize_(TrivialRep(), bz, x)
 function bz_to_standard(rep, f, bz, p, alg::AutoPTR; kws...)
     prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
     alg = AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms)

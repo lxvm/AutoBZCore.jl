@@ -120,13 +120,17 @@ struct SerialExecutor <: AbstractExecutor end
 
 
 """
-    ThreadedExecutor(ntasks::Int)
+    ThreadedExecutor(ntasks::Int, max_batch::Int)
+    ThreadedExecutor(; ntasks::Int, max_batch::Int)
 
 Policy that a commonsolve function be executed on multiple threads, scheduling up to `ntasks` tasks at a time which may exceed the number of threads.
 The pool of commonsolve workers is of size `ntasks`.
+`max_batch` sets a soft limit on the number of quadrature points assigned to any task so that the program does not run out of memory.
+If `max_batch` is too small, the overhead of scheduling tasks could negate the speedup of parallelization.
 """
-struct ThreadedExecutor <: AbstractExecutor
+Base.@kwdef struct ThreadedExecutor <: AbstractExecutor
     ntasks::Int
+    max_batch::Int
 end
 
 

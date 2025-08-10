@@ -17,7 +17,7 @@ end
 function init_integrand_cacheval_if(exec::ThreadedExecutor, f::IntegralFunction, dom, p)
     prototype = get_prototype(f, get_prototype(dom), p)
     proto = [prototype]
-    func = InplaceBatchIntegralFunction(proto; max_batch=1_000_000*exec.ntasks) do y, x, p
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.max_batch) do y, x, p
         d, r = divrem(size(x)[end], exec.ntasks)
         @sync for n in 1:exec.ntasks
             chunk = ((n-1)*d+(n > r ? r : n-1)):(n*d-1+(n > r ? r : n))
@@ -51,10 +51,10 @@ function init_integrand_cacheval_cs(::SerialExecutor, f::CommonSolveIntegralFunc
     cacheval = (solver, integrand)
     return prototype, cacheval
 end
-function init_integrand_integrand_cacheval_cs(exec::ThreadedExecutor, f::CommonSolveIntegralFunction, dom, p)
+function init_integrand_cacheval_cs(exec::ThreadedExecutor, f::CommonSolveIntegralFunction, dom, p)
     channel, integrand, prototype = init_commonsolvefunction(f, dom, p)
     proto = [prototype]
-    func = InplaceBatchIntegralFunction(proto; max_batch=1_000_000*exec.ntasks) do y, x, p
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.max_batch) do y, x, p
         do_threaded_solve!(integrand, channel, f, y, x, p)
     end
     _prototype, _cacheval = init_integrand_cacheval(func, dom, p)
@@ -133,13 +133,15 @@ function do_integral(f, dom, p, alg::QuadGKJL, (segbuf, alg_cache, cacheval);
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
     # we need to strip units from the limits since infinity transformations change the units
     # of the limits, which can break the segbuf
-    u = oneunit(eltype(dom))
-    usegs = map(x -> x/u, dom)
+    segs = PuncturedInterval(dom)
+    u = oneunit(real(eltype(segs)))
+    ua, ub = map(x -> x/u, endpoints(segs))
+    usegs = map(x -> x/u, breakpoints(segs))
     atol = isnothing(abstol) ? abstol : abstol/u
     g = quadgk_integrand(f, p, u, alg_cache, cacheval)
-    val, err = quadgk(g, usegs...; segbuf, maxevals = maxiters, rtol = reltol, atol, order = alg.order, norm = alg.norm)
+    val, err = quadgk(g, ua, usegs..., ub; segbuf, maxevals = maxiters, rtol = reltol, atol, order = alg.order, norm = alg.norm)
     value = u*val
-    retcode = err < max(something(atol, zero(err)), alg.norm(val)*something(reltol, isnothing(atol) ? sqrt(eps(one(eltype(usegs)))) : 0)) ? Success : Failure
+    retcode = err < max(something(atol, zero(err)), alg.norm(val)*something(reltol, isnothing(atol) ? sqrt(eps(float(one(u)))) : 0)) ? Success : Failure
     stats = (; error=u*err)
     return IntegralSolution(value, retcode, stats)
 end

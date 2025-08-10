@@ -30,7 +30,14 @@ function do_integral(f, dom, p, alg::AuxQuadGKJL, (segbuf, alg_cache, cacheval);
     stats = (; error=u*err)
     return IntegralSolution(value, retcode, stats)
 end
-auxquadgk_integrand(f::AbstractIntegralFunction, p, u, alg_cache, cacheval) = quadgk_integrand(f, p, u, alg_cache, cacheval)
+function auxquadgk_integrand(f::AbstractIntegralFunction, p, u, alg_cache, cacheval)
+    g = quadgk_integrand(f, p, u, alg_cache, cacheval)
+    if g isa BatchIntegrand
+        return IteratedIntegration.AuxQuadGK.BatchIntegrand(g.f!, g.y, g.x, g.max_batch)
+    else
+        return g
+    end
+end
 function auxquadgk_integrand(f::InplaceBatchIntegralFunction, p, u, alg_cache, cacheval)
     pts, upts = alg_cache
     IteratedIntegration.AuxQuadGK.BatchIntegrand((y, x) -> f.f!(y, resize!(pts, length(x)) .= u .* x, p), cacheval, upts; max_batch=f.max_batch)

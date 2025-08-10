@@ -62,6 +62,7 @@ julia = "1.10"
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 Elliptic = "b305315f-e792-5b7a-8f41-49f472929428"
+FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
 GeneralizedGaussianQuadrature = "958e0c08-f14d-42e8-a0ab-84193b3783f2"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
@@ -74,4 +75,4 @@ UnitfulAtomic = "a7773ee8-282e-5fa2-be4e-bd808c38a91a"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [targets]
-test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase", "Unitful", "UnitfulAtomic", "WannierIO", "ImplicitIntegration"]
+test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase", "Unitful", "UnitfulAtomic", "WannierIO", "ImplicitIntegration", "FunctionWrappers"]

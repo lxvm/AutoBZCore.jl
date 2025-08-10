@@ -13,11 +13,12 @@ struct NestedQuad{T,S,E} <: IntegralAlgorithm
     specialize::S
     executor::E
     NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor()) = new{typeof(alg),typeof(specialize),typeof(executor)}(alg, specialize, executor)
-    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->NoSpecialize(), length(algs)), executor::Tuple{Vararg{AbstractExecutor}}=ntuple(_->SerialExecutor(), length(algs))) = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
+    NestedQuad(algs::Tuple{IntegralAlgorithm,Vararg{IntegralAlgorithm,N}}, specialize::Tuple{Vararg{AbstractSpecialization,N}}=ntuple(_->NoSpecialize(), length(algs)-1), executor::Tuple{Vararg{AbstractExecutor,N}}=ntuple(_->SerialExecutor(), length(algs)-1)) where {N} = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 
-unroll_limits(dom) = unroll_limits(limit_iterate(dom)...)
+unroll_limits(dom::AbstractIteratedLimits) = unroll_limits(limit_iterate(dom)...)
+unroll_limits(dom) = unroll_limits(IteratedIntegration.load_limits(dom))
 function unroll_limits(segs, lims, state)
     a, b, = segs
     x = (a + b)/2
@@ -132,7 +133,7 @@ end
 function nested_integralfunction_cs(exec::ThreadedExecutor, f, x0, p)
     channel, integrand, prototype = init_commonsolvefunction_(exec, f, x0, p)
     proto = [prototype]
-    func = InplaceBatchIntegralFunction(proto; max_batch=exec.ntasks) do y, x, p
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.max_batch) do y, x, p
         do_threaded_solve!(integrand, channel, f, y, x, p)
     end
     return func
@@ -142,17 +143,19 @@ function nested_innerintegralfunction(f::IntegralFunction, x0, p)
     func = IntegralFunction(proto, f.executor) do x, (; p, state)
         f.f(SVector(promote(x, state...)), p)
     end
-    return func
+    return func, proto
 end
 function nested_innerintegralfunction(f::CommonSolveIntegralFunction, x0, p)
-    return nested_innerintegralfunction_cs(f.executor, f, x0, p)
+    proto = get_prototype(f, x0, p)
+    return nested_innerintegralfunction_cs(f.executor, f, x0, p, proto), proto
 end
-function nested_innerintegralfunction_cs(::SerialExecutor, f, x0, p)
-    _solve! = (solver, x, (; p, state)) -> f.solve!(solver, SVector(promote(x, state...)), p)
-    return CommonSolveIntegralFunction(_solve!, f.prob, f.alg, f.prototype, f.specialize, f.executor; f.kwargs...)
+function nested_innerintegralfunction_cs(::SerialExecutor, f, x0, p, prototype)
+    fsolve! = f.solve!
+    _solve! = (solver, x, (; p, state)) -> fsolve!(solver, SVector(promote(x, state...)), p)
+    return CommonSolveIntegralFunction(_solve!, f.prob, f.alg, prototype, f.specialize, f.executor; f.kwargs...)
 end
-function nested_innerintegralfunction_cs(exec::ThreadedExecutor, f, x0, p)
-    _f = nested_innerintegralfunction_cs(SerialExecutor(), f, x0, p)
+function nested_innerintegralfunction_cs(exec::ThreadedExecutor, f, x0, p, prototype)
+    _f = nested_innerintegralfunction_cs(SerialExecutor(), f, x0, p, prototype)
     return nested_integralfunction_cs(exec, _f, x0, p)
 end
 _rescale_abstol(s; kws...) = haskey(kws, :abstol) ? (; kws..., abstol=kws[:abstol]*s) : (; kws...)
@@ -162,7 +165,7 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
     spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom))) : alg.specialize
     exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor, Val(ndims(dom))) : alg.executor
 
-    _f = nested_innerintegralfunction(f, x0, p)
+    _f, fprototype = nested_innerintegralfunction(f, x0, p)
 
     intprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
     segprob = SegmentProblem(lims[1], 1)
@@ -178,12 +181,13 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
     end
 
     inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
-    prob, alg = nested_prob(innerprob, inneralg, _f.prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
+    prob, alg = nested_prob(innerprob, inneralg, fprototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec, exec; kws...)
     return init(prob, alg)
 end
 
 function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
-    cacheval.input = (; cacheval.input..., p, lims=dom, kws=(; kws...))
+    lims = dom isa AbstractIteratedLimits ? dom : IteratedIntegration.load_limits(dom)
+    cacheval.input = (; cacheval.input..., p, lims, kws=(; kws...))
     return solve!(cacheval)
 end
 

@@ -74,6 +74,10 @@ end
         end
     end
     @test @inferred(solve(IntegralProblem((x, p) -> exp(-x^2), (-Inf, Inf)), QuadGKJL())).value ≈ sqrt(pi)
+    @test @inferred(solve(IntegralProblem((x, p) -> exp(-x^2), (0.0, Inf)), QuadGKJL())).value ≈ sqrt(pi)/2
+    @test @inferred(solve(IntegralProblem((x, p) -> exp(-x^2), (-Inf, 0.0)), QuadGKJL())).value ≈ sqrt(pi)/2
+    @test abs(@inferred(solve(IntegralProblem((x, p) -> exp(-x^2), AutoBZCore.PuncturedInterval((1-im, 1+im, -1+im, -1-im, 1-im))), QuadGKJL(); abstol=1e-10)).value) < 1e-10
+    @test solve(IntegralProblem((x, p) -> exp(-x^2), AutoBZCore.PuncturedInterval((1-im, 1+im, -1+im, -1-im))), QuadGKJL()).value ≈ -solve(IntegralProblem((x, p) -> exp(-x^2), AutoBZCore.PuncturedInterval((-1-im, 1-im))), QuadGKJL()).value
 end
 
 @testset "commonproblem" begin
