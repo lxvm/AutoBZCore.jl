@@ -5,7 +5,7 @@ using FourierSeriesEvaluators
 using AutoBZCore
 using AutoBZCore: CubicLimits
 using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
-#=
+
 @testset "FourierIntegralFunction" begin
     @testset "quadrature" begin
         a = 0
@@ -79,7 +79,7 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
         end
     end
 end
-=#
+
 @testset "CommonSolveFourierIntegralFunction" begin
     _solve! = (solver, x, s, p) -> begin
         solver.p = (x, s, p)
