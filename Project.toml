@@ -1,7 +1,7 @@
 name = "AutoBZCore"
 uuid = "66bd3e16-1600-45cf-8f55-0b550710682b"
 authors = ["lxvm <lorenzo@vanmunoz.com>"]
-version = "0.4.1"
+version = "0.5.0"
 
 [deps]
 AutoSymPTR = "78a0c066-08f1-49a8-82f0-b29cd485e1d3"
@@ -9,7 +9,6 @@ ChunkSplitters = "ae650224-84b6-46f8-82ea-d812ca08434e"
 CircularArrays = "7a955b69-7140-5f4e-a0ed-f168c5e2e749"
 CommonSolve = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
 FourierSeriesEvaluators = "2a892dea-6eef-4bb5-9d1c-de966c9f6db5"
-FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
 HCubature = "19dc6840-f33b-545b-b366-655c7e3ffd49"
 IteratedIntegration = "3ecdc4d6-ee34-4049-885a-a4e3631db98b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -18,6 +17,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [weakdeps]
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
+FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
 ImplicitIntegration = "bc256489-3a69-4a66-afc4-127cc87e6182"
 Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
 SymmetryReduceBZ = "49a35663-c880-4242-bebb-1ec8c0fa8046"
@@ -26,6 +26,7 @@ WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [extensions]
 AtomsBaseExt = "AtomsBase"
+AutoBZCoreFunctionWrappersExt = "FunctionWrappers"
 AutoBZCoreImplicitIntegrationExt = "ImplicitIntegration"
 SymmetryReduceBZExt = ["SymmetryReduceBZ", "Polyhedra"]
 UnitfulExt = "Unitful"
@@ -47,7 +48,7 @@ ImplicitIntegration = "0.1.1"
 IteratedIntegration = "0.5"
 LinearAlgebra = "1.9"
 OffsetArrays = "1"
-Polyhedra = "0.6,0.7"
+Polyhedra = "0.6,0.7,0.8"
 QuadGK = "2.6"
 StaticArrays = "1"
 SymmetryReduceBZ = "0.2"
@@ -55,12 +56,13 @@ Test = "1.9"
 Unitful = "1"
 UnitfulAtomic = "1"
 WannierIO = "0.1,0.2"
-julia = "1.9"
+julia = "1.10"
 
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 Elliptic = "b305315f-e792-5b7a-8f41-49f472929428"
+FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
 GeneralizedGaussianQuadrature = "958e0c08-f14d-42e8-a0ab-84193b3783f2"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
@@ -73,4 +75,4 @@ UnitfulAtomic = "a7773ee8-282e-5fa2-be4e-bd808c38a91a"
 WannierIO = "cb1bc77f-5443-4951-af9f-05b616a3e422"
 
 [targets]
-test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase", "Unitful", "UnitfulAtomic", "WannierIO", "ImplicitIntegration"]
+test = ["Aqua", "Elliptic", "LinearAlgebra", "GeneralizedGaussianQuadrature", "Test", "StaticArrays", "OffsetArrays", "SymmetryReduceBZ", "Polyhedra", "AtomsBase", "Unitful", "UnitfulAtomic", "WannierIO", "ImplicitIntegration", "FunctionWrappers"]

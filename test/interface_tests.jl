@@ -30,6 +30,11 @@ end
 function testpost(sol, x, p)
     return sol
 end
+function testsolve!(solver, x, p)
+    testup!(solver, x, p)
+    sol = solve!(solver)
+    return testpost(sol, x, p)
+end
 
 @testset "domains" begin
     # PuncturedInterval
@@ -56,19 +61,23 @@ end
     b = 2pi
     abstol=1e-5
     p=3.0
-    # QuadratureFunction QuadGKJL AuxQuadGKJL ContQuadGKJL MeroQuadGKJL
+    # QuadratureFunction QuadGKJL AuxQuadGKJL
     for (f, ref) in (
         ((x,p) -> p*sin(x), 0.0),
         ((x,p) -> p*one(x), p*(b-a)),
         ((x,p) -> inv(p-cos(x)), (b-a)/sqrt(p^2-1)),
     )
         prob = IntegralProblem(f, (a, b), p; abstol)
-        for alg in (QuadratureFunction(), QuadGKJL(), AuxQuadGKJL(), ContQuadGKJL(), MeroQuadGKJL())
+        for alg in (QuadratureFunction(), QuadGKJL(), AuxQuadGKJL())
             sol = solve(prob, alg)
             @test ref ≈ sol.value atol=abstol
         end
     end
     @test @inferred(solve(IntegralProblem((x, p) -> exp(-x^2), (-Inf, Inf)), QuadGKJL())).value ≈ sqrt(pi)
+    @test @inferred(solve(IntegralProblem((x, p) -> exp(-x^2), (0.0, Inf)), QuadGKJL())).value ≈ sqrt(pi)/2
+    @test @inferred(solve(IntegralProblem((x, p) -> exp(-x^2), (-Inf, 0.0)), QuadGKJL())).value ≈ sqrt(pi)/2
+    @test abs(@inferred(solve(IntegralProblem((x, p) -> exp(-x^2), AutoBZCore.PuncturedInterval((1-im, 1+im, -1+im, -1-im, 1-im))), QuadGKJL(); abstol=1e-10)).value) < 1e-10
+    @test solve(IntegralProblem((x, p) -> exp(-x^2), AutoBZCore.PuncturedInterval((1-im, 1+im, -1+im, -1-im))), QuadGKJL()).value ≈ -solve(IntegralProblem((x, p) -> exp(-x^2), AutoBZCore.PuncturedInterval((-1-im, 1-im))), QuadGKJL()).value
 end
 
 @testset "commonproblem" begin
@@ -76,14 +85,17 @@ end
     b = 2pi
     abstol=1e-5
     p0=3.0
-    # QuadratureFunction QuadGKJL AuxQuadGKJL ContQuadGKJL MeroQuadGKJL
-    update! = (cache, x, p) -> cache.p = (x, p)
-    postsolve = (sol, x, p) -> sol.value
+    # QuadratureFunction QuadGKJL AuxQuadGKJL
+    _solve! = (solver, x, p) -> begin
+        solver.p = (x, p)
+        sol = solve!(solver)
+        return sol.value
+    end
     f = (x, (y, p)) -> p*(y + x)
     subprob = IntegralProblem(f, (a, b), ((a+b)/2, p0); abstol)
-    integrand = CommonSolveIntegralFunction(subprob, QuadGKJL(), update!, postsolve)
+    integrand = CommonSolveIntegralFunction(_solve!, subprob, QuadGKJL())
     prob = IntegralProblem(integrand, (a, b), p0; abstol)
-    for alg in (QuadratureFunction(), QuadGKJL(), HCubatureJL(), AuxQuadGKJL(), ContQuadGKJL(), MeroQuadGKJL())
+    for alg in (QuadratureFunction(), QuadGKJL(), HCubatureJL(), AuxQuadGKJL())
         cache = init(prob, alg)
         for p in [3.0, 4.0]
             ref = p*(b-a)*(b^2-a^2)
@@ -94,7 +106,7 @@ end
     end
     f = (x, (y, p)) -> p*(sin(only(y))^2 + x)
     subprob = IntegralProblem(f, (a, b), ([b/2], p0); abstol)
-    integrand = CommonSolveIntegralFunction(subprob, QuadGKJL(), update!, postsolve)
+    integrand = CommonSolveIntegralFunction(_solve!, subprob, QuadGKJL())
     prob = IntegralProblem(integrand, AutoBZCore.Basis(b*I(1)), p0; abstol)
     for alg in (MonkhorstPack(), AutoSymPTRJL(),)
         cache = init(prob, alg)
@@ -197,24 +209,13 @@ end
             @test_broken ref ≈ solve(batchprob, ndalg, abstol=abstol).value atol=abstol
         end
     end
-    #=
-    # AbsoluteEstimate
-    est_alg = QuadratureFunction()
-    abs_alg = QuadGKJL()
-    alg = AbsoluteEstimate(est_alg, abs_alg)
-    ref_alg = MeroQuadGKJL()
-    f2(x, p) = inv(complex(p...) - cos(x))
-    prob = IntegralProblem(f2, 0.0, 2pi, (0.5, 1e-3))
-    abstol = 1e-5; reltol=1e-5
-    @test solve(prob, alg, reltol=reltol).value ≈ solve(prob, ref_alg, abstol=abstol).value atol=abstol
-    =#
 
     # EvalCounter
     for prob in (
         IntegralProblem((x, p) -> 1.0, (0, 1)),
         IntegralProblem(InplaceIntegralFunction((y, x, p) -> y .= 1.0, fill(0.0)), (0, 1)),
         IntegralProblem(InplaceBatchIntegralFunction((y, x, p) -> y .= 1.0, [0.0]), (0, 1)),
-        IntegralProblem(CommonSolveIntegralFunction(TestProblem(0.0, 0.0), TestAlgorithm(), testup!, testpost, 0.0), (0, 1), 3.0),
+        IntegralProblem(CommonSolveIntegralFunction(testsolve!, TestProblem(0.0, 0.0), TestAlgorithm(), 0.0), (0, 1), 3.0),
     )
         # constant integrand should always use the same number of evaluations as the
         # base quadrature rule
@@ -227,4 +228,19 @@ end
         end
     end
     @test solve(IntegralProblem((x, p) -> 1.0, CubicLimits((0,0), (1,1))), EvalCounter(NestedQuad(QuadGKJL(order=7)))).stats.numevals == 15^2
+    # EvalCounter for nested integrals using CommonSolutionStats
+    let
+        counter = Ref(0)
+        f = IntegralFunction((x, (counter, p)) -> (counter[] += 1; (1 / (p - cos(x)))), 0.0im)
+        prob1 = IntegralProblem(f, (0.0, 2pi), (counter, 1.0+im))
+        g = CommonSolveIntegralFunction(prob1, EvalCounter(QuadGKJL()), 0.0im) do solver, x, (counter, p)
+            solver.p = (counter, p-cos(x))
+            sol = solve!(solver)
+            return AutoBZCore.CommonSolutionStats(sol.value, sol.stats)
+        end
+        prob2 = IntegralProblem(g, (0.0, 2pi), (counter, 0.5+0.1im))
+        counter[] = 0
+        sol = solve(prob2, EvalCounter(QuadGKJL()))
+        @test sol.stats.numevals == counter[]
+    end
 end

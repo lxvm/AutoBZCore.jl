@@ -23,6 +23,7 @@ makedocs(
         "Algorithms" => "algorithms.md",
         "Reference" => "reference.md",
         "Extensions" => "extensions.md",
+        "Performance Tips" => "performance.md",
     ],
 )
 

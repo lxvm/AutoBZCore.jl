@@ -4,10 +4,9 @@ function init_cacheval(h, domain, p, alg::GGR)
     bz = p
 
     j = JacobianSeries(h)
-    w = workspace_allocate(j, period(j))
     kalg = MonkhorstPack(npt=alg.npt, syms=bz.syms)
     dom = canonical_ptr_basis(bz.B)
-    rule = init_fourier_rule(w, dom, kalg)
+    rule = init_fourier_rule(j, dom, kalg, SerialExecutor())
     return get_ggr_data(rule, period(j))
 end
 

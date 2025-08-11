@@ -12,8 +12,6 @@ AutoBZCore.IntegralAlgorithm
 AutoBZCore.QuadratureFunction
 AutoBZCore.QuadGKJL
 AutoBZCore.AuxQuadGKJL
-AutoBZCore.ContQuadGKJL
-AutoBZCore.MeroQuadGKJL
 ```
 
 ### Cubature
@@ -29,12 +27,13 @@ AutoBZCore.AutoSymPTRJL
 ```@docs
 AutoBZCore.NestedQuad
 AutoBZCore.EvalCounter
+AutoBZCore.EvalLogger
 ```
 
 ## `AutoBZProblem` algorithms
 
-In order to make algorithms domain-agnostic, the BZ loaded from
-[`load_bz`](@ref) can be called with the algorithms below, which are aliases
+Although different algorithms may use different representations of the BZ, the BZ loaded from
+[`load_bz`](@ref) can be called with any of the algorithms below, which are aliases
 for algorithms above
 
 ```@docs

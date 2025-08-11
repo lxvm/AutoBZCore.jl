@@ -1,7 +1,7 @@
 using Test
 using LinearAlgebra
 using AutoBZCore
-using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
+using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints, AuxValue
 
 @testset "domains" begin
     @testset "SymmetricBZ" begin
@@ -26,6 +26,16 @@ using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
         @test cbz.B ≈ B
         @test nsyms(cbz) == factorial(dims)*2^dims
         @test cbz.lims == AutoBZCore.TetrahedralLimits(ntuple(n -> 0.5, dims))
+
+        ibz = IBZ()
+        @test_throws ArgumentError load_bz(ibz)
+        ibz3 = IBZ(3)
+        @test_throws "SymmetryReduceBZ" load_bz(ibz3)
+    end
+    @testset "n symmetries" for d in 1:3
+        @test AutoBZCore.n_permutations(d) == factorial(d)
+        @test AutoBZCore.n_sign_flips(d) == 2^d
+        @test AutoBZCore.n_cube_automorphisms(d) == 2^d * factorial(d)
     end
 end
 
@@ -41,4 +51,15 @@ end
         end
         @test solve(ip, EvalCounter(PTR(; npt=10))).stats.numevals == 10^dims
     end
+end
+@testset "AuxValue" begin
+    dims = 3
+    A = I(dims)
+    vol = (2π)^dims
+    bz = load_bz(FBZ(), A)
+    ip = AutoBZProblem((x,p) -> AuxValue(1.0, 1.0), bz)  # unit measure
+    alg = IAI(ntuple(_->AuxQuadGKJL(), dims))
+    solver = init(ip, alg)
+    sol = solve!(solver)
+    @test sol.value.val ≈ sol.value.aux
 end

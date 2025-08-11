@@ -3,10 +3,9 @@ function init_cacheval(h, domain, p, alg::BCD)
     h isa FourierSeries || throw(ArgumentError("BCD currently supports Fourier series Hamiltonians"))
     p isa SymmetricBZ || throw(ArgumentError("BCD supports BZ parameters from load_bz"))
     d2h = HessianSeries(h)
-    wd2h = FourierSeriesEvaluators.workspace_allocate(d2h, FourierSeriesEvaluators.period(d2h))
     kalg = MonkhorstPack(npt=alg.npt,syms=p.syms)
     dom = canonical_ptr_basis(p.B)
-    rule = init_fourier_rule(wd2h, dom, kalg)
+    rule = init_fourier_rule(d2h, dom, kalg, SerialExecutor())
     if rule isa FourierPTR
         if typeof(rule.s[1][1]) <: Number
             tabeigen = eigen.(getindex.(rule.s, 1))
@@ -20,7 +19,7 @@ function init_cacheval(h, domain, p, alg::BCD)
             tabeigen = eigen.(Hermitian.(getindex.(getproperty.(getindex.(rule.wxs, 2),:s),1)))
         end
     end
-    
+
     return rule, tabeigen
 end
 
@@ -33,7 +32,7 @@ function dos_solve(h, domain, p, alg::BCD, cacheval;
     rule, tabeigen = cacheval
     (; npt, α, ΔE, η) = alg
     d = ndims(bz)
-    temp= rule isa FourierPTR ? rule.s[1][1] : rule.wxs[1][2].s[1] 
+    temp= rule isa FourierPTR ? rule.s[1][1] : rule.wxs[1][2].s[1]
     J = size(temp)[1]
     result = do_BCD(rule, tabeigen, h, E, α, ΔE, η, Val(d), Val(J))
     return DOSSolution(result, Success, (;))

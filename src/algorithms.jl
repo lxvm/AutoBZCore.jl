@@ -2,6 +2,67 @@
 # - init_cacheval
 # - do_integral
 
+# Methods an integrand must define
+# - init_integrand_cacheval -> (prototype, cacheval)
+# - $(algorithm)_integrand
+
+init_integrand_cacheval(f::IntegralFunction, dom, p) = init_integrand_cacheval_if(f.executor, f, dom, p)
+init_integrand_cacheval(f::CommonSolveIntegralFunction, dom, p) = init_integrand_cacheval_cs(f.executor, f, dom, p)
+
+function init_integrand_cacheval_if(::SerialExecutor, f::IntegralFunction, dom, p)
+    prototype = get_prototype(f, get_prototype(dom), p)
+    cacheval = nothing
+    return prototype, cacheval
+end
+function init_integrand_cacheval_if(exec::ThreadedExecutor, f::IntegralFunction, dom, p)
+    prototype = get_prototype(f, get_prototype(dom), p)
+    proto = [prototype]
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.max_batch) do y, x, p
+        d, r = divrem(size(x)[end], exec.ntasks)
+        @sync for n in 1:exec.ntasks
+            chunk = ((n-1)*d+(n > r ? r : n-1)):(n*d-1+(n > r ? r : n))
+            Threads.@spawn for i in chunk
+                y[begin+i] = f.f(x[begin+i], p)
+            end
+        end
+    end
+    _prototype, _cacheval = init_integrand_cacheval(func, dom, p)
+    cacheval = (func, proto, _cacheval)
+    return _prototype, cacheval
+end
+struct InplaceArray{T<:AbstractArray}
+    data::T
+end
+function init_integrand_cacheval(f::InplaceIntegralFunction, dom, p)
+    prototype = get_prototype(f, get_prototype(dom), p)
+    cacheval = similar(prototype)
+    return InplaceArray(prototype), cacheval
+end
+struct BatchArray{T<:AbstractArray}
+    data::T
+end
+function init_integrand_cacheval(f::InplaceBatchIntegralFunction, dom, p)
+    prototype = get_prototype(f, get_prototype(dom), p)
+    cacheval = similar(prototype)
+    return BatchArray(prototype), cacheval
+end
+function init_integrand_cacheval_cs(::SerialExecutor, f::CommonSolveIntegralFunction, dom, p)
+    solver, integrand, prototype = init_commonsolvefunction(f, dom, p)
+    cacheval = (solver, integrand)
+    return prototype, cacheval
+end
+function init_integrand_cacheval_cs(exec::ThreadedExecutor, f::CommonSolveIntegralFunction, dom, p)
+    channel, integrand, prototype = init_commonsolvefunction(f, dom, p)
+    proto = [prototype]
+    func = InplaceBatchIntegralFunction(proto; max_batch=exec.max_batch) do y, x, p
+        do_threaded_solve!(integrand, channel, f, y, x, p)
+    end
+    _prototype, _cacheval = init_integrand_cacheval(func, dom, p)
+    cacheval = (func, channel, integrand, proto, _cacheval)
+    return _prototype, cacheval
+end
+
+
 """
     QuadGKJL(; order = 7, norm = norm)
 
@@ -43,63 +104,75 @@ function init_segbuf(prototype, segs, alg)
     TE = typeof(alg.norm(fx_s))
     return IteratedIntegration.alloc_segbuf(TX, TI, TE)
 end
-
-function init_cacheval(f::IntegralFunction, dom, p, alg::QuadGKJL; kws...)
+function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::QuadGKJL; kws...)
     segs = PuncturedInterval(dom)
-    prototype = get_prototype(f, get_prototype(segs), p)
-    return init_segbuf(prototype, segs, alg)
+    prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p)
+    proto = if prototype isa BatchArray
+        (data = prototype.data) isa AbstractVector || throw(ArgumentError("QuadGK does not support batched functions with multidimensional outputs"))
+        first(data)
+    elseif prototype isa InplaceArray
+        prototype.data
+    else
+        prototype
+    end
+    algorithm_cacheval = if prototype isa BatchArray
+        pt = get_prototype(segs)
+        pts = zeros(typeof(pt), 2*alg.order+1)
+        upts = pts / pt
+        (pts, upts)
+    elseif prototype isa InplaceArray
+        fg = similar(prototype.data)
+        I = fg * real(oneunit(eltype(segs)))
+        (fg, similar(fg), similar(fg), similar(fg), similar(I), I)
+    else
+        nothing
+    end
+    return init_segbuf(proto, segs, alg), algorithm_cacheval, integrand_cacheval
 end
-function init_cacheval(f::InplaceIntegralFunction, dom, p, alg::QuadGKJL; kws...)
-    segs = PuncturedInterval(dom)
-    prototype = get_prototype(f, get_prototype(segs), p)
-    return init_segbuf(prototype, segs, alg), similar(prototype)
-end
-function init_cacheval(f::InplaceBatchIntegralFunction, dom, p, alg::QuadGKJL; kws...)
-    segs = PuncturedInterval(dom)
-    pt = get_prototype(segs)
-    prototype = get_prototype(f, pt, p)
-    prototype isa AbstractVector || throw(ArgumentError("QuadGKJL only supports batch integrands with vector outputs"))
-    pts = zeros(typeof(pt), 2*alg.order+1)
-    upts = pts / pt
-    return init_segbuf(first(prototype), segs, alg), similar(prototype), pts, upts
-end
-function init_cacheval(f::CommonSolveIntegralFunction, dom, p, alg::QuadGKJL; kws...)
-    segs = PuncturedInterval(dom)
-    x = get_prototype(segs)
-    cache, integrand, prototype = _init_commonsolvefunction(f, dom, p; x)
-    return init_segbuf(prototype, segs, alg), cache, integrand
-end
-function do_integral(f, dom, p, alg::QuadGKJL, cacheval;
+function do_integral(f, dom, p, alg::QuadGKJL, (segbuf, alg_cache, cacheval);
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
     # we need to strip units from the limits since infinity transformations change the units
     # of the limits, which can break the segbuf
-    u = oneunit(eltype(dom))
-    usegs = map(x -> x/u, dom)
+    segs = PuncturedInterval(dom)
+    u = oneunit(real(eltype(segs)))
+    ua, ub = map(x -> x/u, endpoints(segs))
+    usegs = map(x -> x/u, breakpoints(segs))
     atol = isnothing(abstol) ? abstol : abstol/u
-    val, err = call_quadgk(f, p, u, usegs, cacheval; maxevals = maxiters, rtol = reltol, atol, order = alg.order, norm = alg.norm)
+    g = quadgk_integrand(f, p, u, alg_cache, cacheval)
+    val, err = quadgk(g, ua, usegs..., ub; segbuf, maxevals = maxiters, rtol = reltol, atol, order = alg.order, norm = alg.norm)
     value = u*val
-    retcode = err < max(something(atol, zero(err)), alg.norm(val)*something(reltol, isnothing(atol) ? sqrt(eps(one(eltype(usegs)))) : 0)) ? Success : Failure
+    retcode = err < max(something(atol, zero(err)), alg.norm(val)*something(reltol, isnothing(atol) ? sqrt(eps(float(one(u)))) : 0)) ? Success : Failure
     stats = (; error=u*err)
     return IntegralSolution(value, retcode, stats)
 end
-function call_quadgk(f::IntegralFunction, p, u, usegs, cacheval; kws...)
-    quadgk(x -> f.f(u*x, p), usegs...; kws..., segbuf=cacheval)
+quadgk_integrand(f::IntegralFunction, p, u, alg_cache, cacheval) = quadgk_integrand_if(f.executor, f, p, u, alg_cache, cacheval)
+function quadgk_integrand_if(::SerialExecutor, f::IntegralFunction, p, u, alg_cache, cacheval)
+    x -> f.f(u*x, p)
 end
-function call_quadgk(f::InplaceIntegralFunction, p, u, usegs, cacheval; kws...)
+function quadgk_integrand_if(exec::ThreadedExecutor, f::IntegralFunction, p, u, alg_cache, cacheval)
+    func, proto, cache = cacheval
+    quadgk_integrand(func, p, u, alg_cache, cache)
+end
+function quadgk_integrand(f::InplaceIntegralFunction, p, u, alg_cache, cacheval)
     # TODO allocate everything in the QuadGK.InplaceIntegrand in the cacheval
-    quadgk!((y, x) -> f.f!(y, u*x, p), cacheval[2], usegs...; kws..., segbuf=cacheval[1])
+    _f = (y, x) -> f.f!(y, u*x, p)
+    fg, fk, Ig, Ik, Idiff, I = alg_cache
+    fx = cacheval
+    InplaceIntegrand(_f, fg, fk, Ig, Ik, fx, Idiff, I)
 end
-function call_quadgk(f::InplaceBatchIntegralFunction, p, u, usegs, cacheval; kws...)
-    pts = cacheval[3]
-    g = BatchIntegrand((y, x) -> f.f!(y, resize!(pts, length(x)) .= u .* x, p), cacheval[2], cacheval[4]; max_batch=f.max_batch)
-    quadgk(g, usegs...; kws..., segbuf=cacheval[1])
+function quadgk_integrand(f::InplaceBatchIntegralFunction, p, u, alg_cache, cacheval)
+    pts, upts = alg_cache
+    BatchIntegrand((y, x) -> f.f!(y, resize!(pts, length(x)) .= u .* x, p), cacheval, upts; max_batch=f.max_batch)
 end
-function call_quadgk(f::CommonSolveIntegralFunction, p, u, usegs, cacheval; kws...)
-    # cache = cacheval[2] could call do_solve!(cache, f, x, p) to fully specialize
-    integrand = cacheval[3]
-    quadgk(x -> integrand(u * x, p), usegs...; kws..., segbuf=cacheval[1])
+quadgk_integrand(f::CommonSolveIntegralFunction, p, u, alg_cache, cacheval) = quadgk_integrand_cs(f.executor, f, p, u, alg_cache, cacheval)
+function quadgk_integrand_cs(::SerialExecutor, f::CommonSolveIntegralFunction, p, u, alg_cache, cacheval)
+    solver, integrand = cacheval
+    x -> integrand(solver, f, u * x, p)
 end
-
+function quadgk_integrand_cs(exec::ThreadedExecutor, f::CommonSolveIntegralFunction, p, u, alg_cache, cacheval)
+    func, channel, integrand, proto, cache = cacheval
+    quadgk_integrand(func, p, u, alg_cache, cache)
+end
 
 """
     HCubatureJL(; norm=norm, initdiv=1)
@@ -112,13 +185,11 @@ struct HCubatureJL{N} <: IntegralAlgorithm
 end
 HCubatureJL(; norm=norm, initdiv=1) = HCubatureJL(norm, initdiv)
 
-function init_cacheval(f::IntegralFunction, dom, p, ::HCubatureJL; kws...)
-    # TODO utilize hcubature_buffer
-    return
-end
-function init_cacheval(f::CommonSolveIntegralFunction, dom, p, ::HCubatureJL; kws...)
-    cache, integrand, = _init_commonsolvefunction(f, dom, p)
-    return cache, integrand
+function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::HCubatureJL; kws...)
+    prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p)
+    prototype isa InplaceArray && throw(ArgumentError("HCubatureJL does not support inplace integrands"))
+    prototype isa BatchArray && throw(ArgumentError("HCubatureJL does not support batched integrands"))
+    return integrand_cacheval
 end
 
 function do_integral(f, dom, p, alg::HCubatureJL, cacheval; reltol = 0, abstol = 0, maxiters = typemax(Int))
@@ -131,11 +202,13 @@ function do_integral(f, dom, p, alg::HCubatureJL, cacheval; reltol = 0, abstol =
     return IntegralSolution(value, retcode, stats)
 end
 function hcubature_integrand(f::IntegralFunction, p, a, b, cacheval)
+    @assert f.executor isa SerialExecutor
     x -> f.f(x, p)
 end
 function hcubature_integrand(f::CommonSolveIntegralFunction, p, a, b, cacheval)
-    integrand = cacheval[2]
-    return x -> integrand(x, p)
+    @assert f.executor isa SerialExecutor
+    solver, integrand = cacheval
+    return x -> integrand(solver, f, x, p)
 end
 
 """
@@ -155,7 +228,7 @@ function trapz(n::Integer)
 end
 
 """
-    QuadratureFunction(; fun=trapz, npt=50, nthreads=1)
+    QuadratureFunction(; fun=trapz, npt=50)
 
 Quadrature rule for the standard interval [-1,1] computed from a function `x, w = fun(npt)`.
 The nodes and weights should be set so the integral of `f` on [-1,1] is `sum(w .* f.(x))`.
@@ -163,54 +236,28 @@ The default quadrature rule is [`trapz`](@ref), although other packages provide 
 
     using FastGaussQuadrature
     alg = QuadratureFunction(fun=gausslegendre, npt=100)
-
-`nthreads` sets the numbers of threads used to parallelize the quadrature only when the
-integrand is a , in which case the user must parallelize the
-integrand evaluations. For no threading set `nthreads=1`.
 """
 struct QuadratureFunction{F} <: IntegralAlgorithm
     fun::F
     npt::Int
-    nthreads::Int
 end
-QuadratureFunction(; fun=trapz, npt=50, nthreads=1) = QuadratureFunction(fun, npt, nthreads)
+QuadratureFunction(; fun=trapz, npt=50) = QuadratureFunction(fun, npt)
 
 function init_rule(dom, alg::QuadratureFunction)
     x, w = alg.fun(alg.npt)
     return [(w,x) for (w,x) in zip(w,x)]
 end
-function init_autosymptr_cache(f::IntegralFunction, dom, p, bufsize; kws...)
-    return (; buffer=nothing)
-end
-function init_autosymptr_cache(f::InplaceIntegralFunction, dom, p, bufsize; kws...)
-    x = get_prototype(dom)
-    proto = get_prototype(f, x, p)
-    y = similar(proto)
-    ytmp = similar(proto)
-    I = y * prod(x)
-    Itmp = similar(I)
-    return (; buffer=nothing, I, Itmp, y, ytmp)
-end
-function init_autosymptr_cache(f::InplaceBatchIntegralFunction, dom, p, bufsize; kws...)
-    x0 = get_prototype(dom)
-    proto=get_prototype(f, x0, p)
-    return (; buffer=similar(proto, bufsize), y=similar(proto, bufsize), x=Vector{typeof(x0)}(undef, bufsize))
-end
-function init_autosymptr_cache(f::CommonSolveIntegralFunction, dom, p, bufsize; kws...)
-    cache, integrand, = _init_commonsolvefunction(f, dom, p)
-    return (; buffer=nothing, cache, integrand)
-end
-function init_cacheval(f, dom, p, alg::QuadratureFunction; kws...)
+
+function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::QuadratureFunction; kws...)
     rule = init_rule(dom, alg)
-    cache = init_autosymptr_cache(f, dom, p, alg.npt; kws...)
-    return (; rule, cache...)
+    return init_cacheval(f, dom, p, AffineQuad(rule); kws...)
 end
 
 function do_integral(f, dom, p, alg::QuadratureFunction, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
-    rule = cacheval.rule; buffer=cacheval.buffer
+    rule = cacheval.rule; buffer=cacheval.algorithm_cacheval.buffer
     segs = segments(dom)
-    g = autosymptr_integrand(f, p, segs, cacheval)
+    g = autosymptr_integrand(f, p, segs, cacheval.algorithm_cacheval, cacheval.integrand_cacheval)
     A = sum(1:length(segs)-1) do i
         a, b = segs[i], segs[i+1]
         s = (b-a)/2
@@ -219,17 +266,4 @@ function do_integral(f, dom, p, alg::QuadratureFunction, cacheval;
     end
 
     return IntegralSolution(A, Success, (; numevals = length(cacheval.rule)*(length(segs)-1)))
-end
-function autosymptr_integrand(f::IntegralFunction, p, segs, cacheval)
-    x -> f.f(x, p)
-end
-function autosymptr_integrand(f::InplaceIntegralFunction, p, segs, cacheval)
-    AutoSymPTR.InplaceIntegrand((y,x) -> f.f!(y,x,p), cacheval.I, cacheval.Itmp, cacheval.y, cacheval.ytmp)
-end
-function autosymptr_integrand(f::InplaceBatchIntegralFunction, p, segs, cacheval)
-    AutoSymPTR.BatchIntegrand((y,x) -> f.f!(y,x,p), cacheval.y, cacheval.x, max_batch=f.max_batch)
-end
-function autosymptr_integrand(f::CommonSolveIntegralFunction, p, segs, cacheval)
-    integrand = cacheval.integrand
-    return x -> integrand(x, p)
 end

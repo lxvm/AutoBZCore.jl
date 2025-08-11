@@ -34,4 +34,5 @@ AutoBZCore.HyperCube
 AutoBZCore.SymmetricBZ
 AutoBZCore.trapz
 AutoBZCore.cube_automorphisms
+AutoBZCore.CommonSolutionStats
 ```

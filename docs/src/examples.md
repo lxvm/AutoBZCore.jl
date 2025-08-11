@@ -52,6 +52,7 @@ prob = IntegralProblem(gloc_integrand, dom, p)
 alg = QuadGKJL()
 solve(prob, alg; abstol=1e-3).value
 ```
+For an explanation on how to set integration tolerances `abstol` and `reltol` see [`AutoBZCore.solve`](@ref).
 
 ## BZ integration
 

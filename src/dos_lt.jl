@@ -3,10 +3,9 @@ using CircularArrays
 function init_cacheval(h, domain, p, alg::LT)
     h isa FourierSeries || throw(ArgumentError("LT currently supports Fourier series Hamiltonians"))
     p isa SymmetricBZ || throw(ArgumentError("LT supports BZ parameters from load_bz"))
-    wh = FourierSeriesEvaluators.workspace_allocate(h, FourierSeriesEvaluators.period(h))
     kalg = MonkhorstPack(npt = alg.npt, syms = p.syms)
     dom = canonical_ptr_basis(p.B)
-    rule = init_fourier_rule(wh, dom, kalg)
+    rule = init_fourier_rule(h, dom, kalg, SerialExecutor())
     if rule isa FourierPTR
         tabeigen = CircularArray(real.(getfield.(eigen.(rule.s), :values)))
     elseif rule isa FourierMonkhorstPack

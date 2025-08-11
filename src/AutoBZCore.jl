@@ -50,18 +50,17 @@ module AutoBZCore
 using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr, diag, eigen, Hermitian
 
 using StaticArrays: SVector, SMatrix, sacollect
-using FunctionWrappers: FunctionWrapper
 using ChunkSplitters: chunks, getchunk
 using AutoSymPTR
 using FourierSeriesEvaluators
 using IteratedIntegration
-using QuadGK: quadgk, quadgk!, BatchIntegrand
+using QuadGK: quadgk, quadgk!, BatchIntegrand, InplaceIntegrand
 using HCubature: hcubature
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
 using IteratedIntegration: limit_iterate, interior_point
 using HCubature: hcubature, hquadrature
 using CommonSolve: solve
-import CommonSolve: init, solve!
+import CommonSolve: init, solve!, step!
 export init, solve!, solve
 
 include("domains.jl")
@@ -69,22 +68,24 @@ include("domains.jl")
 export IntegralFunction, InplaceIntegralFunction, InplaceBatchIntegralFunction
 export CommonSolveIntegralFunction
 export IntegralProblem
+export AbstractSpecialization, DefaultSpecialize, NoSpecialize, FullSpecialize, FunctionWrapperSpecialize
+export AbstractExecutor, SerialExecutor, ThreadedExecutor
 include("interfaces.jl")
 
 export QuadGKJL, HCubatureJL, QuadratureFunction
 include("algorithms.jl")
-export AuxQuadGKJL, ContQuadGKJL, MeroQuadGKJL
+export AuxQuadGKJL
 include("algorithms_iterated.jl")
 export MonkhorstPack, AutoSymPTRJL
 include("algorithms_autosymptr.jl")
-export NestedQuad, EvalCounter#, AbsoluteEstimate
+export NestedQuad, EvalCounter, EvalLogger
 include("algorithms_meta.jl")
 
 export SymmetricBZ, nsyms
 export load_bz, FBZ, IBZ, InversionSymIBZ, CubicSymIBZ
 export AbstractSymRep, UnknownRep, TrivialRep
 export AutoBZProblem
-export IAI, PTR, AutoPTR, TAI, AutoBZEvalCounter
+export IAI, PTR, AutoPTR, TAI
 include("brillouin.jl")
 
 export FourierIntegralFunction, CommonSolveFourierIntegralFunction
