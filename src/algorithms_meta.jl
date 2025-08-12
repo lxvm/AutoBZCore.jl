@@ -1,3 +1,15 @@
+@enum StaticTolAlgMethod begin
+    bbox
+    project
+end
+struct StaticTolAlg
+    method::StaticTolAlgMethod
+end
+StaticTolAlg(; method=bbox) = StaticTolAlg(method)
+struct AdaptiveTolAlg end
+# struct v04TolAlg end
+struct v03TolAlg end
+
 """
     NestedQuad(alg::IntegralAlgorithm)
     NestedQuad(algs::IntegralAlgorithm...)
@@ -8,24 +20,29 @@ IteratedIntegration.jl package. Analogous to `nested_quad` from IteratedIntegrat
 The integrand should expect `SVector` inputs. Do not use this for very high-dimensional
 integrals, since the compilation time scales very poorly with respect to dimensionality.
 """
-struct NestedQuad{T,S,E} <: IntegralAlgorithm
+struct NestedQuad{T,S,E,A} <: IntegralAlgorithm
     algs::T
     specialize::S
     executor::E
-    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor()) = new{typeof(alg),typeof(specialize),typeof(executor)}(alg, specialize, executor)
-    NestedQuad(algs::Tuple{IntegralAlgorithm,Vararg{IntegralAlgorithm,N}}, specialize::Tuple{Vararg{AbstractSpecialization,N}}=ntuple(_->NoSpecialize(), length(algs)-1), executor::Tuple{Vararg{AbstractExecutor,N}}=ntuple(_->SerialExecutor(), length(algs)-1)) where {N} = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
+    tolerance_alg::A
+    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor(), tol=StaticTolAlg()) = new{typeof(alg),typeof(specialize),typeof(executor),typeof(tol)}(alg, specialize, executor, tol)
+    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->NoSpecialize(), length(algs)), executor::Tuple{Vararg{AbstractExecutor}}=ntuple(_->SerialExecutor(), length(algs)), tol=StaticTolAlg()) = new{typeof(algs),typeof(specialize),typeof(executor),typeof(tol)}(algs, specialize, executor, tol)
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 
-unroll_limits(dom::AbstractIteratedLimits) = unroll_limits(limit_iterate(dom)...)
+unroll_limits(dom::AbstractIteratedLimits) = unroll_limits(segments(dom, ndims(dom)), dom, ())
 unroll_limits(dom) = unroll_limits(IteratedIntegration.load_limits(dom))
 function unroll_limits(segs, lims, state)
     a, b, = segs
     x = (a + b)/2
-    next = limit_iterate(lims, state, x)
-    next isa SVector && return next, (segs,), (lims,), (state,)
-    x0, _segs, _lims, _state = unroll_limits(next...)
-    return x0, (_segs..., segs), (_lims..., lims), (_state..., state)
+    # next = limit_iterate(lims, state, x)
+    if ndims(lims) == 1
+        return SVector(promote(x, state...)), (segs,), (lims,), (state,)
+    else
+        lx = fixandeliminate(lims, x, Val(ndims(lims)))
+        x0, _segs, _lims, _state = unroll_limits(segments(lx, ndims(lx)), lx, (x, state...))
+        return x0, (_segs..., segs), (_lims..., lims), (_state..., state)
+    end
 end
 
 struct SegmentProblem{L,D,K}
@@ -50,7 +67,7 @@ function init(prob::SegmentProblem, ::SegmentAlgorithm; kws...)
 end
 
 function solve!(solver::SegmentSolver)
-    return IteratedIntegration.segments(solver.lims, solver.dim)
+    return segments(solver.lims, solver.dim)
 end
 
 struct EliminationProblem{L,X,D,K}
@@ -79,11 +96,11 @@ function init(prob::EliminationProblem, alg::EliminationAlgorithm; kws...)
 end
 
 function solve!(solver::EliminationSolver)
-    return IteratedIntegration.fixandeliminate(solver.lims, solver.x, solver.dim)
+    return fixandeliminate(solver.lims, solver.x, solver.dim)
 end
 
 _val_unwrap(::Val{X}) where {X} = X
-function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, algs, spec, exec; kws...)
+function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, algs, spec, exec, tolalg; kws...)
     length(states) == 0 && return innerprob, inneralg
     elimprob = EliminationProblem(lims[1], x0[ndims(lims[1])], Val(ndims(lims[1])))
     eliminput = (; x=x0[ndims(lims[1])], lims=lims[1], state=states[1], dim=Val(ndims(lims[1])), p, kws=innerprob.input.kws)
@@ -105,7 +122,9 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
         return sol.value
     end
     __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
-    _kws = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
+
+    _kws = tolalg isa AdaptiveTolAlg ? _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...) : 
+        tolalg isa StaticTolAlg ? _rescale_abstol(1/measure_of_outer_domain; kws...) : error("tolalg not recognized")
     innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], p, kws=_kws)
     intprob = IntegralProblem(__f, segs[1], (; innerinput..., kws=eliminput.kws); _kws...)
 
@@ -115,14 +134,13 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
         segsolver.dim = _val_unwrap(dim)
         segs = solve!(segsolver)
         intsolver.dom = segs
-        len = abs(segs[end]-segs[begin])
-        intsolver.p = (; intsolver.p..., lims, state, dim, p, kws=_rescale_abstol(1/len; kws...))
+        intsolver.p = (; intsolver.p..., lims, state, dim, p, kws=tolalg isa AdaptiveTolAlg ? _rescale_abstol(1/abs(segs[end]-segs[begin]); kws...) : kws)
         intsolver.kwargs = (; intsolver.kwargs..., kws...)
         return solve!(intsolver)
     end
     _inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
 
-    nested_prob(_innerprob, _inneralg, prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end]; kws...)
+    nested_prob(_innerprob, _inneralg, prototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec[2:end], exec[2:end], tolalg; kws...)
 end
 function nested_integralfunction(f::CommonSolveIntegralFunction, x0, p)
     return nested_integralfunction_cs(f.executor, f, x0, p)
@@ -181,7 +199,7 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
     end
 
     inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
-    prob, alg = nested_prob(innerprob, inneralg, fprototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec, exec; kws...)
+    prob, alg = nested_prob(innerprob, inneralg, fprototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec, exec, alg.tolerance_alg; kws...)
     return init(prob, alg)
 end
 

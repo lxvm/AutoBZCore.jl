@@ -3,6 +3,7 @@ using LinearAlgebra
 using AutoBZCore
 using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
 using AutoBZCore: CubicLimits
+using QuadGK, HCubature, AuxQuadGK
 
 
 struct TestProblem{A,B}

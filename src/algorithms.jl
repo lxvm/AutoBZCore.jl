@@ -256,7 +256,7 @@ end
 function do_integral(f, dom, p, alg::QuadratureFunction, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
     rule = cacheval.rule; buffer=cacheval.algorithm_cacheval.buffer
-    segs = segments(dom)
+    segs = _segments(dom)
     g = autosymptr_integrand(f, p, segs, cacheval.algorithm_cacheval, cacheval.integrand_cacheval)
     A = sum(1:length(segs)-1) do i
         a, b = segs[i], segs[i+1]

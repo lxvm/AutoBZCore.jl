@@ -85,7 +85,6 @@ symmetrize(rep, bz::SymmetricBZ, x) = symmetrize_(rep, bz, x)
 symmetrize(_, ::FullBZ, x) = x
 
 symmetrize_(rep, bz, x) = symmetrize__(rep, bz, x)
-symmetrize_(rep, bz, x::AuxValue) = AuxValue(symmetrize__(rep, bz, x.val), symmetrize__(rep, bz, x.aux))
 
 symmetrize__(::TrivialRep, bz, x) = nsyms(bz) * x
 
@@ -206,7 +205,7 @@ and `positions` must be a matrix whose columns give the coordinates of the atom 
 corresponding species.
 """
 function load_bz(bz::IBZ, A, B, species, positions; kws...)
-    ext = Base.get_extension(@__MODULE__(), :SymmetryReduceBZExt)
+    ext = Base.get_extension(@__MODULE__(), :AutoBZCoreSymmetryReduceBZExt)
     if ext !== nothing
         return ext.load_ibz(bz, A, B, species, positions; kws...)
     else
@@ -397,24 +396,19 @@ end
 # - bz_to_standard: (transformed) bz, unitless domain, standard algorithm
 
 """
-    IAI(alg::IntegralAlgorithm=AuxQuadGKJL())
     IAI(algs::IntegralAlgorithm...)
 
 Iterated-adaptive integration using `nested_quad` from
 [IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
 **This algorithm is the most efficient for localized integrands**.
 """
-struct IAI{T,S,E} <: AutoBZAlgorithm
-    algs::T
-    specialize::S
-    executor::E
-    IAI(alg::IntegralAlgorithm=AuxQuadGKJL(), specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor()) = new{typeof(alg),typeof(specialize),typeof(executor)}(alg, specialize, executor)
-    IAI(algs::Tuple{IntegralAlgorithm,Vararg{IntegralAlgorithm,N}}, specialize::Tuple{Vararg{AbstractSpecialization,N}}=ntuple(_->NoSpecialize(),length(algs)-1), executor::Tuple{Vararg{AbstractExecutor,N}}=ntuple(_->SerialExecutor(),length(algs)-1)) where {N} = new{typeof(algs),typeof(specialize),typeof(executor)}(algs, specialize, executor)
+struct IAI{T<:NestedQuad} <: AutoBZAlgorithm
+    alg::T
 end
-IAI(algs::IntegralAlgorithm...) = IAI(algs)
+IAI(args...; kws...) = IAI(NestedQuad(args...; kws...))
 
 function bz_to_standard(rep, f, bz, p, bzalg::IAI; kws...)
-    return IntegralProblem(f, bz.lims, p; kws...), NestedQuad(bzalg.algs, bzalg.specialize, bzalg.executor)
+    return IntegralProblem(f, bz.lims, p; kws...), bzalg.alg
 end
 
 """

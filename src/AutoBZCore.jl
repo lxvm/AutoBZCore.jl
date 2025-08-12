@@ -53,12 +53,9 @@ using StaticArrays: SVector, SMatrix, sacollect
 using ChunkSplitters: chunks, getchunk
 using AutoSymPTR
 using FourierSeriesEvaluators
-using IteratedIntegration
-using QuadGK: quadgk, quadgk!, BatchIntegrand, InplaceIntegrand
-using HCubature: hcubature
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
-using IteratedIntegration: limit_iterate, interior_point
-using HCubature: hcubature, hquadrature
+using IteratedIntegration: TetrahedralLimits, CubicLimits, interior_point, measure, segments, eliminate, fixandeliminate, AbstractIteratedLimits
+import IteratedIntegration: load_limits
 using CommonSolve: solve
 import CommonSolve: init, solve!, step!
 export init, solve!, solve
@@ -72,10 +69,10 @@ export AbstractSpecialization, DefaultSpecialize, NoSpecialize, FullSpecialize, 
 export AbstractExecutor, SerialExecutor, ThreadedExecutor
 include("interfaces.jl")
 
-export QuadGKJL, HCubatureJL, QuadratureFunction
+export QuadratureFunction
 include("algorithms.jl")
-export AuxQuadGKJL
-include("algorithms_iterated.jl")
+export QuadGKJL, HCubatureJL, AuxQuadGKJL
+include("algorithms_extension.jl")
 export MonkhorstPack, AutoSymPTRJL
 include("algorithms_autosymptr.jl")
 export NestedQuad, EvalCounter, EvalLogger

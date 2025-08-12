@@ -1,6 +1,6 @@
 endpoints(dom) = (first(dom), last(dom))
 breakpoints(dom) = dom[begin+1:end-1] # or Iterators.drop(Iterators.take(dom, length(dom)-1), 1)
-segments(dom) = dom
+_segments(dom) = dom
 function get_prototype(dom)
     a, b, = dom
     return (a+b)/2
@@ -35,7 +35,7 @@ function get_prototype(p::PuncturedInterval)
     a, b, = segments(p)
     return (a + b)/2
 end
-IteratedIntegration.load_limits(p::PuncturedInterval) = CubicLimits(endpoints(p)...)
+load_limits(p::PuncturedInterval) = CubicLimits(endpoints(p)...)
 
 
 """
@@ -62,4 +62,4 @@ end
 
 get_prototype(l::AbstractIteratedLimits) = interior_point(l)
 
-IteratedIntegration.load_limits(c::HyperCube) = CubicLimits(endpoints(c)...)
+load_limits(c::HyperCube) = CubicLimits(endpoints(c)...)
