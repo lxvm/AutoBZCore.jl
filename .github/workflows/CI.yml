@@ -38,7 +38,7 @@ jobs:
           cache-name: cache-artifacts
       - uses: julia-actions/julia-buildpkg@v1
       - name: Install dependencies
-        run: julia --project -e 'using Pkg; Pkg.develop(url="https://github.com/lxvm/AuxQuadGK.jl.git"); Pkg.instantiate()'
+        run: julia --project -e 'using Pkg; Pkg.add(url="https://github.com/lxvm/AuxQuadGK.jl.git", rev="main", target=:weakdeps); Pkg.instantiate()'
       - uses: julia-actions/julia-runtest@v1
         env:
           PYTHON: ''
