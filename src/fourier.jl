@@ -77,7 +77,12 @@ function CommonSolveFourierIntegralFunction(solve!, prob, alg, s, prototype=noth
 end
 
 function do_solve!(solver, f::CommonSolveFourierIntegralFunction, x, s, p)
-    return f.solve!(solver, x, s, p)
+    sol = f.solve!(solver, x, s, p)
+    if sol isa CommonSolutionStats
+        return sol.value
+    else
+        return sol
+    end
 end
 function _get_prototype(f::CommonSolveFourierIntegralFunction, x, ws, p, _solver=nothing)
     if isnothing(f.prototype)
@@ -132,6 +137,10 @@ function init_integrand_cacheval(f::AbstractFourierIntegralFunction, dom, p)
     return prototype, (g, cacheval)
 end
 
+function quadgk_integrand(f::AbstractFourierIntegralFunction, p, u, alg_cache, (g, cacheval))
+    return quadgk_integrand(g, p, u, alg_cache, cacheval)
+end
+
 function autosymptr_integrand(f::AbstractFourierIntegralFunction, p, segs, alg_cache, (g, cacheval))
     return autosymptr_integrand(g, p, segs, alg_cache, cacheval)
 end
@@ -159,7 +168,7 @@ function FourierPTR(f::AbstractFourierSeries, ::Type{T}, ndim, npt, exec) where 
     FourierSeriesEvaluators.isinplace(f) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
     # unitless quadrature weight/node, but unitful value to Fourier series
     p = AutoSymPTR.PTR(typeof(float(real(one(T)))), ndim, npt)
-    prob = FourierEvaluationProblem(f, BatchArray(ProductArray(ntuple(_->p.x,ndim))))
+    prob = FourierEvaluationProblem(f, BatchArray(ProductArray(ntuple(_->p.x * oneunit(T),ndim))))
     vals = solve(prob, FourierEvaluationAlgorithm(exec))
     return FourierPTR(vals, p)
 end
@@ -393,8 +402,9 @@ function insert_stats(alg::SolverStats, f::FourierIntegralFunction, x, p, channe
 end
 function insert_stats(alg::SolverStats, f::CommonSolveFourierIntegralFunction, x, p, channel)
     input = (; x, p, s=f.s(x))
+    fsolve! = f.solve!
     prob = ComposedCommonSolveProblem(input, f.prob, StatsProblem((x, input.s, p, f.prototype), channel, false)) do (; x, s, p), probsolver, statssolver
-        out = f.solve!(probsolver, x, s, p)
+        out = fsolve!(probsolver, x, s, p)
         step_stats!(statssolver, x, s, p, out)
         return out
     end
@@ -548,7 +558,6 @@ function batchsolve_fourierevalcache!(out, channel, f::AbstractFourierSeries, x:
 end
 
 # Nested quadrature with special series evaluation on a hierarchical grid
-function _quadgk end
 function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQuad; kws...)
     x0, segs, lims, states = unroll_limits(dom)
     series = unroll_series(f.s)
@@ -558,14 +567,32 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQu
     tolalg = alg.tolerance_alg
     _f, fprototype = nested_innerfourierintegralfunction(f, x0, series[1], x0[1], p)
 
-    if tolalg isa StaticTolAlg && tolalg.method == project
-        elimdom = eliminate(dom, 1)
-        meas = elimdom === nothing ? 1 : measure(_quadgk, elimdom)
+
+    _kws, kws_ = if tolalg isa StaticTolAlg && tolalg.method == project
+        elimdom = eliminate(lims[end], 1)
+        invoutermeasure = inv(elimdom === nothing ? 1 : measure(quadgk, elimdom))
+        _rescale_abstol(invoutermeasure; kws...), (; kws...)
+    elseif tolalg isa v04TolAlg
+        _meas = 1
+        _lims = lims[end]
+        while ndims(_lims) > 1
+            s = segments(_lims, ndims(_lims))
+            _meas *= abs(s[end]-s[begin])
+            _lims = fixandeliminate(_lims, (s[begin]+s[end])/2, Val(ndims(_lims)))
+        end
+        init_kws = _rescale_abstol(1/_meas; kws...)
+        _tmp_kws = _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)
+        _tmp_kws, _tmp_kws
+    elseif tolalg isa v03TolAlg
+        _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...), _rescale_abstol(1/real(prod(x0[begin+2:end])); kws...)
+    else
+        _tmp_kws = _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)
+        _tmp_kws, _tmp_kws
     end
 
-    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1], series=series[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
+    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1], series=series[1]); _kws...)
     segprob = SegmentProblem(lims[1], 1)
-    innerinput = (; lims=lims[1], dim=Val(1), state=states[1], p, series=series[1], kws=intprob.kwargs)
+    innerinput = (; lims=lims[1], dim=Val(1), state=states[1], p, series=series[1], kws=kws_)
     innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, p, series, kws), segsolver, intsolver
         segsolver.lims = lims
         segsolver.dim = _val_unwrap(dim)
@@ -577,17 +604,16 @@ function init_cacheval(f::AbstractFourierIntegralFunction, dom, p, alg::NestedQu
             if tolalg.method == bbox
                 kws
             elseif tolalg.method == project
-                _rescale_abstol(inv(meas); kws...)
+                _rescale_abstol(invoutermeasure; kws...)
             else
                 error("$(tolalg.method) not implemented")
             end
         elseif tolalg isa AdaptiveTolAlg
             kws
-        # elseif tolalg isa v04TolAlg
-            # error("v04TolAlg not yet implemented")
-            # kws
+        elseif tolalg isa v04TolAlg
+            length(states) == 1 ? kws : init_kws
         elseif tolalg isa v03TolAlg
-            _rescale_abstol(1/len; kws...)
+            _rescale_abstol(length(states) == 1 ? one(1/len) : 1/len; kws...)
         else
             error("tolalg not recognized")
         end
@@ -621,26 +647,44 @@ function nested_fourierprob(innerprob, inneralg, prototype, p, x0, segs, lims, s
         # solver.input = (; solver.input..., p..., x)
         # sol = solve!(solver)
         ## out-of-place semantics may be faster
-        # @show x
         sol = solver.solve!((; solver.input..., p..., x), solver.solvers...)
-        return sol.value
+        return CommonSolutionStats(sol.value, sol.stats)
     end
     __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
-    _kws = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
-    innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], series=series[1], p, kws=_kws)
-    intprob = IntegralProblem(__f, segs[1], (; innerinput..., kws=eliminput.kws); _kws...)
-
-    if tolalg isa StaticTolAlg
-        invouterlen = if tolalg.method == bbox
+    
+    _kws, kws_ = if tolalg isa StaticTolAlg
+        if tolalg.method == bbox
             _a, _b = segments(lims[end], ndims(lims[1]))
-            1/abs(_b-_a)
+            invouterlen =(1/abs(_b-_a))
+            _tmpk = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
+            _tmpk, _tmpk
         elseif tolalg.method == project
             elimdom = eliminate(lims[end], 1:ndims(lims[1]))
-            elimdom === nothing ? 1 : inv(measure(_quadgk, elimdom))
+            invouterlen = (elimdom === nothing ? 1 : inv(measure(quadgk, elimdom)))
+            _rescale_abstol(invouterlen; kws...), (; kws...)
         else
             error("$(tolalg.method) not implemented")
         end
+    elseif tolalg isa v04TolAlg
+        _meas = 1
+        _lims = lims[end]
+        while ndims(_lims) > ndims(lims[1])
+            s = segments(_lims, ndims(_lims))
+            _meas *= abs(s[end]-s[begin])
+            _lims = fixandeliminate(_lims, (s[begin]+s[end])/2, Val(ndims(_lims)))
+        end
+        init_kws = _rescale_abstol(1/_meas; kws...)
+        ekws = eliminput.kws
+        init_kws, init_kws
+    elseif tolalg isa v03TolAlg
+        _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...), _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1])+1:end])); kws...)
+    else
+        tmpkw = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
+        tmpkw, tmpkw
     end
+
+    innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], series=series[1], p, kws=kws_)
+    intprob = IntegralProblem(__f, segs[1], (; innerinput..., kws=eliminput.kws); _kws...)
 
     segprob = SegmentProblem(lims[1], ndims(lims[1]))
     _innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, series, p, kws), segsolver, intsolver
@@ -648,28 +692,26 @@ function nested_fourierprob(innerprob, inneralg, prototype, p, x0, segs, lims, s
         segsolver.dim = _val_unwrap(dim)
         _segs = solve!(segsolver)
         intsolver.dom = _segs
-        # @show lims; kws _segs
         len = abs(_segs[end]-_segs[begin])
-        __kws, ___kws = if tolalg isa StaticTolAlg
+        __kws, kws__ = if tolalg isa StaticTolAlg
             if tolalg.method == bbox
                 kws, _rescale_abstol(invouterlen; kws...)
             elseif tolalg.method == project
-                _rescale_abstol(invouterlen; kws...), kws
+                _rescale_abstol(invouterlen; kws...), (; kws...)
             else
                 error("not implemented")
             end
         elseif tolalg isa AdaptiveTolAlg
             kws, _rescale_abstol(1/len; kws...)
-        # elseif tolalg isa v04TolAlg
-        #     error("v04TolAlg not yet implemented")
-            # _kws, _rescale_abstol(1/len; _kws...)
+        elseif tolalg isa v04TolAlg
+            (length(states) == 1 ? kws : init_kws), _rescale_abstol(1/len; ekws...) # latter is ignored
         elseif tolalg isa v03TolAlg
-            kw = _rescale_abstol(length(states) == 1 ? oneunit(1/len) : 1/len; kws...)
+            kw = _rescale_abstol(length(states) == 1 ? one(1/len) : 1/len; kws...)
             kw, kw
         else
             error("tolalg not recognized")
         end
-        intsolver.p = (; intsolver.p..., lims, state, series, dim, p, kws=___kws)
+        intsolver.p = (; intsolver.p..., lims, state, series, dim, p, kws=kws__)
         intsolver.kwargs = (; intsolver.kwargs..., __kws...)
         return solve!(intsolver)
     end
@@ -713,13 +755,14 @@ function nested_innerfourierintegralfunction_cs(exec::SerialExecutor, f, x0, ser
     prob = FourierEvaluationProblem(series, x1)
     alg = FourierEvaluationAlgorithm(exec)
     input = (; x=x0, x1, series, p)
+    fsolve! = f.solve!
     cprob = ComposedCommonSolveProblem(input, prob, f.prob) do (; x, x1, p, series), fouriersolver, fsolver
         # fouriersolver.f = series
         # fouriersolver.x = x1
         # s = solve!(fouriersolver)
         ## for performance, eliding the setfield! call is helpful for small fourier series
         s = solve_fourierevalcache!(fouriersolver.cacheval, series, Tuple(x1), SerialExecutor())
-        return f.solve!(fsolver, x, s, p)
+        return fsolve!(fsolver, x, s, p)
     end
 
     calg = ComposedCommonSolveAlgorithm(alg, f.alg)

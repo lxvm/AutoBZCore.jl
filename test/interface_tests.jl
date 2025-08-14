@@ -1,7 +1,7 @@
 using Test
 using LinearAlgebra
 using AutoBZCore
-using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
+using AutoBZCore: PuncturedInterval, HyperCube, _segments, endpoints
 using AutoBZCore: CubicLimits
 using QuadGK, HCubature, AuxQuadGK
 
@@ -43,7 +43,7 @@ end
     b = collect(a)
     sa = PuncturedInterval(a)
     sb = PuncturedInterval(b)
-    @test all(segments(sa) .== segments(sb))
+    @test all(_segments(sa) .== _segments(sb))
     @test (0.0, 2.0) == endpoints(sa) == endpoints(sb)
     @test Float64 == eltype(sa) == eltype(sb)
 

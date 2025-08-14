@@ -1,17 +1,18 @@
+abstract type AbstolAlgorithm end
 @enum StaticTolAlgMethod begin
     bbox
     project
 end
-struct StaticTolAlg
+struct StaticTolAlg <: AbstolAlgorithm
     method::StaticTolAlgMethod
 end
-StaticTolAlg(; method=bbox) = StaticTolAlg(method)
-struct AdaptiveTolAlg end
-# struct v04TolAlg end
-struct v03TolAlg end
+StaticTolAlg(; method=project) = StaticTolAlg(method)
+struct AdaptiveTolAlg <: AbstolAlgorithm end
+struct v04TolAlg <: AbstolAlgorithm end
+struct v03TolAlg <: AbstolAlgorithm end
 
 """
-    NestedQuad(alg::IntegralAlgorithm)
+    NestedQuad(alg::IntegralAlgorithm=QuadGKJL())
     NestedQuad(algs::IntegralAlgorithm...)
 
 Nested integration by repeating one quadrature algorithm or composing a list of algorithms.
@@ -25,13 +26,13 @@ struct NestedQuad{T,S,E,A} <: IntegralAlgorithm
     specialize::S
     executor::E
     tolerance_alg::A
-    NestedQuad(alg::IntegralAlgorithm, specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor(), tol=StaticTolAlg()) = new{typeof(alg),typeof(specialize),typeof(executor),typeof(tol)}(alg, specialize, executor, tol)
-    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm}}, specialize::Tuple{Vararg{AbstractSpecialization}}=ntuple(_->NoSpecialize(), length(algs)), executor::Tuple{Vararg{AbstractExecutor}}=ntuple(_->SerialExecutor(), length(algs)), tol=StaticTolAlg()) = new{typeof(algs),typeof(specialize),typeof(executor),typeof(tol)}(algs, specialize, executor, tol)
+    NestedQuad(alg::IntegralAlgorithm=QuadGKJL(), specialize::AbstractSpecialization=NoSpecialize(), executor::AbstractExecutor=SerialExecutor(); tolalg::AbstolAlgorithm=StaticTolAlg()) = new{typeof(alg),typeof(specialize),typeof(executor),typeof(tolalg)}(alg, specialize, executor, tolalg)
+    NestedQuad(algs::Tuple{IntegralAlgorithm,Vararg{IntegralAlgorithm,N}}, specialize::Tuple{Vararg{AbstractSpecialization,N}}=ntuple(_->NoSpecialize(), N), executor::Tuple{Vararg{AbstractExecutor}}=ntuple(_->SerialExecutor(), N); tolalg::AbstolAlgorithm=StaticTolAlg()) where {N} = new{typeof(algs),typeof(specialize),typeof(executor),typeof(tolalg)}(algs, specialize, executor, tolalg)
 end
 NestedQuad(algs::IntegralAlgorithm...) = NestedQuad(algs)
 
 unroll_limits(dom::AbstractIteratedLimits) = unroll_limits(segments(dom, ndims(dom)), dom, ())
-unroll_limits(dom) = unroll_limits(IteratedIntegration.load_limits(dom))
+unroll_limits(dom) = unroll_limits(load_limits(dom))
 function unroll_limits(segs, lims, state)
     a, b, = segs
     x = (a + b)/2
@@ -119,23 +120,71 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
         # sol = solve!(solver)
         ## out-of-place semantics may be faster
         sol = solver.solve!((; solver.input..., p..., x), solver.solvers...)
-        return sol.value
+        return CommonSolutionStats(sol.value, sol.stats)
     end
     __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
 
-    _kws = tolalg isa AdaptiveTolAlg ? _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...) : 
-        tolalg isa StaticTolAlg ? _rescale_abstol(1/measure_of_outer_domain; kws...) : error("tolalg not recognized")
-    innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], p, kws=_kws)
+    _kws, kws_ = if tolalg isa StaticTolAlg
+        if tolalg.method == bbox
+            _a, _b = segments(lims[end], ndims(lims[1]))
+            invouterlen =(1/abs(_b-_a))
+            _tmpk = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
+            _tmpk, _tmpk
+        elseif tolalg.method == project
+            elimdom = eliminate(lims[end], 1:ndims(lims[1]))
+            invouterlen = (elimdom === nothing ? 1 : inv(measure(quadgk, elimdom)))
+            _rescale_abstol(invouterlen; kws...), (; kws...)
+        else
+            error("$(tolalg.method) not implemented")
+        end
+    elseif tolalg isa v04TolAlg
+        _meas = 1
+        _lims = lims[end]
+        while ndims(_lims) > ndims(lims[1])
+            s = segments(_lims, ndims(_lims))
+            _meas *= abs(s[end]-s[begin])
+            _lims = fixandeliminate(_lims, (s[begin]+s[end])/2, Val(ndims(_lims)))
+        end
+        init_kws = _rescale_abstol(1/_meas; kws...)
+        ekws = eliminput.kws
+        init_kws, init_kws
+    elseif tolalg isa v03TolAlg
+        _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...), _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1])+1:end])); kws...)
+    else
+        tmpkw = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
+        tmpkw, tmpkw
+    end
+
+    innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], p, kws=kws_)
     intprob = IntegralProblem(__f, segs[1], (; innerinput..., kws=eliminput.kws); _kws...)
 
     segprob = SegmentProblem(lims[1], ndims(lims[1]))
     _innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, p, kws), segsolver, intsolver
         segsolver.lims = lims
         segsolver.dim = _val_unwrap(dim)
-        segs = solve!(segsolver)
-        intsolver.dom = segs
-        intsolver.p = (; intsolver.p..., lims, state, dim, p, kws=tolalg isa AdaptiveTolAlg ? _rescale_abstol(1/abs(segs[end]-segs[begin]); kws...) : kws)
-        intsolver.kwargs = (; intsolver.kwargs..., kws...)
+        _segs = solve!(segsolver)
+        intsolver.dom = _segs
+        len = abs(_segs[end]-_segs[begin])
+        __kws, kws__ = if tolalg isa StaticTolAlg
+            if tolalg.method == bbox
+                kws, _rescale_abstol(invouterlen; kws...)
+            elseif tolalg.method == project
+                _rescale_abstol(invouterlen; kws...), (; kws...)
+            else
+                error("not implemented")
+            end
+        elseif tolalg isa AdaptiveTolAlg
+            kws, _rescale_abstol(1/len; kws...)
+        elseif tolalg isa v04TolAlg
+            (length(states) == 1 ? kws : init_kws), _rescale_abstol(1/len; ekws...) # latter is ignored
+        elseif tolalg isa v03TolAlg
+            kw = _rescale_abstol(length(states) == 1 ? one(1/len) : 1/len; kws...)
+            kw, kw
+        else
+            error("tolalg not recognized")
+        end
+        intsolver.p = (; intsolver.p..., lims, state, dim, p, kws=kws__)
+        intsolver.kwargs = (; intsolver.kwargs..., __kws...)
         return solve!(intsolver)
     end
     _inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
@@ -182,29 +231,70 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
     algs = alg.algs isa IntegralAlgorithm ? ntuple(i -> alg.algs, Val(ndims(dom))) : alg.algs
     spec = alg.specialize isa AbstractSpecialization ? ntuple(i -> alg.specialize, Val(ndims(dom)-1)) : alg.specialize
     exec = alg.executor isa AbstractExecutor ? ntuple(i -> alg.executor, Val(ndims(dom)-1)) : alg.executor
+    tolalg = alg.tolerance_alg
 
     _f, fprototype = nested_innerintegralfunction(f, x0, p)
 
-    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)...)
+    _kws, kws_ = if tolalg isa StaticTolAlg && tolalg.method == project
+        elimdom = eliminate(lims[end], 1)
+        invoutermeasure = inv(elimdom === nothing ? 1 : measure(quadgk, elimdom))
+        _rescale_abstol(invoutermeasure; kws...), (; kws...)
+    elseif tolalg isa v04TolAlg
+        _meas = 1
+        _lims = lims[end]
+        while ndims(_lims) > 1
+            s = segments(_lims, ndims(_lims))
+            _meas *= abs(s[end]-s[begin])
+            _lims = fixandeliminate(_lims, (s[begin]+s[end])/2, Val(ndims(_lims)))
+        end
+        init_kws = _rescale_abstol(1/_meas; kws...)
+        _tmp_kws = _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)
+        _tmp_kws, _tmp_kws
+    elseif tolalg isa v03TolAlg
+        _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...), _rescale_abstol(1/real(prod(x0[begin+2:end])); kws...)
+    else
+        _tmp_kws = _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)
+        _tmp_kws, _tmp_kws
+    end
+
+    intprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _kws...)
     segprob = SegmentProblem(lims[1], 1)
-    innerinput = (; lims=lims[1], dim=Val(1), state=states[1], p, kws=intprob.kwargs)
+    innerinput = (; lims=lims[1], dim=Val(1), state=states[1], p, kws=kws_)
     innerprob = ComposedCommonSolveProblem(innerinput, segprob, intprob) do (; lims, dim, state, p, kws), segsolver, intsolver
         segsolver.lims = lims
         segsolver.dim = _val_unwrap(dim)
-        segs = solve!(segsolver)
-        intsolver.dom = segs
+        _segs = solve!(segsolver)
+        intsolver.dom = _segs
+        len = abs(_segs[end]-_segs[begin])
         intsolver.p = (; p, state)
-        intsolver.kwargs = (; intsolver.kwargs..., kws...)
+        __kws = if tolalg isa StaticTolAlg
+            if tolalg.method == bbox
+                kws
+            elseif tolalg.method == project
+                _rescale_abstol(invoutermeasure; kws...)
+            else
+                error("$(tolalg.method) not implemented")
+            end
+        elseif tolalg isa AdaptiveTolAlg
+            kws
+        elseif tolalg isa v04TolAlg
+            length(states) == 1 ? kws : init_kws
+        elseif tolalg isa v03TolAlg
+            _rescale_abstol(length(states) == 1 ? one(1/len) : 1/len; kws...)
+        else
+            error("tolalg not recognized")
+        end
+        intsolver.kwargs = (; intsolver.kwargs..., __kws...)
         return solve!(intsolver)
     end
 
     inneralg = ComposedCommonSolveAlgorithm(SegmentAlgorithm(), algs[1])
-    prob, alg = nested_prob(innerprob, inneralg, fprototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec, exec, alg.tolerance_alg; kws...)
+    prob, alg = nested_prob(innerprob, inneralg, fprototype, p, x0, segs[2:end], lims[2:end], states[2:end], algs[2:end], spec, exec, tolalg; kws...)
     return init(prob, alg)
 end
 
 function do_integral(f, dom, p, alg::NestedQuad, cacheval; kws...)
-    lims = dom isa AbstractIteratedLimits ? dom : IteratedIntegration.load_limits(dom)
+    lims = dom isa AbstractIteratedLimits ? dom : load_limits(dom)
     cacheval.input = (; cacheval.input..., p, lims, kws=(; kws...))
     return solve!(cacheval)
 end
@@ -245,8 +335,8 @@ end
 function do_integral(f, dom, p, alg::SolverStats, (g, channel, cacheval); kws...)
     stats_reset(alg.stats, channel)
     sol = do_integral(g, dom, p, alg.alg, cacheval; kws...)
-    stats = stats_summary(alg.stats, channel)
-    return IntegralSolution(sol.value, sol.retcode, (; sol.stats..., stats...))
+    stats = stats_summary(alg.stats, channel, sol)
+    return IntegralSolution(sol.value, sol.retcode, stats)
 end
 function insert_stats(alg::SolverStats, f::IntegralFunction, x, p, channel)
     proto = get_prototype(f, x, p)
@@ -327,12 +417,12 @@ function stats_reset(::EvalCounter, channel)
         c[] = 0
     end
 end
-function stats_summary(::EvalCounter, channel)
+function stats_summary(::EvalCounter, channel, sol)
     numevals = 0
     for c in channel.data
         numevals += c[]
     end
-    return (; numevals)
+    return (; sol.stats..., numevals)
 end
 
 """
@@ -356,7 +446,7 @@ function stats_reset(::EvalLogger, channel)
         empty!(c)
     end
 end
-function stats_summary(::EvalLogger, channel)
+function stats_summary(::EvalLogger, channel, sol)
     evallog = Iterators.flatten((log for log in channel.data))
-    return (; evallog)
+    return (; sol.stats..., evallog)
 end

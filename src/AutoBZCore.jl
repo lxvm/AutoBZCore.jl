@@ -56,6 +56,7 @@ using FourierSeriesEvaluators
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period
 using IteratedIntegration: TetrahedralLimits, CubicLimits, interior_point, measure, segments, eliminate, fixandeliminate, AbstractIteratedLimits
 import IteratedIntegration: load_limits
+using QuadGK: quadgk, quadgk!, BatchIntegrand, InplaceIntegrand, alloc_segbuf
 using CommonSolve: solve
 import CommonSolve: init, solve!, step!
 export init, solve!, solve

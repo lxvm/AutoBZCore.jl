@@ -7,7 +7,7 @@ function get_prototype(dom)
 end
 
 function get_prototype(B::Basis)
-    return B * zero(SVector{ndims(B),float(eltype(B))})
+    return B * zero(SVector{ndims(B),typeof(float(one(eltype(B))))})
 end
 
 get_basis(B::Basis) = B
@@ -28,11 +28,11 @@ end
 PuncturedInterval(s::PuncturedInterval) = s
 Base.eltype(::Type{PuncturedInterval{T,S}}) where {T,S} = T
 Base.ndims(::PuncturedInterval) = 1
-segments(p::PuncturedInterval) = p.s
+_segments(p::PuncturedInterval) = p.s
 endpoints(p::PuncturedInterval) = endpoints(p.s)
 breakpoints(p::PuncturedInterval) = breakpoints(p.s)
 function get_prototype(p::PuncturedInterval)
-    a, b, = segments(p)
+    a, b, = _segments(p)
     return (a + b)/2
 end
 load_limits(p::PuncturedInterval) = CubicLimits(endpoints(p)...)

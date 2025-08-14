@@ -5,7 +5,7 @@ using LinearAlgebra: I
 
 ntasks = 6
 max_batch = 1000
-#=
+
 @testset "threaded executor" begin
     let
         f = (x, p) -> sin(x[1]*p)
@@ -66,7 +66,6 @@ max_batch = 1000
 
     end
 end
-=#
 @testset "fourier threaded executor" begin
     let
         f = (x, s, p) -> sin(x[1]*p) + s

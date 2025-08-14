@@ -62,20 +62,18 @@ function init_integrand_cacheval_cs(exec::ThreadedExecutor, f::CommonSolveIntegr
     return _prototype, cacheval
 end
 
-
 """
     QuadGKJL(; order = 7, norm = norm)
 
 Duplicate of the QuadGKJL provided by Integrals.jl.
 """
-struct QuadGKJL{F} <: IntegralAlgorithm
-    order::Int
-    norm::F
-end
-function QuadGKJL(; order = 7, norm = norm)
-    return QuadGKJL(order, norm)
+Base.@kwdef struct QuadGKJL{F,S} <: IntegralAlgorithm
+    order::Int=7
+    norm::F=norm
+    stats::S=record_error
 end
 
+record_error(; error, stats...) = (; error)
 function init_midpoint_scale(a::T, b::T) where {T}
     # we try to reproduce the initial midpoint used by QuadGK, and scale just needs right units
     s = float(oneunit(T))
@@ -102,7 +100,7 @@ function init_segbuf(prototype, segs, alg)
     fx_s = prototype * s/oneunit(s)
     TI = typeof(fx_s)
     TE = typeof(alg.norm(fx_s))
-    return IteratedIntegration.alloc_segbuf(TX, TI, TE)
+    return alloc_segbuf(TX, TI, TE)
 end
 function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::QuadGKJL; kws...)
     segs = PuncturedInterval(dom)
@@ -142,7 +140,7 @@ function do_integral(f, dom, p, alg::QuadGKJL, (segbuf, alg_cache, cacheval);
     val, err = quadgk(g, ua, usegs..., ub; segbuf, maxevals = maxiters, rtol = reltol, atol, order = alg.order, norm = alg.norm)
     value = u*val
     retcode = err < max(something(atol, zero(err)), alg.norm(val)*something(reltol, isnothing(atol) ? sqrt(eps(float(one(u)))) : 0)) ? Success : Failure
-    stats = (; error=u*err)
+    stats = alg.stats(; error=u*err, abstol, reltol)
     return IntegralSolution(value, retcode, stats)
 end
 quadgk_integrand(f::IntegralFunction, p, u, alg_cache, cacheval) = quadgk_integrand_if(f.executor, f, p, u, alg_cache, cacheval)
@@ -174,42 +172,6 @@ function quadgk_integrand_cs(exec::ThreadedExecutor, f::CommonSolveIntegralFunct
     quadgk_integrand(func, p, u, alg_cache, cache)
 end
 
-"""
-    HCubatureJL(; norm=norm, initdiv=1)
-
-Multi-dimensional h-adaptive cubature from HCubature.jl.
-"""
-struct HCubatureJL{N} <: IntegralAlgorithm
-    norm::N
-    initdiv::Int
-end
-HCubatureJL(; norm=norm, initdiv=1) = HCubatureJL(norm, initdiv)
-
-function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::HCubatureJL; kws...)
-    prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p)
-    prototype isa InplaceArray && throw(ArgumentError("HCubatureJL does not support inplace integrands"))
-    prototype isa BatchArray && throw(ArgumentError("HCubatureJL does not support batched integrands"))
-    return integrand_cacheval
-end
-
-function do_integral(f, dom, p, alg::HCubatureJL, cacheval; reltol = 0, abstol = 0, maxiters = typemax(Int))
-    a, b = endpoints(dom)
-    g = hcubature_integrand(f, p, a, b, cacheval)
-    routine = a isa Number ? hquadrature : hcubature
-    value, error = routine(g, a, b; norm = alg.norm, initdiv = alg.initdiv, atol=abstol, rtol=reltol, maxevals=maxiters)
-    retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(a))) : abstol)) ? Success : Failure
-    stats = (; error)
-    return IntegralSolution(value, retcode, stats)
-end
-function hcubature_integrand(f::IntegralFunction, p, a, b, cacheval)
-    @assert f.executor isa SerialExecutor
-    x -> f.f(x, p)
-end
-function hcubature_integrand(f::CommonSolveIntegralFunction, p, a, b, cacheval)
-    @assert f.executor isa SerialExecutor
-    solver, integrand = cacheval
-    return x -> integrand(solver, f, x, p)
-end
 
 """
     trapz(n::Integer)
