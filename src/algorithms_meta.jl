@@ -1,25 +1,79 @@
+"""
+    AbstolAlgorithm
+
+Supertype for choice of absolute tolerances of inner integrals in [`NestedQuad`](@ref).
+"""
 abstract type AbstolAlgorithm end
+
+"""
+    StaticTolAlgMethod
+
+Enum for choosing the [`StaticTolAlg`](@ref). Two options:
+- `bbox`: this can set tighter tolerances than the default because it calculates the volume of a bounding box of the domain.
+- `project`: this is the default choice and computes the exact volume of the integration domain, slower than `bbox`.
+"""
 @enum StaticTolAlgMethod begin
     bbox
     project
 end
+
+"""
+    StaticTolAlg(; method::StaticTolAlgMethod=project)
+
+Pick the `abstol` for an inner integral by dividing the problem `abstol` by the volume of the outer variables of integration. 
+The `method` keyword determines how accurately this volume is calculated. See [`StaticTolAlgMethod`](@ref).
+These algorithms do not adapt to changing the domain of integration, so it is recommended to create a new solver whenever the domain needs to be changed.
+"""
 struct StaticTolAlg <: AbstolAlgorithm
     method::StaticTolAlgMethod
 end
 StaticTolAlg(; method=project) = StaticTolAlg(method)
+
+"""
+    AdaptiveTolAlg()
+
+Choose the `abstol` for the next inner integral by dividing the tolerance of the previous integral by the length of its integral segment.
+Fixes the bugs in [`v03TolAlg`](@ref) and [`v04TolAlg`](@ref).
+"""
 struct AdaptiveTolAlg <: AbstolAlgorithm end
+
+"""
+    v04TolAlg()
+
+Uses the same choice of tolerances as AutoBZCore v0.4.
+It is not recommended to use it as it has a bug, so it is mainly for reference.
+"""
 struct v04TolAlg <: AbstolAlgorithm end
+
+"""
+    v03TolAlg()
+
+Uses the same choice of tolerances as AutoBZCore v0.3.
+It is not recommended to use it as it has a bug, so it is mainly for reference.
+"""
 struct v03TolAlg <: AbstolAlgorithm end
 
 """
-    NestedQuad(alg::IntegralAlgorithm=QuadGKJL())
-    NestedQuad(algs::IntegralAlgorithm...)
+    NestedQuad(alg::IntegralAlgorithm=QuadGKJL(), specialize=NoSpecialize(), executor=SerialExecutor(); tolalg=StaticTolAlg(project))
+    NestedQuad(algs::Tuple{Vararg{IntegralAlgorithm,N}}, specializations=ntuple(_->NoSpecialize(), N-1), executors=ntuple(_->SerialExecutor(),N-1); tolalg=StaticTolAlg(project)) where {N}
+    NestedQuad(algs::IntegralAlgorithm...; tolalg=StaticTolAlg(project))
 
-Nested integration by repeating one quadrature algorithm or composing a list of algorithms.
-The domain of integration must be an `AbstractIteratedLimits` from the
-IteratedIntegration.jl package. Analogous to `nested_quad` from IteratedIntegration.jl.
+Nested integration done variable by variable using one quadrature algorithm for all variables or a tuple of algorithms for each variable.
+In `algs`, the first algorithm corresponds to the "hot" innermost integration variable, and the last corresponds to the outer integration variable.
+The domain of integration must be an `AbstractIteratedLimits` from the IteratedIntegration.jl package.
 The integrand should expect `SVector` inputs. Do not use this for very high-dimensional
 integrals, since the compilation time scales very poorly with respect to dimensionality.
+
+The `specialize` arguments allow control over how to trade compilation time for run time.
+If specifying a tuple of these, it should be one element shorter than `algs` since specialization of the inner integration variable is controlled by the integral function.
+
+The `executor` arguments allow control over running the integrand in serial or parallel.
+When using a `ThreadedExecutor`, the `ntasks` workers are shared in the same pool in the corresponding dimension.
+This means that the `ntasks` of the first/inner variable should be greater than or equal to the second, and so on, to have enough workers for each task.
+If specifying a tuple of these, it should be one element shorter than `algs` since specialization of the inner integration variable is controlled by the integral function.
+
+The `tolalg` keyword controls how `abstol` is set for inner integrals based on the value requested for the integral problem.
+The default choice of [`StaticTolAlg`](@ref) chooses a simple and robust scaling of tolerances.
 """
 struct NestedQuad{T,S,E,A} <: IntegralAlgorithm
     algs::T

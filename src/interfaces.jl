@@ -86,7 +86,7 @@ struct DefaultSpecialize <: AbstractSpecialization end
 """
     NoSpecialize()
 
-Type-stable specialization of a commonsolve function without code generation or inference based on the solver type.
+Type-stable specialization of a commonsolve function without code generation or inference based on the solver type using the `@nospecializeinfer` macro.
 Asserts that the returned value is of the same type as the prototype.
 Strikes a good balance of compile time and run time.
 """

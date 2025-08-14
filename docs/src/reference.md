@@ -36,3 +36,16 @@ AutoBZCore.trapz
 AutoBZCore.cube_automorphisms
 AutoBZCore.CommonSolutionStats
 ```
+
+### `tolalg`
+
+These docstrings explain the choices for the `tolalg` keyword of `NestedQuad`
+
+```@docs
+AutoBZCore.AbstolAlgorithm
+AutoBZCore.StaticTolAlgMethod
+AutoBZCore.StaticTolAlg
+AutoBZCore.AdaptiveTolAlg
+AutoBZCore.v04TolAlg
+AutoBZCore.v03TolAlg
+```

@@ -396,10 +396,10 @@ end
 # - bz_to_standard: (transformed) bz, unitless domain, standard algorithm
 
 """
-    IAI(algs::IntegralAlgorithm...)
+    IAI(::NestedQuad)
+    IAI(args...; kws...) = IAI(NestedQuad(args...; kws...))
 
-Iterated-adaptive integration using `nested_quad` from
-[IteratedIntegration.jl](https://github.com/lxvm/IteratedIntegration.jl).
+Iterated-adaptive integration using [`NestedQuad`](@ref).
 **This algorithm is the most efficient for localized integrands**.
 """
 struct IAI{T<:NestedQuad} <: AutoBZAlgorithm
