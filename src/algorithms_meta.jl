@@ -164,8 +164,8 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
         elimsolver.lims = lims
         elimsolver.dim = dim
         _state = (x, state...)
-        _lims = solve!(elimsolver)
-        innersolver.input = (; innersolver.input..., lims=_lims, state=_state, dim=Val(_val_unwrap(dim)-1), p, kws)
+        lims_ = solve!(elimsolver)
+        innersolver.input = (; innersolver.input..., lims=lims_, state=_state, dim=Val(_val_unwrap(dim)-1), p, kws)
         return solve!(innersolver)
     end
     _alg = ComposedCommonSolveAlgorithm(EliminationAlgorithm(), inneralg)
@@ -178,16 +178,16 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
     end
     __f = nested_integralfunction(_f, x0[ndims(lims[1])], p)
 
-    _kws, kws_ = if tolalg isa StaticTolAlg
+    _kws, kws_, tolalg_params = if tolalg isa StaticTolAlg
         if tolalg.method == bbox
             _a, _b = segments(lims[end], ndims(lims[1]))
             invouterlen =(1/abs(_b-_a))
             _tmpk = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
-            _tmpk, _tmpk
+            _tmpk, _tmpk, (; invouterlen)
         elseif tolalg.method == project
             elimdom = eliminate(lims[end], 1:ndims(lims[1]))
             invouterlen = (elimdom === nothing ? 1 : inv(measure(quadgk, elimdom)))
-            _rescale_abstol(invouterlen; kws...), (; kws...)
+            _rescale_abstol(invouterlen; kws...), (; kws...), (; invouterlen)
         else
             error("$(tolalg.method) not implemented")
         end
@@ -201,12 +201,12 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
         end
         init_kws = _rescale_abstol(1/_meas; kws...)
         ekws = eliminput.kws
-        init_kws, init_kws
+        init_kws, init_kws, (; init_kws, ekws)
     elseif tolalg isa v03TolAlg
-        _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...), _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1])+1:end])); kws...)
+        _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...), _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1])+1:end])); kws...), nothing
     else
         tmpkw = _rescale_abstol(1/real(prod(x0[begin+ndims(lims[1]):end])); kws...)
-        tmpkw, tmpkw
+        tmpkw, tmpkw, nothing
     end
 
     innerinput = (; lims=lims[1], dim=Val(ndims(lims[1])), state=states[1], p, kws=kws_)
@@ -221,16 +221,16 @@ function nested_prob(innerprob, inneralg, prototype, p, x0, segs, lims, states, 
         len = abs(_segs[end]-_segs[begin])
         __kws, kws__ = if tolalg isa StaticTolAlg
             if tolalg.method == bbox
-                kws, _rescale_abstol(invouterlen; kws...)
+                kws, _rescale_abstol(tolalg_params.invouterlen; kws...)
             elseif tolalg.method == project
-                _rescale_abstol(invouterlen; kws...), (; kws...)
+                _rescale_abstol(tolalg_params.invouterlen; kws...), (; kws...)
             else
                 error("not implemented")
             end
         elseif tolalg isa AdaptiveTolAlg
             kws, _rescale_abstol(1/len; kws...)
         elseif tolalg isa v04TolAlg
-            (length(states) == 1 ? kws : init_kws), _rescale_abstol(1/len; ekws...) # latter is ignored
+            (length(states) == 1 ? kws : tolalg_params.init_kws), _rescale_abstol(1/len; tolalg_params.ekws...) # latter is ignored
         elseif tolalg isa v03TolAlg
             kw = _rescale_abstol(length(states) == 1 ? one(1/len) : 1/len; kws...)
             kw, kw
@@ -289,10 +289,12 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
 
     _f, fprototype = nested_innerintegralfunction(f, x0, p)
 
-    _kws, kws_ = if tolalg isa StaticTolAlg && tolalg.method == project
+    # WARNING: Boxing of variables defined conditionally may lead to incorrect results, so always pack into tolalg_params
+    # TODO: rewrite this big if with a function barrier and dispatch on tolalg
+    _kws, kws_, tolalg_params = if tolalg isa StaticTolAlg && tolalg.method == project
         elimdom = eliminate(lims[end], 1)
         invoutermeasure = inv(elimdom === nothing ? 1 : measure(quadgk, elimdom))
-        _rescale_abstol(invoutermeasure; kws...), (; kws...)
+        _rescale_abstol(invoutermeasure; kws...), (; kws...), (; invoutermeasure)
     elseif tolalg isa v04TolAlg
         _meas = 1
         _lims = lims[end]
@@ -303,12 +305,12 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
         end
         init_kws = _rescale_abstol(1/_meas; kws...)
         _tmp_kws = _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)
-        _tmp_kws, _tmp_kws
+        _tmp_kws, _tmp_kws, (; init_kws)
     elseif tolalg isa v03TolAlg
-        _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...), _rescale_abstol(1/real(prod(x0[begin+2:end])); kws...)
+        _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...), _rescale_abstol(1/real(prod(x0[begin+2:end])); kws...), nothing
     else
         _tmp_kws = _rescale_abstol(1/real(prod(x0[begin+1:end])); kws...)
-        _tmp_kws, _tmp_kws
+        _tmp_kws, _tmp_kws, nothing
     end
 
     intprob = IntegralProblem(_f, segs[1], (; p, state=states[1]); _kws...)
@@ -325,14 +327,14 @@ function init_cacheval(f, dom, p, alg::NestedQuad; kws...)
             if tolalg.method == bbox
                 kws
             elseif tolalg.method == project
-                _rescale_abstol(invoutermeasure; kws...)
+                _rescale_abstol(tolalg_params.invoutermeasure; kws...)
             else
                 error("$(tolalg.method) not implemented")
             end
         elseif tolalg isa AdaptiveTolAlg
             kws
         elseif tolalg isa v04TolAlg
-            length(states) == 1 ? kws : init_kws
+            length(states) == 1 ? kws : tolalg_params.init_kws
         elseif tolalg isa v03TolAlg
             _rescale_abstol(length(states) == 1 ? one(1/len) : 1/len; kws...)
         else
