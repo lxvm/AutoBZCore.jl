@@ -237,9 +237,12 @@ end
 function do_threaded_solve!(integrand, channel, f, y, x, p)
     @sync for (iy, xi) in zip(eachindex(y), x)
         solver = take!(channel)
-        Threads.@spawn begin
+        Threads.@spawn try
             # TODO mini-batch the x evaluations
             y[iy] = integrand(solver, f, xi, p)
+        catch e
+            rethrow(e)
+        finally
             put!(channel, solver)
         end
     end

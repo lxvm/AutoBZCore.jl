@@ -548,9 +548,12 @@ function batchsolve_fourierevalcache!(out, channel, f::AbstractFourierSeries, x:
     for n in 1:exec.ntasks
         chunk = ((n-1)*d+(n > r ? r : n-1)):(n*d-1+(n > r ? r : n))
         cacheval = take!(channel)
-        Threads.@spawn begin
+        Threads.@spawn try
             nd = ndims(x)
             batchsolve_fourierevalcache!(view(out, ntuple(_->(:),Val(nd-1))..., chunk .+ io), cacheval, f, ProductArray((ntuple(n->x.xs[n],Val(nd-1))..., x.xs[nd][chunk .+ ix])), SerialExecutor())
+        catch e
+            rethrow(e)
+        finally
             put!(channel, cacheval)
         end
     end
