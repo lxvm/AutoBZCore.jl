@@ -34,7 +34,7 @@ WannierIOExt = "WannierIO"
 
 [compat]
 Aqua = "0.8"
-AtomsBase = "0.3"
+AtomsBase = "0.3, 0.5"
 AutoSymPTR = "0.4"
 ChunkSplitters = "2"
 CircularArrays = "1.4.0"
