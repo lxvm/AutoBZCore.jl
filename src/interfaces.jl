@@ -120,17 +120,21 @@ struct SerialExecutor <: AbstractExecutor end
 
 
 """
-    ThreadedExecutor(ntasks::Int, max_batch::Int)
-    ThreadedExecutor(; ntasks::Int, max_batch::Int)
+    ThreadedExecutor(ntasks::Int, nworkers::Int, min_chunksize::Int, max_batch::Int)
+    ThreadedExecutor(; ntasks::Int=2 * Threads.nthreads(), nworkers=Threads.nthreads(), min_chunksize::Int=1, max_batch::Int=typemax(Int))
 
 Policy that a commonsolve function be executed on multiple threads, scheduling up to `ntasks` tasks at a time which may exceed the number of threads.
-The pool of commonsolve workers is of size `ntasks`.
+The pool of commonsolve workers is of size `nworkers` and by default `ntasks = 2nworkers` in order to achieve some parallel speedup through load balancing.
 `max_batch` sets a soft limit on the number of quadrature points assigned to any task so that the program does not run out of memory.
 If `max_batch` is too small, the overhead of scheduling tasks could negate the speedup of parallelization.
+`min_chunksize` sets a lower bound on how many quadrature points to group together before spawning a task to evaluate the integrand.
+The default of `1` spawns a task for each quadrature point, which may create a lot of overhead from spawning tasks when the number of quadrature points is comparable to `ntasks`, so increasing this will amortize the cost of the overhead over a larger "base case".
 """
 Base.@kwdef struct ThreadedExecutor <: AbstractExecutor
-    ntasks::Int
-    max_batch::Int
+    ntasks::Int=2 * Threads.nthreads()
+    nworkers::Int=Threads.nthreads()
+    min_chunksize::Int=1
+    max_batch::Int=typemax(Int)
 end
 
 
@@ -222,7 +226,7 @@ end
 
 
 function fillchannel(f, exec::ThreadedExecutor)
-    return fillchannel(f, exec.ntasks)
+    return fillchannel(f, exec.nworkers)
 end
 function fillchannel(f, n::Integer)
     item = f()
@@ -234,18 +238,28 @@ function fillchannel(f, n::Integer)
     return ch
 end
 
-function do_threaded_solve!(integrand, channel, f, y, x, p)
-    @sync for (iy, xi) in zip(eachindex(y), x)
-        solver = take!(channel)
-        Threads.@spawn try
-            # TODO mini-batch the x evaluations
-            y[iy] = integrand(solver, f, xi, p)
-        catch e
-            rethrow(e)
-        finally
-            put!(channel, solver)
+function do_threaded_solve!(integrand, channel, f, y, x, p, ntasks, minsize)
+    (n = length(x)) == length(y) || throw(DimensionMismatch("quadrature batch input and output arrays do not have matching lengths"))
+    @sync for ichunk in chunks(0:n-1; n=ntasks, minsize)
+        Threads.@spawn begin
+            solver = take!(channel)
+            try
+                for i in ichunk
+                    # WARNING: for small enough inputs, there will be false sharing of x and y across tasks
+                    y[begin+i] = integrand(solver, f, x[begin+i], p)
+                    # if not chunking, then calling y .= fetch.(tasks) avoids this
+                end
+            catch e
+                rethrow(e)
+            finally
+                put!(channel, solver)
+            end
         end
     end
+    # cannot write something like
+    # for solver in channel ...
+    # because in NestedQuad the channel is shared across IntegralSolvers and may be empty
+    # other options are also possible
 end
 
 # TODO add InplaceCommonSolveIntegralFunction and InplaceBatchCommonSolveIntegralFunction

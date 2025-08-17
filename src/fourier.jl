@@ -245,7 +245,7 @@ function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::Abstract
     else
         # since we don't know the distribution of ibz nodes, other than that it will be
         # piecewise linear, our best chance for a speedup from parallelizing is to scatter
-        Threads.@threads for (vrange, ichunk) in chunks(1:npt, len, :scatter)
+        Threads.@threads for (ichunk, vrange) in enumerate(chunks(1:npt; n=len, split=RoundRobin()))
             for i in vrange
                 @inbounds(fi = f[i, idx...]) == 0 && continue
                 @inbounds xi = x[i]
@@ -291,6 +291,8 @@ Base.eltype(::Type{FourierMonkhorstPack{d,W,T,S}}) where {d,W,T,S} = Tuple{W,Fou
 Base.length(r::FourierMonkhorstPack) = length(r.wxs)
 Base.iterate(rule::FourierMonkhorstPack, args...) = iterate(rule.wxs, args...)
 
+Base.eachindex(rule::FourierMonkhorstPack) = eachindex(rule.wxs)
+AutoSymPTR.getweightsnodes(rule::FourierMonkhorstPack) = rule.wxs
 function (rule::FourierMonkhorstPack{d})(f::F, B::Basis, buffer=nothing) where {d,F}
     arule = AutoSymPTR.AffineQuad(rule, B)
     return AutoSymPTR.quadsum(arule, f, arule.vol / (rule.npt^d * rule.nsyms), buffer)

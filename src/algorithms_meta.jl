@@ -254,8 +254,10 @@ end
 function nested_integralfunction_cs(exec::ThreadedExecutor, f, x0, p)
     channel, integrand, prototype = init_commonsolvefunction_(exec, f, x0, p)
     proto = [prototype]
+    minchunksize = exec.min_chunksize
+    ntasks = exec.ntasks
     func = InplaceBatchIntegralFunction(proto; max_batch=exec.max_batch) do y, x, p
-        do_threaded_solve!(integrand, channel, f, y, x, p)
+        do_threaded_solve!(integrand, channel, f, y, x, p, ntasks, minchunksize)
     end
     return func
 end

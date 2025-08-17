@@ -54,8 +54,10 @@ end
 function init_integrand_cacheval_cs(exec::ThreadedExecutor, f::CommonSolveIntegralFunction, dom, p)
     channel, integrand, prototype = init_commonsolvefunction(f, dom, p)
     proto = [prototype]
+    min_chunksize = exec.min_chunksize
+    ntasks = exec.ntasks
     func = InplaceBatchIntegralFunction(proto; max_batch=exec.max_batch) do y, x, p
-        do_threaded_solve!(integrand, channel, f, y, x, p)
+        do_threaded_solve!(integrand, channel, f, y, x, p, ntasks, min_chunksize)
     end
     _prototype, _cacheval = init_integrand_cacheval(func, dom, p)
     cacheval = (func, channel, integrand, proto, _cacheval)

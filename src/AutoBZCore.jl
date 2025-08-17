@@ -50,7 +50,7 @@ module AutoBZCore
 using LinearAlgebra: I, norm, det, checksquare, isdiag, Diagonal, tr, diag, eigen, Hermitian
 
 using StaticArrays: SVector, SMatrix, sacollect
-using ChunkSplitters: chunks, getchunk
+using ChunkSplitters: chunks, RoundRobin
 using AutoSymPTR
 using FourierSeriesEvaluators
 using FourierSeriesEvaluators: workspace_allocate, workspace_contract!, workspace_evaluate!, workspace_evaluate, period

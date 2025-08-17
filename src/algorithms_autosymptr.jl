@@ -13,7 +13,9 @@ end
 function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::AffineQuad; kws...)
     rule = init_rule(dom, alg)
     prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p)
-    algorithm_cacheval = if prototype isa BatchArray
+    algorithm_cacheval = if f isa CommonSolveIntegralFunction
+        (; buffer=nothing)
+    elseif prototype isa BatchArray
         (data = prototype.data) isa AbstractVector || throw(ArgumentError("AutoSymPTR.jl does not support batched functions with multidimensional outputs"))
         bufsize = 0 # a buffer of size zero will be filled with the default number of threads
         x0 = get_prototype(dom) # the number of threads should be chosen to prevent false sharing
@@ -29,9 +31,6 @@ function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::AffineQuad; kws
     end
     return (; rule, algorithm_cacheval, integrand_cacheval)
 end
-
-# TODO define do_integral for AffineQuad
-
 autosymptr_integrand(f::IntegralFunction, p, segs, alg_cache, cacheval) = autosymptr_integrand_if(f.executor, f, p, segs, alg_cache, cacheval)
 function autosymptr_integrand_if(::SerialExecutor, f::IntegralFunction, p, segs, alg_cache, cacheval)
     x -> f.f(x, p)
@@ -53,7 +52,9 @@ function autosymptr_integrand_cs(::SerialExecutor, f, p, segs, alg_cache, cachev
 end
 function autosymptr_integrand_cs(exec::ThreadedExecutor, f, p, segs, alg_cache, cacheval)
     func, channel, integrand, proto, cache = cacheval
-    return autosymptr_integrand(func, p, segs, alg_cache, cache)
+    # return autosymptr_integrand(func, p, segs, alg_cache, cache)
+    _f! = (solver, x) -> integrand(solver, f, x, p)
+    return AutoSymPTR.ChannelIntegrand(_f!, channel; n=exec.ntasks, minsize=exec.min_chunksize)
 end
 
 """
