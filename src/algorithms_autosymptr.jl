@@ -13,21 +13,21 @@ end
 function init_cacheval(f::AbstractIntegralFunction, dom, p, alg::AffineQuad; kws...)
     rule = init_rule(dom, alg)
     prototype, integrand_cacheval = init_integrand_cacheval(f, dom, p)
-    algorithm_cacheval = if f isa CommonSolveIntegralFunction
-        (; buffer=nothing)
+    algorithm_cacheval = if f isa IntegralFunction || f isa CommonSolveIntegralFunction
+        (;)
     elseif prototype isa BatchArray
         (data = prototype.data) isa AbstractVector || throw(ArgumentError("AutoSymPTR.jl does not support batched functions with multidimensional outputs"))
         bufsize = 0 # a buffer of size zero will be filled with the default number of threads
         x0 = get_prototype(dom) # the number of threads should be chosen to prevent false sharing
-        (; buffer=similar(data, bufsize), y=similar(data, bufsize), x=Vector{typeof(x0)}(undef, bufsize))
+        (; y=similar(data, bufsize), x=Vector{typeof(x0)}(undef, bufsize))
     elseif prototype isa InplaceArray
         x = get_prototype(dom)
         ytmp = similar(prototype.data)
         I = ytmp * prod(x)
         Itmp = similar(I)
-        (; I, Itmp, ytmp, buffer=nothing)
+        (; I, Itmp, ytmp)
     else
-        (; buffer=nothing)
+        (;)
     end
     return (; rule, algorithm_cacheval, integrand_cacheval)
 end
@@ -36,8 +36,8 @@ function autosymptr_integrand_if(::SerialExecutor, f::IntegralFunction, p, segs,
     x -> f.f(x, p)
 end
 function autosymptr_integrand_if(exec::ThreadedExecutor, f::IntegralFunction, p, segs, alg_cache, cacheval)
-    func, proto, cache = cacheval
-    return autosymptr_integrand(func, p, segs, alg_cache, cache)
+    _f = f.f
+    return AutoSymPTR.TaskSafeIntegrand(x -> _f(x, p); n=exec.ntasks, minsize=exec.min_chunksize)
 end
 function autosymptr_integrand(f::InplaceIntegralFunction, p, segs, alg_cache, cacheval)
     AutoSymPTR.InplaceIntegrand((y,x) -> f.f!(y,x,p), alg_cache.I, alg_cache.Itmp, cacheval, alg_cache.ytmp)
@@ -54,7 +54,7 @@ function autosymptr_integrand_cs(exec::ThreadedExecutor, f, p, segs, alg_cache, 
     func, channel, integrand, proto, cache = cacheval
     # return autosymptr_integrand(func, p, segs, alg_cache, cache)
     _f! = (solver, x) -> integrand(solver, f, x, p)
-    return AutoSymPTR.ChannelIntegrand(_f!, channel; n=exec.ntasks, minsize=exec.min_chunksize)
+    return AutoSymPTR.TaskSafeIntegrand(_f!, channel; n=exec.ntasks, minsize=exec.min_chunksize)
 end
 
 """
@@ -70,8 +70,6 @@ struct MonkhorstPack{S} <: IntegralAlgorithm
 end
 MonkhorstPack(; npt=50, syms=nothing) = MonkhorstPack(npt, syms)
 function init_rule(dom, alg::MonkhorstPack)
-    # rule = AutoSymPTR.MonkhorstPackRule(alg.syms, alg.a, alg.nmin, alg.nmax, alg.n₀, alg.Δn)
-    # return rule(eltype(dom), Val(ndims(dom)))
     if alg.syms === nothing
         return AutoSymPTR.PTR(eltype(dom), Val(ndims(dom)), alg.npt)
     else
@@ -89,7 +87,8 @@ function do_integral(f, dom, p, alg::MonkhorstPack, cacheval;
                     reltol = nothing, abstol = nothing, maxiters = typemax(Int))
     b = get_basis(dom)
     g = autosymptr_integrand(f, p, b, cacheval.algorithm_cacheval, cacheval.integrand_cacheval)
-    value = cacheval.rule(g, b, cacheval.algorithm_cacheval.buffer)
+    rule = AutoSymPTR.AffineQuad(cacheval.rule, b)
+    value = rule(g)
     retcode = Success
     stats = (; numevals=length(cacheval.rule))
     return IntegralSolution(value, retcode, stats)
@@ -135,7 +134,7 @@ function do_integral(f, dom, p, alg::AutoSymPTRJL, cacheval;
     g = autosymptr_integrand(f, p, dom, cacheval.algorithm_cacheval, cacheval.integrand_cacheval)
     bas = get_basis(dom)
     value, error = autosymptr(g, bas; syms = alg.syms, rule = cacheval.rule, cache = cacheval.rule_cache, keepmost = alg.keepmost,
-        abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm, buffer=cacheval.algorithm_cacheval.buffer)
+        abstol = abstol, reltol = reltol, maxevals = maxiters, norm=alg.norm)
     retcode = error < max(something(abstol, zero(error)), alg.norm(value)*something(reltol, isnothing(abstol) ? sqrt(eps(eltype(bas))) : abstol)) ? Success : Failure
     stats = (; error)
     return IntegralSolution(value, retcode, stats)

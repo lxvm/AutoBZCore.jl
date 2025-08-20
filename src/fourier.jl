@@ -148,9 +148,9 @@ end
 # PTR rules with special series evaluation on rectangular grids
 
 # no symmetries
-struct FourierPTR{N,T,S,X} <: AbstractArray{Tuple{AutoSymPTR.One,FourierValue{SVector{N,T},S}},N}
+struct FourierPTR{N,T,S,X,W} <: AutoSymPTR.AbstractQuadratureRule
     s::Array{S,N}
-    p::AutoSymPTR.PTR{N,T,X}
+    p::AutoSymPTR.PTR{N,T,X,W}
 end
 
 
@@ -168,52 +168,56 @@ function FourierPTR(f::AbstractFourierSeries, ::Type{T}, ndim, npt, exec) where 
     FourierSeriesEvaluators.isinplace(f) && throw(ArgumentError("inplace series not supported for PTR - please file a bug report"))
     # unitless quadrature weight/node, but unitful value to Fourier series
     p = AutoSymPTR.PTR(typeof(float(real(one(T)))), ndim, npt)
-    prob = FourierEvaluationProblem(f, BatchArray(ProductArray(ntuple(_->p.x * oneunit(T),ndim))))
+    prob = FourierEvaluationProblem(f, BatchArray(ProductArray(map(x->x * oneunit(T),p.x.xs))))
     vals = solve(prob, FourierEvaluationAlgorithm(exec))
     return FourierPTR(vals, p)
 end
 
-# Array interface
-Base.size(r::FourierPTR) = size(r.s)
-function Base.getindex(r::FourierPTR{N}, i::Vararg{Int,N}) where {N}
-    w, x = r.p[i...]
-    return w, FourierValue(x, r.s[i...])
+# indexing interface
+Base.@propagate_inbounds function Base.getindex(r::FourierPTR{N}, args...) where {N}
+    w, x = getindex(r.p, args...)
+    return w, FourierValue(x, getindex(r.s, args...))
 end
+Base.firstindex(rule::FourierPTR) = firstindex(rule.p)
+Base.lastindex(rule::FourierPTR) = lastindex(rule.p)
+
+# quadrature rule multi-threading interface
+Base.IndexStyle(::Type{<:FourierPTR}) = IndexCartesian()
+Base.axes(rule::FourierPTR, args...) = axes(rule.s, args...)
+Base.nextind(p::FourierPTR, i::CartesianIndex) = nextind(p.p, i)
 
 # iteration
-function Base.iterate(p::FourierPTR)
-    next1 = iterate(p.s)
+Base.IteratorSize(::Type{<:FourierPTR{N}}) where {N} = Base.HasShape{N}()
+Base.length(rule::FourierPTR) = length(rule.p)
+Base.size(r::FourierPTR) = size(r.s)
+Base.eltype(::Type{FourierPTR{N,T,S,X,W}}) where {N,T,S,X,W} = Tuple{W,FourierValue{SVector{N,T},S}}
+function Base.iterate(rule::FourierPTR)
+    next1 = Base.iterate(rule.p)
     next1 === nothing && return nothing
-    next2 = iterate(p.p)
+    (w, x), state1 = next1
+    next2 = Base.iterate(rule.s)
     next2 === nothing && return nothing
-    s, state1 = next1
-    (w, x), state2 = next2
+    s, state2 = next2
     return (w, FourierValue(x, s)), (state1, state2)
 end
-Base.isdone(::FourierPTR, state) = any(isnothing, state)
-function Base.iterate(p::FourierPTR, state)
-    next1 = iterate(p.s, state[1])
+function Base.iterate(rule::FourierPTR, (state1_, state2_))
+    next1 = Base.iterate(rule.p, state1_)
     next1 === nothing && return nothing
-    next2 = iterate(p.p, state[2])
+    (w, x), state1 = next1
+    next2 = Base.iterate(rule.s, state2_)
     next2 === nothing && return nothing
-    s, state1 = next1
-    (w, x), state2 = next2
+    s, state2 = next2
     return (w, FourierValue(x, s)), (state1, state2)
-end
-
-function (rule::FourierPTR)(f::F, B::Basis, buffer=nothing) where {F}
-    arule = AutoSymPTR.AffineQuad(rule, B)
-    return AutoSymPTR.quadsum(arule, f, arule.vol / length(rule), buffer)
 end
 
 # SymPTR rules
-struct FourierMonkhorstPack{d,W,T,S}
+struct FourierMonkhorstPack{d,W,T,S} <: AutoSymPTR.AbstractQuadratureRule
     npt::Int64
     nsyms::Int64
     wxs::Vector{Tuple{W,FourierValue{SVector{d,T},S}}}
 end
 
-function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, npt, wsym, ::Tuple{}, idx, coord, offset)
+function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, weight, x::AbstractVector, npt, wsym, ::Tuple{}, idx, coord, offset)
     t = period(w.series, 1)
     o = offset-1
     # we can't parallelize the inner loop without knowing the offsets of each contiguous
@@ -227,11 +231,11 @@ function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::Abstract
         @inbounds wi = wsym[i, idx...]
         iszero(wi) && continue
         @inbounds xi = x[i]
-        vals[o+(n+=1)] = (wi, FourierValue(SVector(xi, coord...), workspace_evaluate!(w, t*xi)))
+        vals[o+(n+=1)] = (weight * wi, FourierValue(SVector(xi, coord...), workspace_evaluate!(w, t*xi)))
     end
     return vals
 end
-function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::AbstractVector, npt, wsym, flags, idx, coord, offset)
+function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, weight, x::AbstractVector, npt, wsym, flags, idx, coord, offset)
     d = ndims(w.series)
     t = period(w.series, d)
     flag, f = flags[begin:end-1], flags[end]
@@ -240,7 +244,7 @@ function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::Abstract
             @inbounds(fi = f[i, idx...]) == 0 && continue
             @inbounds xi = x[i]
             ws = workspace_contract!(w, t*xi)
-            _fourier_symptr!(vals, ws, x, npt, wsym, flag, (i, idx...), (xi, coord...), fi)
+            _fourier_symptr!(vals, ws, weight, x, npt, wsym, flag, (i, idx...), (xi, coord...), fi)
         end
     else
         # since we don't know the distribution of ibz nodes, other than that it will be
@@ -250,15 +254,15 @@ function _fourier_symptr!(vals::AbstractVector, w::FourierWorkspace, x::Abstract
                 @inbounds(fi = f[i, idx...]) == 0 && continue
                 @inbounds xi = x[i]
                 ws = workspace_contract!(w, t*xi, ichunk)
-                _fourier_symptr!(vals, ws, x, npt, wsym, flag, (i, idx...), (xi, coord...), fi)
+                _fourier_symptr!(vals, ws, weight, x, npt, wsym, flag, (i, idx...), (xi, coord...), fi)
             end
         end
     end
     return vals
 end
-function fourier_symptr!(wxs, w, u, npt, wsym, flags)
+function fourier_symptr!(wxs, w, weight, u, npt, wsym, flags)
     flag, f = flags[begin:end-1], flags[end]
-    return _fourier_symptr!(wxs, w, u, npt, wsym, flag, (), (), f[])
+    return _fourier_symptr!(wxs, w, weight, u, npt, wsym, flag, (), (), f[])
 end
 
 function FourierMonkhorstPack(w::FourierWorkspace, ::Type{T}, ndim::Val{d}, npt, syms) where {d,T}
@@ -268,10 +272,11 @@ function FourierMonkhorstPack(w::FourierWorkspace, ::Type{T}, ndim::Val{d}, npt,
     s = w(map(*, period(w.series), ntuple(_->zero(eltype(u)), ndim)))
     # the bottleneck is likely to be symptr_rule, which is not a fast or parallel algorithm
     wsym, flags, nsym = AutoSymPTR.symptr_rule(npt, ndim, syms)
-    wxs = Vector{Tuple{eltype(wsym),FourierValue{SVector{d,eltype(u)},typeof(s)}}}(undef, nsym)
+    weight = convert(eltype(u), 1//npt)^d/length(syms)
+    wxs = Vector{Tuple{typeof(weight*first(wsym)),FourierValue{SVector{d,eltype(u)},typeof(s)}}}(undef, nsym)
     # fourier_symptr! may be worth parallelizing for expensive Fourier series, but may not
     # be the bottleneck
-    fourier_symptr!(wxs, w, u, npt, wsym, flags)
+    fourier_symptr!(wxs, w, weight, u, npt, wsym, flags)
     return FourierMonkhorstPack(npt, length(syms), wxs)
 end
 
@@ -284,19 +289,18 @@ function FourierMonkhorstPack(f::AbstractFourierSeries, ::Type{T}, ndim::Val{d},
 end
 
 # indexing
-Base.getindex(rule::FourierMonkhorstPack, i::Int) = rule.wxs[i]
+Base.@propagate_inbounds Base.getindex(rule::FourierMonkhorstPack, i::Int) = rule.wxs[i]
+Base.firstindex(rule::FourierMonkhorstPack) = firstindex(rule.wxs)
+Base.lastindex(rule::FourierMonkhorstPack) = lastindex(rule.wxs)
+
+# quadrature rule multi-threading interface
+Base.IndexStyle(::Type{<:FourierMonkhorstPack}) = IndexLinear()
+Base.nextind(p::FourierMonkhorstPack, i::Int) = nextind(p.wxs, i)
 
 # iteration
 Base.eltype(::Type{FourierMonkhorstPack{d,W,T,S}}) where {d,W,T,S} = Tuple{W,FourierValue{SVector{d,T},S}}
 Base.length(r::FourierMonkhorstPack) = length(r.wxs)
 Base.iterate(rule::FourierMonkhorstPack, args...) = iterate(rule.wxs, args...)
-
-Base.eachindex(rule::FourierMonkhorstPack) = eachindex(rule.wxs)
-AutoSymPTR.getweightsnodes(rule::FourierMonkhorstPack) = rule.wxs
-function (rule::FourierMonkhorstPack{d})(f::F, B::Basis, buffer=nothing) where {d,F}
-    arule = AutoSymPTR.AffineQuad(rule, B)
-    return AutoSymPTR.quadsum(arule, f, arule.vol / (rule.npt^d * rule.nsyms), buffer)
-end
 
 # rule definition
 
@@ -310,7 +314,6 @@ function FourierMonkhorstPackRule(s, syms, a, nmin, nmax, n₀, Δn, exec)
     mp = AutoSymPTR.MonkhorstPackRule(syms, a, nmin, nmax, n₀, Δn)
     return FourierMonkhorstPackRule(s, mp, exec)
 end
-AutoSymPTR.nsyms(r::FourierMonkhorstPackRule) = AutoSymPTR.nsyms(r.m)
 
 function (r::FourierMonkhorstPackRule)(::Type{T}, v::Val{d}) where {T,d}
     if r.m.syms isa Nothing
@@ -321,7 +324,7 @@ function (r::FourierMonkhorstPackRule)(::Type{T}, v::Val{d}) where {T,d}
 end
 
 function AutoSymPTR.nextrule(p::FourierPTR{d,T}, r::FourierMonkhorstPackRule) where {d,T}
-    return FourierPTR(r.s, T, Val(d), length(p.p.x)+r.m.Δn, r.executor)
+    return FourierPTR(r.s, T, Val(d), p.p.npt+r.m.Δn, r.executor)
 end
 
 function AutoSymPTR.nextrule(p::FourierMonkhorstPack{d,W,T}, r::FourierMonkhorstPackRule) where {d,W,T}
@@ -337,6 +340,11 @@ function init_fourier_rule(f::AbstractFourierSeries, dom, alg::MonkhorstPack, ex
     else
         return FourierMonkhorstPack(f, eltype(dom), Val(ndims(dom)), alg.npt, alg.syms, exec)
     end
+end
+function init_fourier_rule(f::AbstractFourierSeries, dom::RepBZ, alg::MonkhorstPack, exec)
+    B = get_basis(dom)
+    rule = init_fourier_rule(f, B, alg, exec)
+    return SymmetricRule(rule, dom.rep, dom.bz)
 end
 function fourier_to_partial(func::FourierIntegralFunction)
     IntegralFunction(func.prototype, func.executor) do _x, p
@@ -492,14 +500,15 @@ function init_fourierevalcache(f::AbstractFourierSeries, x::BatchArray, exec::Se
 end
 function init_fourierevalcache(f::AbstractFourierSeries, x::BatchArray, exec::ThreadedExecutor)
     # threaded execution needs multiple solvers
-    # heuristically, we assume that the workload can be distributed uniformly over the
+    # heuristically , we assume that the workload can be distributed uniformly over the
     # outermost variable (otherwise an adaptive scheme is possible like for IAI)
     x1 = _firstpoint(x.data)
     channel = fillchannel(exec) do
         init_fourierevalcache(f, Tuple(x1), exec)
     end
-    solver = first(channel)
+    solver = take!(channel)
     sol = solve_fourierevalcache!(solver, f, Tuple(x1), exec)
+    put!(channel, solver)
     out = similar(x.data, typeof(sol))
     # the output array above would not work for inplace series
     return (channel, out)
@@ -547,16 +556,18 @@ function batchsolve_fourierevalcache!(out, channel, f::AbstractFourierSeries, x:
     d, r = divrem(size(x)[end], exec.ntasks)
     ix = firstindex(axes(x)[end])
     io = firstindex(axes(out)[end])
-    for n in 1:exec.ntasks
+    @sync for n in 1:exec.ntasks
         chunk = ((n-1)*d+(n > r ? r : n-1)):(n*d-1+(n > r ? r : n))
-        cacheval = take!(channel)
-        Threads.@spawn try
-            nd = ndims(x)
-            batchsolve_fourierevalcache!(view(out, ntuple(_->(:),Val(nd-1))..., chunk .+ io), cacheval, f, ProductArray((ntuple(n->x.xs[n],Val(nd-1))..., x.xs[nd][chunk .+ ix])), SerialExecutor())
-        catch e
-            rethrow(e)
-        finally
-            put!(channel, cacheval)
+        Threads.@spawn begin
+            cacheval = take!(channel)
+            try
+                nd = ndims(x)
+                batchsolve_fourierevalcache!(view(out, ntuple(_->(:),Val(nd-1))..., chunk .+ io), cacheval, f, ProductArray((ntuple(n->x.xs[n],Val(nd-1))..., x.xs[nd][chunk .+ ix])), SerialExecutor())
+            catch e
+                rethrow(e)
+            finally
+                put!(channel, cacheval)
+            end
         end
     end
     return out

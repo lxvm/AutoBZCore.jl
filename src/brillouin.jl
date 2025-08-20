@@ -88,18 +88,32 @@ symmetrize_(rep, bz, x) = symmetrize__(rep, bz, x)
 
 symmetrize__(::TrivialRep, bz, x) = nsyms(bz) * x
 
-struct SymmetricRule{R, U, B}
+struct SymmetricRule{R, U, B} <: AutoSymPTR.AbstractQuadratureRule
     rule::R
     rep::U
     bz::B
 end
 
-Base.getindex(r::SymmetricRule, i) = getindex(r.rule, i)
+# indexing
+Base.@propagate_inbounds Base.getindex(r::SymmetricRule, i) = getindex(r.rule, i)
+Base.firstindex(rule::SymmetricRule) = firstindex(rule.rule)
+Base.lastindex(rule::SymmetricRule) = lastindex(rule.rule)
+
+# quadrature rule multi-threading interface
+Base.IndexStyle(::Type{<:SymmetricRule{R}}) where {R} = Base.IndexStyle(R)
+Base.nextind(rule::SymmetricRule, i) = nextind(rule.rule, i)
+Base.axes(rule::SymmetricRule, args...) = axes(rule.rule, args...)
+
+# iteration
+Base.IteratorSize(::Type{<:SymmetricRule{R}}) where {R} = Base.IteratorSize(R)
+Base.size(r::SymmetricRule) = size(r.rule)
 Base.eltype(::Type{SymmetricRule{R, U, B}}) where {R, U, B} = eltype(R)
 Base.length(r::SymmetricRule) = length(r.rule)
 Base.iterate(r::SymmetricRule, args...) = iterate(r.rule, args...)
-function (r::SymmetricRule)(f::F, args...) where {F}
-    out = r.rule(f, args...)
+
+# dispatch to properly normalize quadrature rule
+function AutoSymPTR.evalrule(r::SymmetricRule, f::F) where {F}
+    out = AutoSymPTR.evalrule(r.rule, f)
     val = symmetrize(r.rep, r.bz, out)
     return val/nsyms(r.bz)
 end
@@ -388,7 +402,6 @@ function do_solve_autobz(rep, f, bz, p, bzalg::AutoBZAlgorithm, cacheval; kws...
     sol = solve!(cacheval)
     value = j * symmetrize(rep, bz, sol.value)
     stats = (; sol.stats...)
-    # err = sol.resid === nothing ? nothing : j*symmetrize(f, bz_, sol.resid)
     return IntegralSolution(value, sol.retcode, stats)
 end
 
@@ -411,6 +424,15 @@ function bz_to_standard(rep, f, bz, p, bzalg::IAI; kws...)
     return IntegralProblem(f, bz.lims, p; kws...), bzalg.alg
 end
 
+# domain wrapper for making sure symmetries are handled correctly by quadrature rules
+struct RepBZ{R, B}
+    rep::R
+    bz::B
+end
+Base.ndims(dom::RepBZ) = ndims(dom.bz)
+Base.eltype(::Type{RepBZ{R, B}}) where {R, B} = eltype(B)
+get_prototype(dom::RepBZ) = get_prototype(dom.bz)
+
 """
     PTR(; npt=50)
 
@@ -424,9 +446,14 @@ end
 PTR(; npt=50) = PTR(npt)
 
 function bz_to_standard(rep, f, bz, p, alg::PTR; kws...)
-    return IntegralProblem(f, canonical_ptr_basis(bz.B), p; kws...), MonkhorstPack(npt=alg.npt, syms=bz.syms)
+    prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
+    return prob, MonkhorstPack(npt=alg.npt, syms=bz.syms)
 end
-
+get_basis(dom::RepBZ) = canonical_ptr_basis(dom.bz.B)
+function init_rule(dom::RepBZ, alg::MonkhorstPack)
+    rule = init_rule(B, alg)
+    return SymmetricRule(rule, dom.rep, dom.bz)
+end
 
 """
     AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6, Δn=log(10), keepmost=2)
@@ -448,22 +475,12 @@ end
 function AutoPTR(; norm=norm, a=1.0, nmin=50, nmax=1000, n₀=6.0, Δn=log(10), keepmost=2)
     return AutoPTR(norm, a, nmin, nmax, n₀, Δn, keepmost)
 end
-
-
-struct RepBZ{R, B}
-    rep::R
-    bz::B
-end
-Base.ndims(dom::RepBZ) = ndims(dom.bz)
-Base.eltype(::Type{RepBZ{R, B}}) where {R, B} = eltype(B)
-get_prototype(dom::RepBZ) = get_prototype(dom.bz)
 function bz_to_standard(rep, f, bz, p, alg::AutoPTR; kws...)
     prob = IntegralProblem(f, RepBZ(rep, bz), p; kws...)
     alg = AutoSymPTRJL(norm=alg.norm, a=alg.a, nmin=alg.nmin, nmax=alg.nmax, n₀=alg.n₀, Δn=alg.Δn, keepmost=alg.keepmost, syms=bz.syms)
     return prob, alg
 end
 
-get_basis(dom::RepBZ) = canonical_ptr_basis(dom.bz.B)
 function init_rule(dom::RepBZ, alg::AutoSymPTRJL)
     B = get_basis(dom)
     rule = init_rule(B, alg)
