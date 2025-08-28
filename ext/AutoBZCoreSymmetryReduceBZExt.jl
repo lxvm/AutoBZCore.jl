@@ -1,4 +1,4 @@
-module SymmetryReduceBZExt
+module AutoBZCoreSymmetryReduceBZExt
 
 using LinearAlgebra
 using Polyhedra: Polyhedron, polyhedron, doubledescription, hrepiscomputed, hrep
@@ -7,19 +7,18 @@ using StaticArrays
 using SymmetryReduceBZ
 using AutoBZCore: canonical_reciprocal_basis, SymmetricBZ, IBZ, DefaultPolyhedron,
     CubicLimits, AbstractIteratedLimits, load_limits
-import AutoBZCore: IteratedIntegration.fixandeliminate, IteratedIntegration.segments
-
+import IteratedIntegration: fixandeliminate, segments, eliminate
 
 include("ibzlims.jl")
 
-function get_segs(vert::AbstractMatrix)
+function get_segs(vert::AbstractMatrix, dim=size(vert, 2))
     rtol = atol = sqrt(eps(eltype(vert)))
     uniquepts=Vector{eltype(vert)}(undef, size(vert, 1))
     numpts = 0
     for i in axes(vert,1)
-        v = vert[i,end]
+        v = vert[i,dim]
         test = isapprox(v, atol=atol, rtol=rtol)
-        if !any(test, @view(uniquepts[begin:begin+numpts-1,end]))
+        if !any(test, @view(uniquepts[begin:begin+numpts-1]))
             numpts += 1
             uniquepts[numpts] = v
         end
@@ -32,30 +31,76 @@ end
 
 struct Polyhedron3{T<:Real} <: AbstractIteratedLimits{3,T}
     face_coord::Vector{Matrix{T}}
-    segs::Vector{T}
+    segs3::Vector{T}
+    segs2::Vector{T}
+    segs1::Vector{T}
 end
 function segments(ph::Polyhedron3, dim)
-    @assert dim == 3
-    return ph.segs
+    if dim == 3
+        return ph.segs3
+    elseif dim == 2
+        return ph.segs2
+    elseif dim == 1
+        return ph.segs1
+    else
+        error("dim must be 1, 2, or 3")
+    end
 end
 
 struct Polygon2{T<:Real} <: AbstractIteratedLimits{2,T}
     vert::Matrix{T}
-    segs::Vector{T}
+    segs2::Vector{T}
+    segs1::Vector{T}
 end
 function segments(pg::Polygon2, dim)
-    @assert dim == 2
-    return pg.segs
+    if dim == 2
+        return pg.segs2
+    elseif dim == 1
+        return pg.segs1
+    else
+        error("dim must be 1 or 2")
+    end
 end
 
 function fixandeliminate(ph::Polyhedron3, z, ::Val{3})
     pg_vert = pg_vert_from_zslice(z, ph.face_coord)
-    segs = get_segs(pg_vert)
-    return Polygon2(pg_vert, segs)
+    segs2 = get_segs(pg_vert, 2)
+    segs1 = get_segs(pg_vert, 1)
+    return Polygon2(pg_vert, segs2, segs1)
 end
 function fixandeliminate(pg::Polygon2, y, ::Val{2})
     return CubicLimits(xlim_from_yslice(y, pg.vert)...)
 end
+
+function eliminate(ph::Polyhedron3{T}, dims::Int) where {T<:Real}
+    idx = setdiff(1:3, dims)
+    @assert length(idx) == 2
+    vert = tidy_vertices!(reduce(vcat, (view(v, :, idx) for v in ph.face_coord)), floor(Int, abs(log10(eps(T))))-1) |> eachrow |> unique |> stack |> permutedims
+    if dims == 1
+        Polygon2(vert, ph.segs3, ph.segs2)
+    elseif dims == 2
+        Polygon2(vert, ph.segs3, ph.segs1)
+    elseif dims == 3
+        Polygon2(vert, ph.segs2, ph.segs1)
+    else
+        error("dims must be 1, 2, or 3")
+    end
+end
+function eliminate(ph::Polyhedron3, dims)
+    1 in dims && 2 in dims && 3 in dims && return nothing
+    length(dims) == 1 && return eliminate(ph, only(dims))
+    length(dims) == 2 && return CubicLimits(extrema(segments(ph, only(setdiff(1:3, dims))))...)
+    error("dims must be 1, 2, or 3")
+end
+function eliminate(pg::Polygon2, dims::Int)
+    CubicLimits(segments(pg, dims)...)
+end
+function eliminate(pg::Polygon2, dims)
+    1 in dims && 2 in dims && return nothing
+    length(dims) == 1 && return eliminate(pg, only(dims))
+    error("dims must be 1 or 2")
+end
+
 
 function (::IBZ{n,Polyhedron})(real_latvecs, atom_types, atom_pos, coordinates; makeprim=false, convention="ordinary") where {n}
     ibz_cart = calc_ibz(real_latvecs, atom_types, atom_pos, coordinates, makeprim, convention)
@@ -73,8 +118,10 @@ function (::IBZ{3,DefaultPolyhedron})(real_latvecs, atom_types, atom_pos, coordi
     ibz_lat = real_latvecs' * ibz_cart
     ph_vert = permutedims(reduce(hcat, SymmetryReduceBZ.Utilities.vertices(ibz_lat)))
     face_coord = map(x -> permutedims(reduce(hcat, x)), SymmetryReduceBZ.Utilities.get_uniquefacets(ibz_lat))
-    segs = get_segs(ph_vert)
-    return Polyhedron3(face_coord, segs)
+    segs3 = get_segs(ph_vert, 3)
+    segs2 = get_segs(ph_vert, 2)
+    segs1 = get_segs(ph_vert, 1)
+    return Polyhedron3(face_coord, segs3, segs2, segs1)
 end
 
 fixsign(x) = iszero(x) ? abs(x) : x

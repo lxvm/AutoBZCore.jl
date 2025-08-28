@@ -1,4 +1,4 @@
-module AtomsBaseExt
+module AutoBZCoreAtomsBaseExt
 
 using StaticArrays: SMatrix
 
@@ -12,23 +12,21 @@ import AutoBZCore: load_bz
 Automatically load a BZ using data from AtomsBase.jl-compatible `AbstractSystem`.
 """
 function load_bz(bz::AbstractBZ, system::AbstractSystem)
-    @assert all(==(Periodic()), boundary_conditions(system))
+    @assert all(periodicity(system))
     bz_ = convert(AbstractBZ{n_dimensions(system)}, bz)
-    bb = bounding_box(system)
-    A = reinterpret(reshape, eltype(eltype(bb)), bb)
+    A = stack(cell_vectors(system))
     return load_bz(bz_, A)
 end
 load_bz(system::AbstractSystem) = load_bz(FBZ(), system)
 function load_bz(bz::IBZ, system::AbstractSystem; kws...)
-    @assert all(==(Periodic()), boundary_conditions(system))
+    @assert all(periodicity(system))
     d = n_dimensions(system)
     bz_ = convert(AbstractBZ{d}, bz)
-    bb = bounding_box(system)
-    A = SMatrix{d,d}(reinterpret(reshape, eltype(eltype(bb)), bb))
+    A = SMatrix{d,d}(stack(cell_vectors(system)))
     B = canonical_reciprocal_basis(A)
-    species = atomic_symbol(system)
-    pos = position(system)
-    atom_pos = reinterpret(reshape, eltype(eltype(pos)), pos)
+    species = atomic_symbol(system, :)
+    pos = position(system, :)
+    atom_pos = stack(pos)
     return load_bz(bz_, A, B, species, atom_pos; kws..., coordinates="Cartesian")
 end
 

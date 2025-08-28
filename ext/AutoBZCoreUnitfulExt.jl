@@ -1,4 +1,4 @@
-module UnitfulExt
+module AutoBZCoreUnitfulExt
 
     using Unitful: Quantity, unit, ustrip
     import AutoBZCore: canonical_reciprocal_basis, canonical_ptr_basis

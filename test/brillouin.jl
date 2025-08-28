@@ -1,7 +1,7 @@
 using Test
 using LinearAlgebra
 using AutoBZCore
-using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints, AuxValue
+using AutoBZCore: PuncturedInterval, HyperCube, segments, endpoints
 
 @testset "domains" begin
     @testset "SymmetricBZ" begin
@@ -51,16 +51,4 @@ end
         end
         @test solve(ip, EvalCounter(PTR(; npt=10))).stats.numevals == 10^dims
     end
-end
-@testset "AuxValue" begin
-    dims = 3
-    A = I(dims)
-    vol = (2π)^dims
-    bz = load_bz(CubicSymIBZ(), A)
-    f = IntegralFunction((x,p) -> AuxValue(1.0, 1.0))
-    ip = AutoBZProblem(TrivialRep(), f, bz)  # unit measure
-    alg = IAI(ntuple(_->AuxQuadGKJL(), dims)...)
-    solver = init(ip, alg)
-    sol = solve!(solver)
-    @test sol.value.val ≈ sol.value.aux ≈ vol
 end

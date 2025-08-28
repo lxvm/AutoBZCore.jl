@@ -1,4 +1,4 @@
-module WannierIOExt
+module AutoBZCoreWannierIOExt
 
 using WannierIO
 using AutoBZCore: AbstractBZ, FBZ, IBZ
